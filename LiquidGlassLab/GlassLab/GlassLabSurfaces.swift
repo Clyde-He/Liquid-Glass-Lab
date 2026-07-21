@@ -390,9 +390,10 @@ final class GlassLabTestWindowController {
 
         let didRecreateWindow = window == nil
             || currentHostType != state.windowHostType
-            || currentRendererMode != state.rendererMode
         if didRecreateWindow {
             recreateWindow(for: state)
+        } else if currentRendererMode != state.rendererMode {
+            replaceSurfaceHost(for: state)
         }
         guard let window, let host = surfaceHost else { return }
         resize(window, host: host, for: state)
@@ -473,24 +474,7 @@ final class GlassLabTestWindowController {
         }
 
         newWindow.isReleasedWhenClosed = false
-        let showsCanvasBackdrop = state.windowHostType != .panel
-        let host: NSView
-        switch state.rendererMode {
-        case .recipe:
-            let recipeHost = GlassLabGlassHost(
-                showsCanvasBackdrop: showsCanvasBackdrop
-            )
-            glassHost = recipeHost
-            semanticHost = nil
-            host = recipeHost
-        case .semanticUsage:
-            let usageHost = GlassLabSemanticHost(
-                showsCanvasBackdrop: showsCanvasBackdrop
-            )
-            semanticHost = usageHost
-            glassHost = nil
-            host = usageHost
-        }
+        let host = makeSurfaceHost(for: state)
         newWindow.contentView = host
         if let previousOrigin {
             newWindow.setFrameOrigin(previousOrigin)
@@ -504,6 +488,39 @@ final class GlassLabTestWindowController {
         currentHostType = state.windowHostType
         currentRendererMode = state.rendererMode
         resize(newWindow, host: host, for: state)
+    }
+
+    /// Renderer changes keep the existing test window and its participation.
+    /// Re-ordering a replacement Panel from inside a SwiftUI `onChange` can
+    /// race the control window's text-completion remote view as its TextField
+    /// leaves the hierarchy, causing ViewBridge to raise an
+    /// NSInternalInconsistencyException. Swapping only the content host avoids
+    /// that window-ordering transition while preserving geometry and position.
+    private func replaceSurfaceHost(for state: GlassLabState) {
+        guard let window else { return }
+        let host = makeSurfaceHost(for: state)
+        window.contentView = host
+        currentRendererMode = state.rendererMode
+    }
+
+    private func makeSurfaceHost(for state: GlassLabState) -> NSView {
+        let showsCanvasBackdrop = state.windowHostType != .panel
+        switch state.rendererMode {
+        case .recipe:
+            let host = GlassLabGlassHost(
+                showsCanvasBackdrop: showsCanvasBackdrop
+            )
+            glassHost = host
+            semanticHost = nil
+            return host
+        case .semanticUsage:
+            let host = GlassLabSemanticHost(
+                showsCanvasBackdrop: showsCanvasBackdrop
+            )
+            semanticHost = host
+            glassHost = nil
+            return host
+        }
     }
 
     private func discardWindow() {
