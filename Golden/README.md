@@ -107,20 +107,41 @@ Compare independently captured Recursive Pass Audits with:
 
 ```sh
 node Golden/compare.mjs \
-  Golden/macOS-27 \
   Golden/macOS-26 \
+  Golden/macOS-27 \
   --fixture=recursive-pass-audit.json
 ```
 
-For this fixture the summary also reports distinct topology/value signature
-counts and the number of matched rows whose signatures changed. The hashes are
-not repeated as opaque ordinary differences; field diffs descend through the
-stable layer/pass/property dictionary keys. Nested `inputMaxHeadroom` remains
-classified as volatile by default. A whole-tree structural wrapper changed
-between the accepted macOS 26 and macOS 27 captures, so raw structural-path
-totals are intentionally conservative; pass-family and property-key parity
-still requires semantic classification rather than equating array/path
-positions across releases.
+Recursive comparison defaults to `--recursive-mode=semantic`. It matches rows
+by Recipe axes, groups passes by channel plus family, and pairs duplicate
+families by owner-path and property-inventory similarity. The report separates
+pass additions/removals, client-object and owner-class transitions, property
+inventory changes, and resolved-value changes. Numeric descriptions honor the
+requested tolerance, while nested `inputMaxHeadroom` remains classified as
+volatile by default.
+
+The semantic mode intentionally excludes raw Layer fields, structural IDs, and
+whole-tree paths. Those remain available for exact same-build diagnostics:
+
+```sh
+node Golden/compare.mjs \
+  Golden/macOS-26 \
+  Golden/macOS-27 \
+  --fixture=recursive-pass-audit.json \
+  --recursive-mode=raw
+```
+
+This distinction matters because a whole-tree wrapper changed between the
+accepted macOS 26 and macOS 27 captures. Raw mode faithfully reports that
+structural replacement; semantic mode prevents it from obscuring matched pass
+families and property changes. Both modes still report the distinct topology
+and value-signature counts plus raw changed-row totals.
+
+Run the comparator integration coverage with:
+
+```sh
+node --test Golden/compare.test.mjs
+```
 
 ## Core Recipe exporter
 

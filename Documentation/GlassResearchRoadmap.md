@@ -35,7 +35,7 @@ work, not an optional refinement.
 
 | Priority | Track | Current state |
 |---|---|---|
-| P0 | AppKit observed-pass completeness and control | macOS 26/27 audits accepted; semantic delta classification and generic editor pending |
+| P0 | AppKit observed-pass completeness and control | macOS 26/27 audits and semantic matcher accepted; value classification and generic editor pending |
 | P1 | Material Strength and system preset-curve research | Blocked on target-topology P0 closure |
 | P2 | Recipe-axis closure | Fixed macOS 26/27 products captured; targeted axes remain |
 | P3 | Pass injection/transplant | Deferred, high risk, not required for Override |
@@ -70,15 +70,16 @@ rows, so those fields remain environment-sensitive evidence rather than
 cross-version Recipe constants.
 
 The complete verified values and topology descriptions are maintained in the
-AppKit Reverse Engineering document. The remaining work is semantic
-cross-version classification and safe control.
+AppKit Reverse Engineering document. The pass/property matcher is implemented;
+the remaining work is value-level classification and safe control.
 
 ### P0.1 — Cross-version recursive classification
 
 The same 336-cell fixed-geometry audit is now accepted on macOS 27. Raw
 structural-path comparison is not sufficient because a whole-tree wrapper
-changed between releases. Compare by Recipe axes, pass family, owning layer
-role/class, neighboring topology, and property identity.
+changed between releases. The comparator now matches Recipe axes, groups by
+pass channel/family, and pairs duplicate families using owner-path and property-
+inventory similarity. Raw mode remains available for exact structural review.
 
 Classify every difference as one of:
 
@@ -98,8 +99,11 @@ The `glassBackground` family remains present in 304 rows but changes from
 `CAFilter` to `DLCAFilter` and publishes 22 additional input keys. Key-fill
 effects add three diffuse scale attributes. These are client-side inventory
 facts; their visual or renderer-level meaning still requires controlled
-mutation. Complete the value-level classification and encode a semantic
-cross-version matcher before closing this item.
+mutation. The matcher reduces the cross-version audit to 1,776 matched passes,
+32 Variant-5 removals, 304 client-object class transitions, 25 property-
+inventory additions, and an explicit value-difference inventory. Classify
+those value changes and validate selected high-signal properties by controlled
+mutation before closing this item.
 
 ### P0.2 — Recursive Pass Inspector
 

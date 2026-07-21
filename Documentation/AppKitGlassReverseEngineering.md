@@ -644,5 +644,5 @@ Unresolved AppKit work is tracked centrally in
 [Glass Research Roadmap](./GlassResearchRoadmap.md). It includes the Material
 Strength curve, the declared-but-nil Aberration anomaly, complete pass/property
 inventory, the remaining `Main × Subdued` matrix, inactive-app mutation timing,
-the semantic macOS 26 versus macOS 27 recursive classifier, and controlled
-mutation of newly observed properties.
+value-level classification of the semantic macOS 26 versus macOS 27 recursive
+report, and controlled mutation of newly observed properties.
