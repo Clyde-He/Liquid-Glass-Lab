@@ -1364,6 +1364,173 @@ enum GlassLabTuning {
         let objectIdentityBySlot: [String: ObjectIdentifier]
     }
 
+    enum PassMutationFamily: String, Equatable {
+        case caFilterInputs = "CAFilter Inputs"
+        case sdfEffectCopy = "SDF Effect · Copy/Reassign"
+        case compositingMode = "Compositing Mode"
+        case unknown = "Unknown / Read-only"
+    }
+
+    enum PassPropertyPresentation: String, Equatable {
+        case number = "Numeric"
+        case percentage = "Percentage"
+        case angle = "Angle"
+        case boolean = "Boolean"
+        case color = "Color"
+        case point = "Point"
+        case size = "Size"
+        case colorMatrix = "Color Matrix"
+        case string = "String"
+        case sourceDependency = "Source Dependency"
+        case imageDependency = "Image Dependency"
+        case numberArray = "Number Array"
+        case colorArray = "Color Array"
+        case timingFunctionArray = "Timing Function Array"
+        case unknown = "Unknown"
+    }
+
+    struct PassPropertyEditorClassification {
+        let mutationFamily: PassMutationFamily
+        let presentation: PassPropertyPresentation
+        let contract: String
+        let isMutationAccepted: Bool
+    }
+
+    static func passMutationFamily(
+        for pass: PassAuditPassRecord
+    ) -> PassMutationFamily {
+        let channel = String(pass.location.prefix { $0 != "[" })
+        switch channel {
+        case "filters", "backgroundFilters":
+            return .caFilterInputs
+        case "effect":
+            return .sdfEffectCopy
+        case "compositingFilter":
+            return .compositingMode
+        default:
+            return .unknown
+        }
+    }
+
+    static func classifyPassProperty(
+        _ property: PassAuditPropertyRecord,
+        key: String,
+        in pass: PassAuditPassRecord
+    ) -> PassPropertyEditorClassification {
+        let family = passMutationFamily(for: pass)
+        let presentation = passPropertyPresentation(
+            key: key,
+            attributes: property.attributes
+        )
+
+        if presentation == .sourceDependency || presentation == .imageDependency {
+            return PassPropertyEditorClassification(
+                mutationFamily: family,
+                presentation: presentation,
+                contract: "Read-only · dependency replacement not accepted",
+                isMutationAccepted: false
+            )
+        }
+        if family == .compositingMode {
+            return PassPropertyEditorClassification(
+                mutationFamily: family,
+                presentation: presentation,
+                contract: "Read-only · discrete mode audit required",
+                isMutationAccepted: false
+            )
+        }
+        if [.colorMatrix, .numberArray, .colorArray, .timingFunctionArray]
+            .contains(presentation) {
+            return PassPropertyEditorClassification(
+                mutationFamily: family,
+                presentation: presentation,
+                contract: "Read-only · composite value audit required",
+                isMutationAccepted: false
+            )
+        }
+
+        let passFamily = pass.name ?? pass.objectClass
+        let acceptedRoute: String?
+        switch passFamily {
+        case "glassBackground":
+            let typedKeyIsAccepted = switch presentation {
+            case .number, .percentage, .angle, .boolean:
+                true
+            case .color:
+                shaderColorKeys.contains { $0.key == key }
+            case .point:
+                shaderPointKeys.contains { $0.key == key }
+            default:
+                false
+            }
+            acceptedRoute = typedKeyIsAccepted ? "Accepted · Glass Filter Override" : nil
+        case "CASDFKeyFillHighlightEffect":
+            let typedKeyIsAccepted = highlightKnobs.contains { $0.key == key }
+                || highlightColorKeys.contains { $0.key == key }
+            acceptedRoute = typedKeyIsAccepted ? "Accepted · Rim Override" : nil
+        case "CASDFOutputEffect":
+            acceptedRoute = ["minimum", "maximum"].contains(key)
+                ? "Accepted · Render Bounds Override"
+                : nil
+        default:
+            acceptedRoute = nil
+        }
+
+        return PassPropertyEditorClassification(
+            mutationFamily: family,
+            presentation: presentation,
+            contract: acceptedRoute ?? "Read-only · mutation audit required",
+            isMutationAccepted: acceptedRoute != nil
+        )
+    }
+
+    private static func passPropertyPresentation(
+        key: String,
+        attributes: [String: String]
+    ) -> PassPropertyPresentation {
+        let type = attributes["type"] ?? ""
+        let subtype = attributes["subtype"] ?? ""
+        if type == "bool" || subtype == "bool" {
+            return .boolean
+        }
+        switch type {
+        case "NSNumber":
+            switch subtype {
+            case "percentage": return .percentage
+            case "angle": return .angle
+            default: return .number
+            }
+        case "CGColor":
+            return .color
+        case "NSValue":
+            switch subtype {
+            case "point": return .point
+            case "size": return .size
+            case "colorMatrix": return .colorMatrix
+            default: return .unknown
+            }
+        case "NSString":
+            let normalizedKey = key.lowercased()
+            if normalizedKey.contains("source")
+                || normalizedKey.contains("sublayer")
+                || normalizedKey.contains("layername") {
+                return .sourceDependency
+            }
+            return .string
+        case "CGImage":
+            return .imageDependency
+        case "NSArray":
+            switch subtype {
+            case "NSNumber": return .numberArray
+            case "CGColor": return .colorArray
+            case "CAMediaTimingFunction": return .timingFunctionArray
+            default: return .unknown
+            }
+        default:
+            return .unknown
+        }
+    }
+
     /// Recursively inventories every known Core Animation pass location under
     /// NSGlassEffectView. Masks are separate layer trees rather than ordinary
     /// sublayers, so they receive an explicit structural path and cycle guard.
@@ -1502,16 +1669,24 @@ enum GlassLabTuning {
                 "  \(pass.location) · \(pass.name ?? pass.objectClass)"
                     + " · class=\(pass.objectClass)"
                     + " · owner=\(pass.layerClass)"
+                    + " · mutation=\(passMutationFamily(for: pass).rawValue)"
                     + " · state=\(passStates[pass.id] ?? "Present")"
             )
             lines.append("    locator=\(pass.layerPath)")
             for key in pass.properties.keys.sorted() {
                 guard let property = pass.properties[key] else { continue }
+                let classification = classifyPassProperty(
+                    property,
+                    key: key,
+                    in: pass
+                )
                 let attributes = property.attributes.keys.sorted().map {
                     "\($0)=\(property.attributes[$0]!)"
                 }.joined(separator: ", ")
                 lines.append(
-                    "    \(key) [\(property.state)] = \(property.value ?? "<nil>")"
+                    "    \(key) [\(property.state); \(classification.presentation.rawValue)]"
+                        + " = \(property.value ?? "<nil>")"
+                        + " · \(classification.contract)"
                         + (attributes.isEmpty ? "" : " {\(attributes)}")
                 )
             }

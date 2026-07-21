@@ -385,6 +385,15 @@ struct GlassLabView: View {
         snapshot: GlassLabTuning.PassAuditSnapshot?
     ) -> some View {
         let items = snapshot.map(passInventoryItems) ?? []
+        let acceptedPropertyCount = items.reduce(into: 0) { count, item in
+            count += item.record.properties.filter { key, property in
+                GlassLabTuning.classifyPassProperty(
+                    property,
+                    key: key,
+                    in: item.record
+                ).isMutationAccepted
+            }.count
+        }
 
         Section("Recursive Pass Inspector") {
             Text(readoutDescription)
@@ -404,6 +413,9 @@ struct GlassLabView: View {
                 LabeledContent("Replaced") {
                     Text(String(items.filter { replacedPassSlots.contains($0.slotID) }.count))
                         .monospacedDigit()
+                }
+                LabeledContent("Accepted Contracts") {
+                    Text(String(acceptedPropertyCount)).monospacedDigit()
                 }
                 LabeledContent("Topology") {
                     Text(String(snapshot.topologySignature.prefix(12)))
@@ -468,6 +480,19 @@ struct GlassLabView: View {
                         Text(item.record.location)
                             .font(.system(.body, design: .monospaced))
                     }
+                    LabeledContent("Mutation Family") {
+                        Text(GlassLabTuning.passMutationFamily(for: item.record).rawValue)
+                            .foregroundStyle(.secondary)
+                    }
+                    LabeledContent("Contract") {
+                        Text(passMutationContractSummary(for: item))
+                            .foregroundStyle(.secondary)
+                    }
+                    if let editor = acceptedPassEditor(for: item) {
+                        Button(editor.label) {
+                            selectedRecipePage = editor.page
+                        }
+                    }
                     LabeledContent("Structural Locator") {
                         Text(item.record.layerPath)
                             .font(.system(size: 10, design: .monospaced))
@@ -478,11 +503,23 @@ struct GlassLabView: View {
                     DisclosureGroup("Properties (\(item.record.properties.count))") {
                         ForEach(item.record.properties.keys.sorted(), id: \.self) { key in
                             if let property = item.record.properties[key] {
+                                let classification = GlassLabTuning.classifyPassProperty(
+                                    property,
+                                    key: key,
+                                    in: item.record
+                                )
                                 LabeledContent {
                                     VStack(alignment: .trailing, spacing: 2) {
                                         Text(property.value ?? property.state)
                                             .font(.system(.body, design: .monospaced))
                                             .textSelection(.enabled)
+                                        Text(classification.contract)
+                                            .font(.caption2)
+                                            .foregroundStyle(
+                                                classification.isMutationAccepted
+                                                    ? AnyShapeStyle(.green)
+                                                    : AnyShapeStyle(.secondary)
+                                            )
                                         if !property.attributes.isEmpty {
                                             Text(passPropertyMetadata(property.attributes))
                                                 .font(.caption2)
@@ -495,6 +532,9 @@ struct GlassLabView: View {
                                         Text(key)
                                         Text(property.state.capitalized)
                                             .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text(classification.presentation.rawValue)
+                                            .font(.caption2)
                                             .foregroundStyle(.secondary)
                                     }
                                 }
@@ -1359,6 +1399,50 @@ struct GlassLabView: View {
             ? " · \(item.ordinal)/\(item.familyCount)"
             : ""
         return "\(item.channel) · \(item.family)\(instance)"
+    }
+
+    private func acceptedPassEditor(
+        for item: PassInventoryItem
+    ) -> (page: RecipePage, label: String)? {
+        switch item.family {
+        case "glassBackground":
+            return (.glassFilter, "Open Accepted Glass Filter Editor")
+        case "CASDFKeyFillHighlightEffect":
+            return (.rimHighlight, "Open Accepted Rim Editor")
+        case "CASDFOutputEffect":
+            return (.glassFilter, "Open Accepted Render Bounds Editor")
+        default:
+            return nil
+        }
+    }
+
+    private func passMutationContractSummary(
+        for item: PassInventoryItem
+    ) -> String {
+        let classifications = item.record.properties.map { key, property in
+            GlassLabTuning.classifyPassProperty(
+                property,
+                key: key,
+                in: item.record
+            )
+        }
+        let accepted = classifications.filter(\.isMutationAccepted).count
+        let readOnly = classifications.count - accepted
+        if classifications.isEmpty {
+            switch GlassLabTuning.passMutationFamily(for: item.record) {
+            case .compositingMode:
+                return "Read-only · discrete mode audit required"
+            default:
+                return "Read-only · no declared properties"
+            }
+        }
+        if readOnly == 0 {
+            return "\(accepted) accepted"
+        }
+        if accepted > 0 {
+            return "\(accepted) accepted · \(readOnly) read-only"
+        }
+        return "\(readOnly) read-only · mutation audit required"
     }
 
     private func passState(

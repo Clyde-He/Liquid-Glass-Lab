@@ -35,7 +35,7 @@ work, not an optional refinement.
 
 | Priority | Track | Current state |
 |---|---|---|
-| P0 | AppKit observed-pass completeness and control | Audits, semantic matcher, read-only Recursive Inspector, and live replacement tracking implemented; value classification and generic editor pending |
+| P0 | AppKit observed-pass completeness and control | Audits, Recursive Inspector, replacement tracking, and typed mutation classification implemented; new-family mutation contracts and generic writes pending |
 | P1 | Material Strength and system preset-curve research | Blocked on target-topology P0 closure |
 | P2 | Recipe-axis closure | Fixed macOS 26/27 products captured; targeted axes remain |
 | P3 | Pass injection/transplant | Deferred, high risk, not required for Override |
@@ -166,6 +166,31 @@ Classify and implement each mutation family separately:
 Core Animation metadata supplies type/range evidence but is not automatically
 a safe Recipe range. Every editor family starts read-only and becomes writable
 only after its mutation contract is accepted.
+
+The first classification/editor-routing stage is implemented. Pass Inventory
+now labels each pass as CAFilter Inputs, SDF Effect Copy/Reassign, Compositing
+Mode, or unknown/read-only. Properties receive distinct Numeric, Percentage,
+Angle, Boolean, Color, Point, Size, Color Matrix, String, source/image
+dependency, and typed-array presentations from the accepted metadata rather
+than being coerced into `Double`.
+
+Only previously validated mutation contracts are promoted: `glassBackground`
+routes to Glass Filter Override, `CASDFKeyFillHighlightEffect` routes to Rim
+Override, and `CASDFOutputEffect.minimum/maximum` route to Render Bounds.
+Common Variant 0 therefore reports 101 accepted property contracts; Variant 14
+reports only the two Output bounds. Its `glassForeground`, duplicate Glass
+Highlights, Gradient, Shadow, and `plusD`/`plusL` remain read-only until P0.4.
+
+Current status:
+
+- [x] classify every observed pass by mutation family;
+- [x] classify declared properties into distinct typed presentations;
+- [x] expose accepted existing-pass routes without creating an absent pass;
+- [x] keep dependencies, composite arrays/matrices, and compositing modes
+  explicitly read-only;
+- [ ] accept controlled mutation contracts for the Variant 14 foreground,
+  highlight, gradient, shadow, and compositing families;
+- [ ] add independently addressed generic writes only for accepted contracts.
 
 ### P0.4 — Mutation contract audit
 

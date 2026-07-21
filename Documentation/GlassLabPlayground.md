@@ -234,6 +234,22 @@ compared when the page returns. Changing Renderer resets the tracker. The page
 retains the raw Layer tree and can copy a deterministic full pass/property
 report including the current state of each pass.
 
+Pass Inventory also exposes the P0.3 editor contract without assuming every
+declared value is a numeric Knob. Each pass is classified as CAFilter Inputs,
+SDF Effect Copy/Reassign, Compositing Mode, or unknown/read-only. Property
+metadata selects a distinct Numeric, Percentage, Angle, Boolean, Color, Point,
+Size, Color Matrix, String, source/image dependency, or typed-array
+presentation. Dependencies, matrices/arrays, and discrete compositing modes
+remain explicitly read-only.
+
+An `Accepted` label means the same mutation path is already exercised by the
+existing editor: `glassBackground` opens Glass Filter, key-fill highlight opens
+Rim Highlight, and Output minimum/maximum open Render Bounds. All newly
+observed foreground, Glass Highlight, Gradient, Shadow, displacement, and
+compositing families stay read-only until their controlled mutation audit is
+accepted. The accepted-contract count therefore describes properties with a
+known write/reset lifecycle; it is not a count of generic sliders on the page.
+
 Semantic values are deliberately read-only in this first pass. A CA input only
 becomes a Knob after its owning Usage/pass, accepted value type, mutation
 lifetime, and safe range have been measured. Existing Recipe Knobs are not
