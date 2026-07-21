@@ -23,15 +23,24 @@ Golden/
   macOS-27/
 ```
 
-Every directory contains a `manifest.json` describing the exact OS build,
-capture conditions, fixture schemas, entry counts, and SHA-256 checksums. A new
-capture should replace a Golden only after its focus/activation conditions and
-Cartesian-product coverage have been accepted.
+Every directory contains a `manifest.json` describing the default OS build and
+capture date, capture conditions, fixture schemas, entry counts, and SHA-256
+checksums. Fixture-level `platform` and `capturedAt` fields override those
+defaults when a later seed is captured without relabelling older fixtures in
+the same major-version directory. A new capture should replace a Golden only
+after its focus/activation conditions and Cartesian-product coverage have been
+accepted.
 
-The current macOS 27 baseline contains:
+The current macOS 27 directory contains:
 
 - `recipe-matrix.json`: the canonical active-session Main × Subdued × Variant
   × Subvariant × representative-Height sweep;
+- `recursive-pass-audit.json`: the accepted 336-row fixed-geometry recursive
+  Layer/Pass/property inventory captured on build `26A5388g`;
+- `recursive-pass-audit-stability-repeat.json`: the raw same-display-session
+  repeat used to validate the canonical recursive fixture;
+- `recursive-pass-audit-display-context-a.json`: an earlier raw contrast whose
+  topology is stable but whose display-sensitive resolved values differ;
 - `semantic-usage-trees.json`: all 24 SwiftUI Semantic Usage roles across real
   Main Off/On participation at one fixed geometry and Host;
 - `formula-analysis.json`: derived envelopes and size formulas from the 426
@@ -107,7 +116,11 @@ For this fixture the summary also reports distinct topology/value signature
 counts and the number of matched rows whose signatures changed. The hashes are
 not repeated as opaque ordinary differences; field diffs descend through the
 stable layer/pass/property dictionary keys. Nested `inputMaxHeadroom` remains
-classified as volatile by default.
+classified as volatile by default. A whole-tree structural wrapper changed
+between the accepted macOS 26 and macOS 27 captures, so raw structural-path
+totals are intentionally conservative; pass-family and property-key parity
+still requires semantic classification rather than equating array/path
+positions across releases.
 
 ## Core Recipe exporter
 
@@ -164,9 +177,20 @@ structural paths key the JSON objects. Filter `inputKeys` and effect
 identify changed cells before reading precise nested diffs.
 
 This fixture is diagnostic rather than automatically accepted. A first capture
-should be repeated on the same build to establish which layer fields and values
-are stable before it is added to an OS manifest. The macOS 26 fixture completed
-that review and is listed in its manifest; macOS 27 remains pending.
+should be repeated on the same build and in the same display session to
+establish which layer fields and values are stable before it is added to an OS
+manifest. The macOS 26 and macOS 27 fixtures have completed that review and are
+listed in their manifests.
+
+The accepted macOS 27 capture and its immediate repeat contain the same 336
+rows, eight topology signatures, 60 value signatures, layer payloads, pass
+inventories, and nonvolatile property values; only the top-level `capturedAt`
+timestamp differs. An earlier capture around a display-context transition kept
+the same topology and pass inventory but changed three resolved fields across
+268 rows: `CASDFOutputEffect.maximum` plus the `DLCAFilter` `glassBackground`
+inputs `inputKeyFillHighlightEffectOffset` and
+`inputKeyFillHighlightHeight`. That capture is retained as provenance rather
+than promoted to canonical.
 
 ## Semantic Usage exporter
 

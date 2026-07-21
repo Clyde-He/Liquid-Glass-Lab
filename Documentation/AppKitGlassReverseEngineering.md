@@ -14,7 +14,9 @@ Strength work, see
 
 ## Test environment
 
-- Primary Recipe analysis: macOS 27.0 beta with the Xcode 27 beta SDK
+- Primary Recipe analysis: macOS 27.0 beta build `26A5378n` with the Xcode 27
+  beta SDK
+- macOS 27 Recursive Pass Audit: build `26A5388g`
 - Cross-version Golden: macOS 26.6 build `25G5065a`
 - `NSGlassEffectView` hosted directly in AppKit windows
 - Integer resolver dispatch cases: `0...20`
@@ -25,8 +27,10 @@ Strength work, see
 The public API begins at macOS 26, but private recipes, class names,
 inventories, and ranges must not be treated as version-stable. Sections without
 an explicit macOS 26 label describe the macOS 27 beta baseline. A macOS 26.6
-Recipe Matrix and fixed-geometry Recursive Pass Audit now exist; a matching
-macOS 27 recursive audit is still required before claiming pass parity.
+Recipe Matrix and fixed-geometry Recursive Pass Audit now exist. The matching
+macOS 27 audit is accepted on the fixture-level build above; preliminary
+pass-family parity is recorded below, while value-level semantic classification
+remains open.
 
 Unknown Objective-C KVC keys raise `NSUnknownKeyException` before Swift can
 catch them. Consumers must discover and guard private capabilities rather than
@@ -370,13 +374,79 @@ populate Aberration/Refraction fields: for example, Variant 14 resolves
 `inputAberrationHeight ≈ 3.3`, `inputAberrationAngle = π/2`,
 `inputRefractionHeight = 8`, and `inputRefractionOffset ≈ -3.3`, while its
 `inputAberrationAmount` is zero. These client-side values establish a separate
-foreground pass and authored private knobs, not their visual contribution and
-not their absence from macOS 27.
+foreground pass and authored private knobs, not their visual contribution. The
+corresponding pass family is present in the macOS 27 audit below.
 
 Subvariant changed no topology in any of the 84 fixed-geometry base groups. It
 changed resolved values for Variants 0, 1, 2, 4, 7, 8, 10, 12, and 16, exactly
 matching the 480 × 200 slice of the compact Recipe Matrix. The Height 24 Matrix
 additionally selects Variants 9, 15, 17, 19, and 20 for targeted compact replay.
+
+### macOS 27 recursive pass inventory
+
+The accepted fixed-geometry audit on build `26A5388g` captured the same 336
+`Main × Subdued × Variant × Subvariant` rows at 480 × 200. All rows were active,
+requested and actual Main participation matched, actual key remained false,
+and every snapshot contained a layer tree. The capture produced eight topology
+signatures and 60 resolved-value signatures.
+
+An immediate repeat in the same display session reproduced every row,
+signature, layer payload, pass inventory, and nonvolatile property value; only
+the top-level capture timestamp changed. An earlier capture around a display-
+context transition retained the same topology, layers, and pass inventory but
+changed three resolved fields across 268 rows:
+
+- `CASDFOutputEffect.maximum` changed in 154 rows;
+- `DLCAFilter` `glassBackground.inputKeyFillHighlightEffectOffset` changed in
+  268 rows;
+- `DLCAFilter` `glassBackground.inputKeyFillHighlightHeight` changed in 212
+  rows.
+
+Typical transitions were `maximum: 2 → 1.5`, highlight offset `-1 → -0.5` or
+`-2 → -1`, and highlight height `1 → 0.5`. This establishes display/runtime
+sensitivity for those resolved values; it does not establish which display
+metric drives them. The contrast capture remains alongside the canonical and
+same-context repeat as provenance.
+
+The macOS 26 and macOS 27 documents use different whole-tree wrappers, so raw
+structural paths cannot be treated as semantic identities across releases.
+Matching by Recipe axes and normalized pass family gives this preliminary
+inventory result:
+
+- macOS 27 retains the observed `glassForeground`, displacement, highlight,
+  gradient, shadow, fill, output, key-fill, color-matrix, `plusD`, and `plusL`
+  families;
+- Variant 5 is the only current family-level exception: all 16 of its rows lose
+  `CASDFFillEffect` and `screenBlendMode`, reducing the pass count from seven to
+  five;
+- `glassBackground` remains in 304 rows, but its client object class changes
+  from `CAFilter` to `DLCAFilter` and it publishes 22 additional input keys;
+- key-fill effects add `diffuseAmountScale`, `diffuseHeightScale`, and
+  `diffuseSpreadScale` attributes;
+- the largest topology outliers remain recognizable: Variant 14 still contains
+  11 passes and Variant 19 still contains nine.
+
+The 22 additional `glassBackground` keys cover foreground aberration,
+blur-fill, face-matrix, key-fill-highlight, and ring-shadow controls:
+
+```text
+inputAberrationAmount / inputAberrationAngle / inputAberrationHeight
+inputAberrationOffset
+inputBlurFillBlurRadius / inputBlurFillDarkenOpacity
+inputBlurFillLightenOpacity / inputBlurFillNormalOpacity
+inputFaceColorMatrixMaxLuma / inputFaceColorMatrixMaxLumaSDR
+inputKeyFillHighlightAmount / inputKeyFillHighlightAngle
+inputKeyFillHighlightColorBias / inputKeyFillHighlightEffectOffset
+inputKeyFillHighlightHeight / inputKeyFillHighlightSpread
+inputKeyFillHighlightSpreadSDR
+inputRingShadowBlurRadius / inputRingShadowMask / inputRingShadowOffset
+inputRingShadowOpacity / inputRingShadowStrokeWidth
+```
+
+These are client-side class, capability, placement, and value observations.
+They do not prove a renderer implementation change or visual contribution.
+Value-level classification and controlled mutation remain required before the
+cross-version delta is considered closed.
 
 ### Complete attribute inventory
 
@@ -574,4 +644,5 @@ Unresolved AppKit work is tracked centrally in
 [Glass Research Roadmap](./GlassResearchRoadmap.md). It includes the Material
 Strength curve, the declared-but-nil Aberration anomaly, complete pass/property
 inventory, the remaining `Main × Subdued` matrix, inactive-app mutation timing,
-and the macOS 26 versus macOS 27 recursive comparison.
+the semantic macOS 26 versus macOS 27 recursive classifier, and controlled
+mutation of newly observed properties.

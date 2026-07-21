@@ -31,7 +31,8 @@ Start with:
 ## Build
 
 The current target is macOS 26.0+. Accepted per-OS captures currently include
-the macOS 27 beta baseline and the macOS 26.6 Recipe/Recursive fixtures.
+the macOS 26.6 and macOS 27 beta Recipe/Recursive baselines, plus the macOS 27
+SwiftUI Semantic Usage fixture.
 
 ```sh
 xcodebuild \

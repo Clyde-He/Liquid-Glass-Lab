@@ -35,9 +35,9 @@ work, not an optional refinement.
 
 | Priority | Track | Current state |
 |---|---|---|
-| P0 | AppKit observed-pass completeness and control | macOS 26 audit accepted; macOS 27 audit and generic editor pending |
+| P0 | AppKit observed-pass completeness and control | macOS 26/27 audits accepted; semantic delta classification and generic editor pending |
 | P1 | Material Strength and system preset-curve research | Blocked on target-topology P0 closure |
-| P2 | Recipe-axis closure | Fixed macOS 26 product captured; targeted axes remain |
+| P2 | Recipe-axis closure | Fixed macOS 26/27 products captured; targeted axes remain |
 | P3 | Pass injection/transplant | Deferred, high risk, not required for Override |
 | P4 | Broader SwiftUI private authoring | Role inventory and fixed-context trees complete |
 
@@ -61,14 +61,24 @@ rim contract: `vibrantColorMatrix`, `CASDFOutputEffect`, `CASDFFillEffect`,
 Variant 5 uses the `screenBlendMode` compositing filter; Variant 14 uses `plusD`
 and `plusL`. Variant 14 and Variant 19 are the strongest topology outliers.
 
+The matching macOS 27 audit on build `26A5388g` also captured all 336 accepted
+rows. It produced eight topology signatures and 60 resolved-value signatures.
+An immediate same-display-session repeat was row-for-row identical apart from
+the document timestamp. An earlier display-context contrast kept topology,
+layers, and pass inventory stable but changed three resolved fields across 268
+rows, so those fields remain environment-sensitive evidence rather than
+cross-version Recipe constants.
+
 The complete verified values and topology descriptions are maintained in the
-AppKit Reverse Engineering document. The remaining work is comparison and safe
-control.
+AppKit Reverse Engineering document. The remaining work is semantic
+cross-version classification and safe control.
 
-### P0.1 — Cross-version recursive baseline
+### P0.1 — Cross-version recursive classification
 
-Run the same 336-cell fixed-geometry audit on macOS 27, then compare by Recipe
-axes and semantic structural identity.
+The same 336-cell fixed-geometry audit is now accepted on macOS 27. Raw
+structural-path comparison is not sufficient because a whole-tree wrapper
+changed between releases. Compare by Recipe axes, pass family, owning layer
+role/class, neighboring topology, and property identity.
 
 Classify every difference as one of:
 
@@ -78,10 +88,18 @@ Classify every difference as one of:
 - client-side representation change with no established visual meaning;
 - volatile environment value that must not enter a semantic signature.
 
-The immediate question is whether the macOS 26 `glassForeground`, displacement,
-highlight, gradient, shadow, fill, color-matrix, and compositing families also
-exist on macOS 27. The old compact Matrix cannot answer that question because
-it intentionally inspected only two pass families.
+The first semantic pass-family pass confirms that macOS 27 retains the observed
+`glassForeground`, displacement, highlight, gradient, shadow, fill,
+color-matrix, output, key-fill, and `plusD`/`plusL` families. Variant 5 is the
+only current family-level exception: its 16 rows lose `CASDFFillEffect` and
+`screenBlendMode`, reducing that tree from seven to five passes.
+
+The `glassBackground` family remains present in 304 rows but changes from
+`CAFilter` to `DLCAFilter` and publishes 22 additional input keys. Key-fill
+effects add three diffuse scale attributes. These are client-side inventory
+facts; their visual or renderer-level meaning still requires controlled
+mutation. Complete the value-level classification and encode a semantic
+cross-version matcher before closing this item.
 
 ### P0.2 — Recursive Pass Inspector
 
