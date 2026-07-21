@@ -41,11 +41,13 @@ An absent role remains visible as Unavailable instead of becoming a fallback
 Recipe or an unresolved launch-time symbol.
 
 The private `_Glass` and public `Glass` value layouts are both 40 bytes on the
-measured macOS 27 runtime. The lab calls each dynamically discovered Swift
-getter/factory through an ABI-compatible `@convention(thin)` function value,
-then transfers that opaque value into the public `.glassEffect` rendering path.
-There is no direct private symbol reference, so macOS 26 can fail closed when a
-newer semantic role is missing.
+measured macOS 27 runtime. On macOS 26.6 Build 25G5065a they are both 41 bytes
+with a 48-byte stride. The lab allowlists these per-major-version profiles and
+also requires the public/private size, stride, and value-witness flags to match
+before calling a dynamically discovered getter through an ABI-compatible
+`@convention(thin)` function value. There is no direct private symbol
+reference, so the 21 Semantic roles missing from the measured macOS 26 runtime
+remain individually Unavailable.
 
 ## One independently hosted test surface
 
@@ -389,6 +391,35 @@ safety ceiling. Before writing, the exporter proves all 1,008 Cartesian-product
 identities are present, every row was captured active, and actual Main matches
 requested Main. Failure or cancellation leaves the destination untouched. The
 user's original values are restored when capture ends.
+
+### Export Recursive Pass Audit
+
+`Export Recursive Pass Audit (JSON)` is the structural complement to the
+compact Recipe Matrix. It requires the Panel host and fixes Width 480, Height
+200, Corner Radius 16, Window Margin 40, Scrim/Reduced Tint Opacity Off,
+Adaptive Appearance 2, Tint nil, and both Overrides disabled. It captures:
+
+```text
+2 Main states × 2 Subdued states × 21 Variants × 4 Subvariant states
+= 336 entries
+```
+
+For every cell, the audit traverses ordinary sublayers plus mask-owned layer
+trees. Stable paths key layer and pass dictionaries so an inserted pass appears
+as one added structural record instead of shifting every later array index. It
+records direct `filters`, `backgroundFilters`, `compositingFilter`, and any
+object-backed `effect`. CAFilter `inputKeys` and effect `CA_attributes` are
+captured as capabilities; every property is independently marked `value`,
+`nil`, or `unreadable`, with metadata and stable color/value descriptions.
+
+Each snapshot carries SHA-256 topology and resolved-value signatures. The
+topology signature covers layer/pass placement and property-key inventory; the
+value signature covers the complete normalized payload. Capture uses the same
+adaptive settling, active-session retry, real Main acceptance, atomic write,
+and state restoration contracts as the Recipe Matrix. An incomplete product is
+never written. The resulting `recursive-pass-audit.json` remains a separate
+diagnostic fixture until a discovered pass or property is promoted into the
+canonical Inspector/Matrix contract.
 
 Accepted OS baselines, their build manifests, and the semantic comparison tool
 live in [`Golden`](../Golden/README.md).

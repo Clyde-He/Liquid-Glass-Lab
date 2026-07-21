@@ -30,8 +30,8 @@ Start with:
 
 ## Build
 
-The current target is macOS 26.0+ and the accepted Golden baseline was captured
-on macOS 27 beta.
+The current target is macOS 26.0+. Accepted per-OS captures currently include
+the macOS 27 beta baseline and the macOS 26.6 Recipe/Recursive fixtures.
 
 ```sh
 xcodebuild \

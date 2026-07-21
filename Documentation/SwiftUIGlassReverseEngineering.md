@@ -106,6 +106,29 @@ The macOS 27 SwiftUI interface exposes the macOS 26+ public surface:
 This layer is the stable product API. It intentionally does not expose raw
 blur, refraction, displacement, gradient, or SDF-highlight values.
 
+### Materialize transition inventory
+
+The macOS 26.5 SDK exposes the public
+`GlassEffectTransition.materialize`, `matchedGeometry`, and `identity`
+transitions. It does not expose a public transition named `dissolve`; in the
+research roadmap, “Dissolve” provisionally names the removal direction of a
+materialize transition rather than an established fourth API case.
+
+The same SDK's SwiftUICore symbol inventory exposes an internal
+`GlassContainer.AppearanceSettings` with static presets named `materialize`
+and `match`. Its visible property symbols are `scale`, `maxPointScale`, and
+`blurRadius`, plus `reduceMotion(_:)`. This is static inventory evidence for a
+coordinated appearance endpoint/vector. It does not yet establish the preset's
+numeric values, whether interpolation changes Shader/SDF inputs, whether the
+timing is role-specific, or whether removal reverses insertion.
+
+Materialize/Dissolve time-series capture is therefore part of the Material
+Strength track rather than the deferred private-authoring backlog. The required
+probe must separate endpoint settings, outer transaction timing, normalized
+per-channel curves, semantic-role selection, insertion/removal direction, and
+Reduced Motion behavior. Its full protocol and decision gate are recorded in
+the Glass Research Roadmap.
+
 ## Private role space and runtime delivery
 
 The current `_Glass.Variant.Role` tag order is:
@@ -129,17 +152,20 @@ These tags are not `NSGlassEffectView._variant` values and do not match the
 ordinal order of `DesignLibrary.GlassMaterialProvider.Variant`.
 
 The Playground resolves every role with `dlopen`/`dlsym`. Public `Glass` and
-private `_Glass` are both 40 bytes on the measured runtime; both sizes are
-checked before an opaque private return value is passed into the public
-`glassEffect` path. Missing roles render as Unavailable rather than creating a
-direct private symbol dependency.
+private `_Glass` are both 40 bytes on the measured macOS 27 runtime. On macOS
+26.6 Build 25G5065a they are both 41 bytes with a 48-byte stride and matching
+value-witness flags. Explicit OS profiles plus exact public/private layout
+matching gate the opaque transfer into the public `glassEffect` path. Missing
+roles render as Unavailable rather than creating a direct private symbol
+dependency.
 
-All 23 zero-argument getters and the parameterized
+On the measured macOS 27 runtime, all 23 zero-argument getters and the parameterized
 `text(tint:frost:normalizedFactor:)` factory are **callable**. The Text factory
 currently receives three nil arguments so its private defaults remain intact.
-The macOS 26 SDK exposes only Regular, Clear, and Identity private static roles;
-a real macOS 26 runtime capture is still required to establish exact symbol and
-rendered availability there.
+The measured macOS 26.6 runtime exports only Regular, Identity, and Clear; all
+three passed an isolated getter ABI smoke test, while the other 21 symbols are
+absent. A rendered macOS 26 Semantic capture is still required before promoting
+those three roles from callable to rendered evidence.
 
 ## The Semantic graph reuses the AppKit glass core
 

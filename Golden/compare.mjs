@@ -6,7 +6,8 @@ import path from "node:path";
 function usage() {
   console.error(
     "Usage: node compare.mjs <baseline-dir> <candidate-dir> "
-      + "[--fixture=recipe-matrix.json] [--tolerance=1e-6] [--limit=100] "
+      + "[--fixture=recipe-matrix.json|recursive-pass-audit.json] "
+      + "[--tolerance=1e-6] [--limit=100] "
       + "[--include-volatile]"
   );
   process.exit(2);
@@ -27,6 +28,7 @@ const fixtureName = option("fixture", "recipe-matrix.json");
 const tolerance = Number(option("tolerance", "1e-6"));
 const differenceLimit = Number(option("limit", "100"));
 const includeVolatile = process.argv.slice(2).includes("--include-volatile");
+const isPassAudit = fixtureName === "recursive-pass-audit.json";
 
 // Values proven to change between active captures on the same OS build due to
 // display/runtime environment rather than a Recipe axis. Raw fixtures retain
@@ -103,6 +105,8 @@ function flatten(value, prefix = "", output = new Map()) {
   if (value && typeof value === "object") {
     for (const key of Object.keys(value).sort()) {
       if (!prefix && axisKeys.has(key)) continue;
+      if (isPassAudit && prefix === "snapshot"
+          && (key === "topologySignature" || key === "valueSignature")) continue;
       flatten(value[key], prefix ? `${prefix}.${key}` : key, output);
     }
     return output;
@@ -130,6 +134,7 @@ function equal(lhs, rhs) {
 
 function isVolatileField(field, baselineValues, candidateValues) {
   if (volatileFields.has(field)) return true;
+  if (field.includes(".properties.inputMaxHeadroom.")) return true;
   if (!field.endsWith(".value")) return false;
   const keyField = `${field.slice(0, -".value".length)}.key`;
   return baselineValues.get(keyField) === "inputMaxHeadroom"
@@ -155,10 +160,20 @@ let volatileChangedValues = 0;
 let volatileMissingFields = 0;
 let volatileAddedFields = 0;
 let maxVolatileNumericDelta = 0;
+let topologyChangedRows = 0;
+let valueChangedRows = 0;
 
 for (const key of [...baselineRows.keys()].filter((rowKey) => candidateRows.has(rowKey)).sort()) {
-  const baselineValues = flatten(baselineRows.get(key));
-  const candidateValues = flatten(candidateRows.get(key));
+  const baselineRow = baselineRows.get(key);
+  const candidateRow = candidateRows.get(key);
+  if (isPassAudit) {
+    if (baselineRow.snapshot?.topologySignature
+        !== candidateRow.snapshot?.topologySignature) topologyChangedRows += 1;
+    if (baselineRow.snapshot?.valueSignature
+        !== candidateRow.snapshot?.valueSignature) valueChangedRows += 1;
+  }
+  const baselineValues = flatten(baselineRow);
+  const candidateValues = flatten(candidateRow);
   const fields = new Set([...baselineValues.keys(), ...candidateValues.keys()]);
   for (const field of [...fields].sort()) {
     const hasBaseline = baselineValues.has(field);
@@ -240,6 +255,22 @@ const summary = {
   volatileTruncated:
     volatileChangedValues + volatileMissingFields + volatileAddedFields
       > volatileDifferences.length,
+  ...(isPassAudit ? {
+    baselineTopologySignatures: new Set(
+      [...baselineRows.values()].map((row) => row.snapshot?.topologySignature)
+    ).size,
+    candidateTopologySignatures: new Set(
+      [...candidateRows.values()].map((row) => row.snapshot?.topologySignature)
+    ).size,
+    baselineValueSignatures: new Set(
+      [...baselineRows.values()].map((row) => row.snapshot?.valueSignature)
+    ).size,
+    candidateValueSignatures: new Set(
+      [...candidateRows.values()].map((row) => row.snapshot?.valueSignature)
+    ).size,
+    topologyChangedRows,
+    valueChangedRows,
+  } : {}),
 };
 
 console.log(JSON.stringify({

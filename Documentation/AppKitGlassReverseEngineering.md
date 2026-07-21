@@ -14,18 +14,19 @@ Strength work, see
 
 ## Test environment
 
-- macOS 27.0 beta
-- Xcode 27 beta SDK
+- Primary Recipe analysis: macOS 27.0 beta with the Xcode 27 beta SDK
+- Cross-version Golden: macOS 26.6 build `25G5065a`
 - `NSGlassEffectView` hosted directly in AppKit windows
 - Integer resolver dispatch cases: `0...20`
 - Known named subvariants: `menu`, `sheet`, `camera`
 
 ## Version scope
 
-The public API begins at macOS 26, but the private recipes, class names,
-inventories, and ranges in this document were captured on macOS 27 beta. They
-must not be treated as version-stable. A real macOS 26 smoke test is still
-required before claiming recipe parity.
+The public API begins at macOS 26, but private recipes, class names,
+inventories, and ranges must not be treated as version-stable. Sections without
+an explicit macOS 26 label describe the macOS 27 beta baseline. A macOS 26.6
+Recipe Matrix and fixed-geometry Recursive Pass Audit now exist; a matching
+macOS 27 recursive audit is still required before claiming pass parity.
 
 Unknown Objective-C KVC keys raise `NSUnknownKeyException` before Swift can
 catch them. Consumers must discover and guard private capabilities rather than
@@ -332,12 +333,50 @@ observed recipes use 0.75...3.5. It also publishes `0...1` for
 `diffuseHeightScale`, even though live recipes resolve 8. Generic authoring
 metadata therefore does not necessarily describe the system Recipe envelope.
 
-### Missing passes are intentional recipe results
+### Missing compact-inspector passes are intentional recipe results
 
 - Variants 13 and 14 have no `glassBackground` filter in either context.
 - Variants 4, 13, and 14 have no `CASDFKeyFillHighlightEffect` pass.
 
 An unavailable live value for these combinations is not a sampling failure.
+It also does not mean that the complete recursive tree has no other pass: the
+macOS 26 audit below demonstrates that Variant 14 is the strongest example of
+that distinction.
+
+### macOS 26.6 recursive pass inventory
+
+The accepted fixed-geometry audit on build `25G5065a` captured all 336
+`Main × Subdued × Variant × Subvariant` rows at 480 × 200 with no inactive,
+participation-mismatch, or missing-tree samples. It produced nine topology
+signatures and 63 resolved-value signatures.
+
+A common Recipe tree contains 16 layers and five pass/effect objects, including
+two `vibrantColorMatrix` filters and a `CASDFOutputEffect` that the compact
+first-backdrop/first-rim Inspector did not inventory. Recursive traversal also
+found `CASDFFillEffect`, `CASDFGradientEffect`, `CASDFShadowEffect`,
+`CASDFGlassHighlightEffect`, `CASDFGlassDisplacementEffect`, `displacementMap`,
+and `glassForeground` families.
+
+Variant 14 contains 23 layers and 11 pass/effect objects despite having neither
+compact-inspector pass. Its tree includes an `SDFPortalLayer`-owned
+`glassForeground`, two `CASDFGlassHighlightEffect` objects, a shadow, a
+gradient, and `plusD`/`plusL` compositing filters. Variant 19 contains 21 layers
+and nine pass/effect objects, including `glassBackground`, `displacementMap`,
+`glassForeground`, and `CASDFGlassDisplacementEffect`. Variant 5 uses the
+`screenBlendMode` compositing filter.
+
+The two observed `glassForeground` instances publish 13 inputs. Both explicitly
+populate Aberration/Refraction fields: for example, Variant 14 resolves
+`inputAberrationHeight ≈ 3.3`, `inputAberrationAngle = π/2`,
+`inputRefractionHeight = 8`, and `inputRefractionOffset ≈ -3.3`, while its
+`inputAberrationAmount` is zero. These client-side values establish a separate
+foreground pass and authored private knobs, not their visual contribution and
+not their absence from macOS 27.
+
+Subvariant changed no topology in any of the 84 fixed-geometry base groups. It
+changed resolved values for Variants 0, 1, 2, 4, 7, 8, 10, 12, and 16, exactly
+matching the 480 × 200 slice of the compact Recipe Matrix. The Height 24 Matrix
+additionally selects Variants 9, 15, 17, 19, and 20 for targeted compact replay.
 
 ### Complete attribute inventory
 
@@ -535,4 +574,4 @@ Unresolved AppKit work is tracked centrally in
 [Glass Research Roadmap](./GlassResearchRoadmap.md). It includes the Material
 Strength curve, the declared-but-nil Aberration anomaly, complete pass/property
 inventory, the remaining `Main × Subdued` matrix, inactive-app mutation timing,
-and macOS 26 comparison.
+and the macOS 26 versus macOS 27 recursive comparison.

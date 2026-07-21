@@ -67,6 +67,7 @@ struct GlassLabView: View {
     @State private var selectedRecipePage = RecipePage.general
     @State private var selectedSemanticPage = SemanticPage.general
     @State private var isCapturingMatrix = false
+    @State private var isCapturingPassAudit = false
     @State private var isCapturingSemanticTrees = false
     @State private var liveSnapshot: LiveReadoutSnapshot?
     @State private var semanticSnapshot: GlassLabSemanticSnapshot?
@@ -77,6 +78,7 @@ struct GlassLabView: View {
     @State private var inspectorHighlightMetadata: [String: GlassLabTuning.AttributeMetadata] = [:]
     @State private var liveRefreshTask: Task<Void, Never>?
     @State private var matrixCaptureTask: Task<Void, Never>?
+    @State private var passAuditCaptureTask: Task<Void, Never>?
     @State private var semanticCaptureTask: Task<Void, Never>?
     @State private var hasPendingSchemaRefresh = false
 
@@ -114,6 +116,7 @@ struct GlassLabView: View {
         .onDisappear {
             liveRefreshTask?.cancel()
             matrixCaptureTask?.cancel()
+            passAuditCaptureTask?.cancel()
             semanticCaptureTask?.cancel()
         }
     }
@@ -307,7 +310,7 @@ struct GlassLabView: View {
                 }
         }
         .formStyle(.grouped)
-        .disabled(isCapturingMatrix || isCapturingSemanticTrees)
+        .disabled(isCapturingMatrix || isCapturingPassAudit || isCapturingSemanticTrees)
         }
     }
 
@@ -551,9 +554,17 @@ struct GlassLabView: View {
                         Button(isCapturingMatrix ? "Capturing…" : "Export Recipe Matrix (JSON)") {
                             exportMatrix()
                         }
-                        .disabled(isCapturingMatrix)
+                        .disabled(isCapturingMatrix || isCapturingPassAudit)
                     }
-                    Text("Export records 3 representative Heights × 21 Variant × 4 Subvariant × Main Window Off/On × Subdued Off/On on the selected Host Type: 1,008 entries carrying actual acceptance flags, Shader, Rim, typed values, geometry, and capability inventories. Width is fixed at 480, Heights at 24/200/600, and Corner Radius at 16; the separate Formula Audit owns dense Size analysis. Capture prevents idle display sleep and pauses if the app becomes inactive. Scrim and Reduced Tint Opacity are fixed Off, Tint is nil, Adaptive Appearance is fixed at 2, and both Overrides must be disabled. Host and Window Margin are recorded as provenance but are not swept.")
+                    Button(
+                        isCapturingPassAudit
+                            ? "Auditing…"
+                            : "Export Recursive Pass Audit (JSON)"
+                    ) {
+                        exportPassAudit()
+                    }
+                    .disabled(isCapturingMatrix || isCapturingPassAudit)
+                    Text("Recipe Matrix records 1,008 compact Shader/Rim rows across representative Heights. Recursive Pass Audit is a separate 336-row Panel capture at 480×200@16 and Margin 40; it walks sublayers, masks, filters, background filters, compositing filters, and object-backed effects across Main × Subdued × Variant × Subvariant. Both exports pause while the app is inactive and require clean system state with Overrides disabled.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -1777,6 +1788,210 @@ struct GlassLabView: View {
         )
     }
 
+    private func exportPassAudit() {
+        guard state.rendererMode == .recipe else {
+            state.reportOutput = "Switch Renderer to Recipe before exporting a Pass Audit."
+            return
+        }
+        guard state.windowHostType == .panel else {
+            state.reportOutput = "Switch Host Type to Panel before exporting the canonical Pass Audit."
+            return
+        }
+        guard !state.shaderOverridesEnabled, !state.highlightOverridesEnabled else {
+            state.reportOutput = "Disable both Overrides before exporting a clean system Pass Audit."
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "recursive-pass-audit.json"
+        guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+
+        liveRefreshTask?.cancel()
+        isCapturingPassAudit = true
+        passAuditCaptureTask = Task { @MainActor in
+            let originalVisibility = state.isTestWindowVisible
+            let originalMainState = state.isTestWindowMain
+            let originalSubdued = state.isSubdued
+            let originalScrim = state.hasScrim
+            let originalReducedTintOpacity = state.hasReducedTintOpacity
+            let originalAdaptiveAppearance = state.adaptiveAppearance
+            let originalTint = state.tintColor
+            let originalGlassWidth = state.glassWidth
+            let originalGlassHeight = state.glassHeight
+            let originalCornerRadius = state.cornerRadius
+            let originalWindowPadding = state.windowPadding
+            let captureStartedAt = Date()
+            let activity = ProcessInfo.processInfo.beginActivity(
+                options: [
+                    .userInitiated,
+                    .idleSystemSleepDisabled,
+                    .idleDisplaySleepDisabled,
+                ],
+                reason: "Capturing the Glass Lab Recursive Pass Audit"
+            )
+
+            defer {
+                ProcessInfo.processInfo.endActivity(activity)
+                state.windowPadding = originalWindowPadding
+                restoreTestWindowContext(
+                    visibility: originalVisibility,
+                    isMainWindow: originalMainState,
+                    isSubdued: originalSubdued,
+                    hasScrim: originalScrim,
+                    hasReducedTintOpacity: originalReducedTintOpacity,
+                    adaptiveAppearance: originalAdaptiveAppearance,
+                    tintColor: originalTint,
+                    glassWidth: originalGlassWidth,
+                    glassHeight: originalGlassHeight,
+                    cornerRadius: originalCornerRadius
+                )
+                passAuditCaptureTask = nil
+            }
+
+            if !state.isTestWindowVisible {
+                state.isTestWindowVisible = true
+                state.testWindow.sync(with: state)
+            }
+            state.isCapturingRecipeMatrix = true
+            state.hasScrim = false
+            state.hasReducedTintOpacity = false
+            state.adaptiveAppearance = 2
+            state.tintColor = nil
+            state.glassWidth = 480
+            state.glassHeight = 200
+            state.cornerRadius = 16
+            state.windowPadding = 40
+
+            var entries: [GlassLabTuning.PassAuditEntry] = []
+            let totalContexts = 4
+            var completedContexts = 0
+
+            do {
+                for wantsMain in [false, true] {
+                    for subdued in [false, true] {
+                        var participationRetries = 0
+                        contextRetry: while true {
+                            try await waitUntilApplicationIsActive(
+                                progress: "Pass context \(completedContexts + 1)/\(totalContexts), "
+                                    + "\(entries.count)/336 entries"
+                            )
+                            state.glassWidth = 480
+                            state.glassHeight = 200
+                            state.cornerRadius = 16
+                            state.windowPadding = 40
+                            state.isTestWindowMain = wantsMain
+                            state.isSubdued = subdued
+                            state.testWindow.sync(with: state)
+                            if let glass = state.testWindow.liveGlass {
+                                GlassLabTuning.applyRecipe(from: state, to: glass)
+                            }
+                            try await Task.sleep(for: .milliseconds(300))
+                            guard NSApp.isActive else { continue contextRetry }
+                            guard state.testWindow.isActuallyMain == wantsMain,
+                                  !state.testWindow.isActuallyKey,
+                                  let glass = state.testWindow.liveGlass else {
+                                participationRetries += 1
+                                guard participationRetries < 4 else {
+                                    throw MatrixExportError.participationRejected(
+                                        main: wantsMain,
+                                        subdued: subdued,
+                                        height: 200
+                                    )
+                                }
+                                continue contextRetry
+                            }
+
+                            let context = "panel"
+                                + (wantsMain ? "-main" : "-neither")
+                                + (subdued ? "-subdued" : "-standard")
+                            do {
+                                let batch = try await GlassLabTuning.capturePassAudit(
+                                    on: glass,
+                                    context: context,
+                                    requestedMain: wantsMain,
+                                    subdued: subdued,
+                                    restoring: state
+                                )
+                                entries += batch
+                                completedContexts += 1
+                                state.reportOutput = "Captured Pass context "
+                                    + "\(completedContexts)/\(totalContexts), "
+                                    + "\(entries.count)/336 entries."
+                                break contextRetry
+                            } catch GlassLabTuning.MatrixCaptureError.applicationInactive {
+                                continue contextRetry
+                            } catch GlassLabTuning.MatrixCaptureError.participationChanged {
+                                participationRetries += 1
+                                guard participationRetries < 4 else {
+                                    throw MatrixExportError.participationRejected(
+                                        main: wantsMain,
+                                        subdued: subdued,
+                                        height: 200
+                                    )
+                                }
+                                continue contextRetry
+                            } catch GlassLabTuning.MatrixCaptureError.missingLayerTree {
+                                throw MatrixExportError.invalidMatrix(
+                                    "Recursive Pass Audit could not capture a stable layer tree."
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if let validationFailure = validatePassAudit(entries) {
+                    throw MatrixExportError.invalidMatrix(validationFailure)
+                }
+
+                let document = GlassLabTuning.PassAuditDocument(
+                    formatVersion: 1,
+                    capturedAt: ISO8601DateFormatter().string(from: Date()),
+                    operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
+                    axes: .init(
+                        main: [false, true],
+                        subdued: [false, true],
+                        variants: GlassLabTuning.variants,
+                        subvariants: [nil]
+                            + GlassLabTuning.knownSubvariants.map(Optional.some)
+                    ),
+                    context: .init(
+                        hostType: GlassLabWindowHostType.panel.rawValue,
+                        windowMargin: 40,
+                        glassWidth: 480,
+                        glassHeight: 200,
+                        cornerRadius: 16,
+                        scrim: false,
+                        reducedTintOpacity: false,
+                        adaptiveAppearance: 2,
+                        tint: nil,
+                        overridesEnabled: false
+                    ),
+                    entries: entries
+                )
+
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let data = try encoder.encode(document)
+                try data.write(to: destinationURL, options: .atomic)
+                let topologyCount = Set(entries.map(\.snapshot.topologySignature)).count
+                let valueCount = Set(entries.map(\.snapshot.valueSignature)).count
+                let duration = Date().timeIntervalSince(captureStartedAt)
+                state.reportOutput = "Exported \(entries.count) recursive Pass entries "
+                    + "(\(topologyCount) topology / \(valueCount) value signatures) in "
+                    + "\(String(format: "%.1f", duration)) seconds to "
+                    + destinationURL.path
+            } catch is CancellationError {
+                state.reportOutput = "Recursive Pass Audit cancelled; no file was written."
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription
+                    ?? error.localizedDescription
+                state.reportOutput = "Recursive Pass Audit failed; no file was written.\n"
+                    + message
+            }
+        }
+    }
+
     private func exportMatrix() {
         guard !state.shaderOverridesEnabled, !state.highlightOverridesEnabled else {
             state.reportOutput = "Disable both Overrides before exporting a clean system Recipe Matrix."
@@ -2043,6 +2258,63 @@ struct GlassLabView: View {
         return nil
     }
 
+    private func validatePassAudit(
+        _ entries: [GlassLabTuning.PassAuditEntry]
+    ) -> String? {
+        let subvariants: [String?] = [nil]
+            + GlassLabTuning.knownSubvariants.map(Optional.some)
+        var expectedIdentities: Set<String> = []
+        for main in [false, true] {
+            for subdued in [false, true] {
+                for variant in GlassLabTuning.variants {
+                    for subvariant in subvariants {
+                        expectedIdentities.insert(matrixIdentity(
+                            width: 480,
+                            height: 200,
+                            cornerRadius: 16,
+                            main: main,
+                            subdued: subdued,
+                            variant: variant,
+                            subvariant: subvariant
+                        ))
+                    }
+                }
+            }
+        }
+
+        let actualIdentities = Set(entries.map {
+            matrixIdentity(
+                width: $0.glassWidth,
+                height: $0.glassHeight,
+                cornerRadius: $0.cornerRadius,
+                main: $0.requestedMain,
+                subdued: $0.subdued,
+                variant: $0.variant,
+                subvariant: $0.subvariant
+            )
+        })
+        guard entries.count == 336,
+              actualIdentities.count == 336,
+              actualIdentities == expectedIdentities else {
+            return "Recursive Pass Audit requires 336 unique fixed-geometry Cartesian-product rows."
+        }
+        guard entries.allSatisfy({
+            $0.appActive
+                && !$0.isActualKeyWindow
+                && $0.isActualMainWindow == $0.requestedMain
+        }) else {
+            return "Recursive Pass Audit contains an inactive or rejected window context."
+        }
+        guard entries.allSatisfy({
+            !$0.snapshot.layers.isEmpty
+                && !$0.snapshot.topologySignature.isEmpty
+                && !$0.snapshot.valueSignature.isEmpty
+        }) else {
+            return "Recursive Pass Audit contains an empty or unsigned layer tree."
+        }
+        return nil
+    }
+
     private func matrixIdentity(
         width: Double,
         height: Double,
@@ -2084,6 +2356,7 @@ struct GlassLabView: View {
         state.testWindow.sync(with: state)
         scheduleLiveReadoutRefresh(refreshSchema: true)
         isCapturingMatrix = false
+        isCapturingPassAudit = false
     }
 
     private func copyToPasteboard(_ string: String) {

@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "status": "accepted",
+  "platform": {
+    "product": "macOS",
+    "version": "26.6",
+    "build": "25G5065a",
+    "architecture": "arm64"
+  },
+  "capturedAt": "2026-07-21",
+  "fixtures": [
+    {
+      "id": "recipe-matrix",
+      "file": "recipe-matrix.json",
+      "sha256": "3edd28d67cc53c290143cd5dbb6f5af31aad39b41bd50d3a02ff8f76f8c57925",
+      "schemaVersion": 1,
+      "entryCount": 1008,
+      "axes": {
+        "main": [
+          false,
+          true
+        ],
+        "subdued": [
+          false,
+          true
+        ],
+        "variant": "0...20",
+        "subvariant": [
+          null,
+          "menu",
+          "sheet",
+          "camera"
+        ],
+        "width": [
+          480
+        ],
+        "height": [
+          24,
+          200,
+          600
+        ],
+        "cornerRadius": [
+          16
+        ]
+      },
+      "environment": {
+        "hostType": "Panel",
+        "windowMargin": 40,
+        "scrim": false,
+        "reducedTintOpacity": false,
+        "adaptiveAppearance": 2,
+        "tint": null,
+        "overridesEnabled": false
+      },
+      "notes": [
+        "Canonical active-session Main × Subdued × Variant × Subvariant × representative-Height sweep.",
+        "Captured at 2026-07-21T07:59:51Z and validated as 1,008 unique rows.",
+        "Every row is appActive=true and actual key=false; requested and actual Main match.",
+        "inputMaxHeadroom is retained raw and classified as display/runtime-volatile by compare.mjs."
+      ]
+    },
+    {
+      "id": "recursive-pass-audit",
+      "file": "recursive-pass-audit.json",
+      "sha256": "3cea573b87cb58a306a1ac540e612801f58bdce9d136d13888888b5553110569",
+      "formatVersion": 1,
+      "entryCount": 336,
+      "axes": {
+        "main": [
+          false,
+          true
+        ],
+        "subdued": [
+          false,
+          true
+        ],
+        "variant": "0...20",
+        "subvariant": [
+          null,
+          "menu",
+          "sheet",
+          "camera"
+        ]
+      },
+      "environment": {
+        "hostType": "Panel",
+        "windowMargin": 40,
+        "width": 480,
+        "height": 200,
+        "cornerRadius": 16,
+        "scrim": false,
+        "reducedTintOpacity": false,
+        "adaptiveAppearance": 2,
+        "tint": null,
+        "overridesEnabled": false
+      },
+      "notes": [
+        "Accepted fixed-geometry recursive Layer, mask, filter, compositing-filter, effect, and property inventory.",
+        "Captured at 2026-07-21T08:35:38Z and validated as 336 unique rows.",
+        "Every row is appActive=true and actual key=false; requested and actual Main match; every row has a non-empty layer tree.",
+        "Contains nine topology signatures and 63 resolved-value signatures.",
+        "All 48 string-backed compositing filters retain their plusD, plusL, or screenBlendMode value."
+      ]
+    }
+  ]
+}

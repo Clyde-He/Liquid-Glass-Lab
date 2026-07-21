@@ -38,6 +38,13 @@ The current macOS 27 baseline contains:
   sample formula probe;
 - `window-context-matrix.json`: the controlled 19-configuration host audit.
 
+The current macOS 26 baseline contains:
+
+- `recipe-matrix.json`: the accepted 1,008-row representative-height Recipe
+  product;
+- `recursive-pass-audit.json`: the accepted 336-row fixed-geometry recursive
+  Layer/Pass/property inventory.
+
 ## Comparing an OS capture
 
 Place the matching fixture in another OS directory and run:
@@ -87,6 +94,21 @@ node Golden/compare.mjs \
   --fixture=semantic-usage-trees.json
 ```
 
+Compare independently captured Recursive Pass Audits with:
+
+```sh
+node Golden/compare.mjs \
+  Golden/macOS-27 \
+  Golden/macOS-26 \
+  --fixture=recursive-pass-audit.json
+```
+
+For this fixture the summary also reports distinct topology/value signature
+counts and the number of matched rows whose signatures changed. The hashes are
+not repeated as opaque ordinary differences; field diffs descend through the
+stable layer/pass/property dictionary keys. Nested `inputMaxHeadroom` remains
+classified as volatile by default.
+
 ## Core Recipe exporter
 
 The Playground's `Export Recipe Matrix` produces the canonical OS baseline.
@@ -115,6 +137,36 @@ pauses and retries its current context, and requested/actual Main acceptance is
 validated before the canonical `recipe-matrix.json` is replaced. A file with
 fewer than 1,008 unique rows is not a Golden Standard even if its axes envelope
 lists the full product.
+
+## Recursive Pass Audit exporter
+
+The Playground's `Export Recursive Pass Audit` keeps structural completeness
+separate from the compact Recipe baseline:
+
+```text
+Main × Subdued × 21 Variants × 4 Subvariants = 336 entries
+Width = 480
+Height = 200
+Corner Radius = 16
+Host = Panel
+Window Margin = 40
+Scrim = false
+Reduced Tint Opacity = false
+Tint = nil
+Overrides = disabled
+```
+
+Every snapshot walks sublayers and masks, then records direct filters,
+background filters, compositing filters, and object-backed effects. Stable
+structural paths key the JSON objects. Filter `inputKeys` and effect
+`CA_attributes` keep capability separate from resolved `value`, `nil`, and
+`unreadable` states. SHA-256 topology and value signatures make it cheap to
+identify changed cells before reading precise nested diffs.
+
+This fixture is diagnostic rather than automatically accepted. A first capture
+should be repeated on the same build to establish which layer fields and values
+are stable before it is added to an OS manifest. The macOS 26 fixture completed
+that review and is listed in its manifest; macOS 27 remains pending.
 
 ## Semantic Usage exporter
 

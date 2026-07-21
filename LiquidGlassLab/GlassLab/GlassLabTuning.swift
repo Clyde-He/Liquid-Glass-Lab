@@ -35,6 +35,7 @@
 
 #if os(macOS)
 import AppKit
+import CryptoKit
 import ObjectiveC.runtime
 import QuartzCore
 
@@ -1300,6 +1301,300 @@ enum GlassLabTuning {
         }
     }
 
+    // MARK: - Recursive pass audit
+
+    struct PassAuditRect: Codable, Equatable {
+        let x: Double
+        let y: Double
+        let width: Double
+        let height: Double
+
+        init(_ rect: CGRect) {
+            x = rect.origin.x
+            y = rect.origin.y
+            width = rect.width
+            height = rect.height
+        }
+    }
+
+    struct PassAuditLayerRecord: Codable, Equatable {
+        let path: String
+        let layerClass: String
+        let name: String?
+        let frame: PassAuditRect
+        let bounds: PassAuditRect
+        let opacity: Double
+        let isHidden: Bool
+        let masksToBounds: Bool
+        let cornerRadius: Double
+        let hasMask: Bool
+    }
+
+    struct PassAuditPropertyRecord: Codable, Equatable {
+        /// `value`, `nil`, or `unreadable`. Keeping this independent from the
+        /// optional description distinguishes declared nil from absent keys.
+        let state: String
+        let value: String?
+        let attributes: [String: String]
+    }
+
+    struct PassAuditPassRecord: Codable, Equatable {
+        let id: String
+        let layerPath: String
+        let layerClass: String
+        let location: String
+        let objectClass: String
+        let name: String?
+        let properties: [String: PassAuditPropertyRecord]
+    }
+
+    struct PassAuditSnapshot: Codable, Equatable {
+        let topologySignature: String
+        let valueSignature: String
+        let layers: [String: PassAuditLayerRecord]
+        let passes: [String: PassAuditPassRecord]
+    }
+
+    /// Recursively inventories every known Core Animation pass location under
+    /// NSGlassEffectView. Masks are separate layer trees rather than ordinary
+    /// sublayers, so they receive an explicit structural path and cycle guard.
+    @MainActor
+    static func capturePassAuditSnapshot(
+        from glass: NSGlassEffectView
+    ) -> PassAuditSnapshot? {
+        guard let root = glass.layer else { return nil }
+        var layers: [String: PassAuditLayerRecord] = [:]
+        var passes: [String: PassAuditPassRecord] = [:]
+        var visited: Set<ObjectIdentifier> = []
+
+        func visit(_ layer: CALayer, path: String) {
+            guard visited.insert(ObjectIdentifier(layer)).inserted else { return }
+            let layerClass = String(describing: type(of: layer))
+            layers[path] = PassAuditLayerRecord(
+                path: path,
+                layerClass: layerClass,
+                name: layer.name,
+                frame: PassAuditRect(layer.frame),
+                bounds: PassAuditRect(layer.bounds),
+                opacity: Double(layer.opacity),
+                isHidden: layer.isHidden,
+                masksToBounds: layer.masksToBounds,
+                cornerRadius: Double(layer.cornerRadius),
+                hasMask: layer.mask != nil
+            )
+
+            capturePassObjects(
+                (layer.filters ?? []).compactMap { $0 as? NSObject },
+                location: "filters",
+                layerPath: path,
+                layerClass: layerClass,
+                into: &passes
+            )
+            capturePassObjects(
+                (layer.backgroundFilters ?? []).compactMap { $0 as? NSObject },
+                location: "backgroundFilters",
+                layerPath: path,
+                layerClass: layerClass,
+                into: &passes
+            )
+            if let compositingFilter = layer.compositingFilter as? NSObject {
+                capturePassObjects(
+                    [compositingFilter],
+                    location: "compositingFilter",
+                    layerPath: path,
+                    layerClass: layerClass,
+                    into: &passes
+                )
+            }
+            if let effect = effectObject(on: layer) {
+                capturePassObjects(
+                    [effect],
+                    location: "effect",
+                    layerPath: path,
+                    layerClass: layerClass,
+                    into: &passes
+                )
+            }
+
+            for (index, child) in (layer.sublayers ?? []).enumerated() {
+                let childClass = String(describing: type(of: child))
+                visit(child, path: "\(path).sublayers[\(index)]:\(childClass)")
+            }
+            if let mask = layer.mask {
+                let maskClass = String(describing: type(of: mask))
+                visit(mask, path: "\(path).mask:\(maskClass)")
+            }
+        }
+
+        let rootClass = String(describing: type(of: root))
+        visit(root, path: "root:\(rootClass)")
+        return makePassAuditSnapshot(layers: layers, passes: passes)
+    }
+
+    private static func capturePassObjects(
+        _ objects: [NSObject],
+        location: String,
+        layerPath: String,
+        layerClass: String,
+        into passes: inout [String: PassAuditPassRecord]
+    ) {
+        for (index, object) in objects.enumerated() {
+            let objectClass = String(describing: type(of: object))
+            // `CALayer.compositingFilter` may be a filter-name NSString rather
+            // than a CAFilter instance. Preserve that authored value instead
+            // of exporting only its bridged `__NSCFConstantString` class.
+            let name = filterName(object)
+                ?? (object as? NSString).map { $0 as String }
+            let id = "\(layerPath)|\(location)[\(index)]|\(objectClass)|\(name ?? "-")"
+            let properties = location == "effect"
+                ? captureEffectProperties(on: object)
+                : captureFilterProperties(on: object)
+            passes[id] = PassAuditPassRecord(
+                id: id,
+                layerPath: layerPath,
+                layerClass: layerClass,
+                location: "\(location)[\(index)]",
+                objectClass: objectClass,
+                name: name,
+                properties: properties
+            )
+        }
+    }
+
+    private static func captureFilterProperties(
+        on filter: NSObject
+    ) -> [String: PassAuditPropertyRecord] {
+        let selector = NSSelectorFromString("attributesForKeyPath:")
+        return Dictionary(uniqueKeysWithValues: filterInputKeys(filter).sorted().map { key in
+            let value = filter.value(forKey: key)
+            let attributes: [String: String]
+            if filter.responds(to: selector),
+               let raw = filter.perform(selector, with: key)?.takeUnretainedValue()
+                    as? [String: Any] {
+                attributes = stableMetadata(raw)
+            } else {
+                attributes = [:]
+            }
+            return (
+                key,
+                PassAuditPropertyRecord(
+                    state: value == nil ? "nil" : "value",
+                    value: value.map { stableDescription($0) },
+                    attributes: attributes
+                )
+            )
+        })
+    }
+
+    private static func captureEffectProperties(
+        on effect: NSObject
+    ) -> [String: PassAuditPropertyRecord] {
+        guard let table = objectFromClassMethod(
+            on: type(of: effect),
+            selectorName: "CA_attributes"
+        ) as? [String: Any] else { return [:] }
+
+        return Dictionary(uniqueKeysWithValues: table.keys.sorted().map { key in
+            let getter = NSSelectorFromString(key)
+            let readable = effect.responds(to: getter)
+            let value = readable ? effect.value(forKey: key) : nil
+            let rawAttributes = table[key] as? [String: Any] ?? [:]
+            return (
+                key,
+                PassAuditPropertyRecord(
+                    state: readable ? (value == nil ? "nil" : "value") : "unreadable",
+                    value: value.map { stableDescription($0) },
+                    attributes: stableMetadata(rawAttributes)
+                )
+            )
+        })
+    }
+
+    private static func stableMetadata(_ metadata: [String: Any]) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: metadata.keys.sorted().map {
+            ($0, stableDescription(metadata[$0]!))
+        })
+    }
+
+    private static func stableDescription(_ value: Any) -> String {
+        if let number = value as? NSNumber {
+            return String(format: "%.17g", number.doubleValue)
+        }
+        if let string = value as? String {
+            return string
+        }
+        let cfValue = value as CFTypeRef
+        if CFGetTypeID(cfValue) == CGColor.typeID {
+            let color = unsafeBitCast(cfValue, to: CGColor.self)
+            let model = colorSpaceModelName(color.colorSpace?.model)
+            let components = (color.components ?? [])
+                .map { String(format: "%.6g", Double($0)) }
+                .joined(separator: ",")
+            return "CGColor(\(model):[\(components)])"
+        }
+        if let array = value as? [Any] {
+            return "[" + array.map { stableDescription($0) }.joined(separator: ",") + "]"
+        }
+        if let dictionary = value as? [String: Any] {
+            return "{" + dictionary.keys.sorted().map {
+                "\($0):\(stableDescription(dictionary[$0]!))"
+            }.joined(separator: ",") + "}"
+        }
+        if let value = value as? NSValue {
+            return value.description
+        }
+        if let object = value as? NSObject {
+            return "<\(String(describing: type(of: object)))>"
+        }
+        return String(describing: value)
+    }
+
+    private static func colorSpaceModelName(_ model: CGColorSpaceModel?) -> String {
+        guard let rawValue = model?.rawValue else { return "unknown" }
+        switch rawValue {
+        case -1: return "unknown"
+        case 0: return "monochrome"
+        case 1: return "rgb"
+        case 2: return "cmyk"
+        case 3: return "lab"
+        case 4: return "deviceN"
+        case 5: return "indexed"
+        case 6: return "pattern"
+        case 7: return "xyz"
+        default: return "model-\(rawValue)"
+        }
+    }
+
+    private static func makePassAuditSnapshot(
+        layers: [String: PassAuditLayerRecord],
+        passes: [String: PassAuditPassRecord]
+    ) -> PassAuditSnapshot {
+        let topology = layers.keys.sorted().map { key in
+            let layer = layers[key]!
+            return "layer|\(key)|\(layer.layerClass)|mask=\(layer.hasMask)"
+        } + passes.keys.sorted().map { key in
+            let pass = passes[key]!
+            return "pass|\(key)|keys=\(pass.properties.keys.sorted().joined(separator: ","))"
+        }
+        struct ValuePayload: Encodable {
+            let layers: [String: PassAuditLayerRecord]
+            let passes: [String: PassAuditPassRecord]
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let valueData = try! encoder.encode(ValuePayload(layers: layers, passes: passes))
+        return PassAuditSnapshot(
+            topologySignature: sha256(Data(topology.joined(separator: "\n").utf8)),
+            valueSignature: sha256(valueData),
+            layers: layers,
+            passes: passes
+        )
+    }
+
+    private static func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
     // MARK: - Recipe matrix capture
 
     struct MatrixEntry: Codable {
@@ -1373,8 +1668,54 @@ enum GlassLabTuning {
         let entries: [MatrixEntry]
     }
 
+    struct PassAuditEntry: Codable {
+        let context: String
+        let appActive: Bool
+        let isActualKeyWindow: Bool
+        let isActualMainWindow: Bool
+        let participation: String
+        let requestedMain: Bool
+        let subdued: Bool
+        let glassWidth: Double
+        let glassHeight: Double
+        let cornerRadius: Double
+        let variant: Int
+        let subvariant: String?
+        let snapshot: PassAuditSnapshot
+    }
+
+    struct PassAuditDocument: Codable {
+        struct Axes: Codable {
+            let main: [Bool]
+            let subdued: [Bool]
+            let variants: [Int]
+            let subvariants: [String?]
+        }
+
+        struct Context: Codable {
+            let hostType: String
+            let windowMargin: Double
+            let glassWidth: Double
+            let glassHeight: Double
+            let cornerRadius: Double
+            let scrim: Bool
+            let reducedTintOpacity: Bool
+            let adaptiveAppearance: Int
+            let tint: String?
+            let overridesEnabled: Bool
+        }
+
+        let formatVersion: Int
+        let capturedAt: String
+        let operatingSystem: String
+        let axes: Axes
+        let context: Context
+        let entries: [PassAuditEntry]
+    }
+
     enum MatrixCaptureError: Error {
         case applicationInactive
+        case missingLayerTree
         case participationChanged(
             expectedMain: Bool,
             actualMain: Bool,
@@ -1398,6 +1739,106 @@ enum GlassLabTuning {
         let highlightColors: [String: String]
         let geometryKeys: [String]
         let geometry: [String: Double]
+    }
+
+    /// Captures the fixed-geometry recursive pass audit for one accepted
+    /// Main/Subdued context. The caller owns the outer four-context loop so a
+    /// context interrupted by application deactivation can be retried whole.
+    @MainActor
+    static func capturePassAudit(
+        on glass: NSGlassEffectView,
+        context: String,
+        requestedMain: Bool,
+        subdued: Bool,
+        restoring state: GlassLabState
+    ) async throws -> [PassAuditEntry] {
+        var entries: [PassAuditEntry] = []
+
+        defer {
+            setGuarded(nil, forKey: "_subvariant", on: glass)
+            setGuarded(state.variant == 0 ? 1 : 0, forKey: "_variant", on: glass)
+            applyRecipe(from: state, to: glass)
+        }
+
+        let subvariants: [String?] = [nil] + knownSubvariants.map(Optional.some)
+        for variant in variants {
+            for subvariant in subvariants {
+                guard NSApp.isActive else {
+                    throw MatrixCaptureError.applicationInactive
+                }
+                selectRecipeCell(variant: variant, subvariant: subvariant, on: glass)
+                refreshResolvedWindowContext(on: glass)
+                let snapshot = try await settledPassAuditSnapshot(from: glass)
+                let actualKey = glass.window.map { NSApp.keyWindow === $0 } ?? false
+                let actualMain = glass.window.map { NSApp.mainWindow === $0 } ?? false
+                guard NSApp.isActive else {
+                    throw MatrixCaptureError.applicationInactive
+                }
+                guard actualMain == requestedMain, !actualKey else {
+                    throw MatrixCaptureError.participationChanged(
+                        expectedMain: requestedMain,
+                        actualMain: actualMain,
+                        actualKey: actualKey
+                    )
+                }
+                entries.append(PassAuditEntry(
+                    context: context,
+                    appActive: NSApp.isActive,
+                    isActualKeyWindow: actualKey,
+                    isActualMainWindow: actualMain,
+                    participation: actualKey ? "key" : (actualMain ? "main" : "neither"),
+                    requestedMain: requestedMain,
+                    subdued: subdued,
+                    glassWidth: state.glassWidth,
+                    glassHeight: state.glassHeight,
+                    cornerRadius: state.cornerRadius,
+                    variant: variant,
+                    subvariant: subvariant,
+                    snapshot: snapshot
+                ))
+            }
+        }
+        return entries
+    }
+
+    @MainActor
+    private static func settledPassAuditSnapshot(
+        from glass: NSGlassEffectView
+    ) async throws -> PassAuditSnapshot {
+        var previous: PassAuditSnapshot?
+        var elapsedMilliseconds = 0
+        for delayMilliseconds in [30, 30, 30, 30, 60] {
+            try await Task.sleep(for: .milliseconds(delayMilliseconds))
+            guard NSApp.isActive else {
+                throw MatrixCaptureError.applicationInactive
+            }
+            elapsedMilliseconds += delayMilliseconds
+            glass.needsLayout = true
+            glass.layoutSubtreeIfNeeded()
+            CATransaction.flush()
+            guard let current = capturePassAuditSnapshot(from: glass) else {
+                continue
+            }
+            if elapsedMilliseconds >= 60, current == previous {
+                return current
+            }
+            previous = current
+        }
+        guard let previous else { throw MatrixCaptureError.missingLayerTree }
+        return previous
+    }
+
+    private static func selectRecipeCell(
+        variant: Int,
+        subvariant: String?,
+        on glass: NSGlassEffectView
+    ) {
+        // Clear both axes first so an unchanged setter cannot leave a recipe
+        // resolved from the previous Cartesian-product cell.
+        setGuarded(nil, forKey: "_subvariant", on: glass)
+        setGuarded(variant == 0 ? 1 : 0, forKey: "_variant", on: glass)
+        setGuarded(variant, forKey: "_variant", on: glass)
+        setGuarded(subvariant, forKey: "_subvariant", on: glass)
     }
 
     /// Sweeps the full Cartesian product of every integer variant and each
@@ -1431,12 +1872,7 @@ enum GlassLabTuning {
                 guard NSApp.isActive else {
                     throw MatrixCaptureError.applicationInactive
                 }
-                // Clear both axes first so an unchanged setter cannot leave a
-                // recipe resolved from the previous Cartesian-product cell.
-                setGuarded(nil, forKey: "_subvariant", on: glass)
-                setGuarded(variant == 0 ? 1 : 0, forKey: "_variant", on: glass)
-                setGuarded(variant, forKey: "_variant", on: glass)
-                setGuarded(subvariant, forKey: "_subvariant", on: glass)
+                selectRecipeCell(variant: variant, subvariant: subvariant, on: glass)
                 // The resolver normally reacts asynchronously. Explicitly run
                 // its window-context hook, then retain the 180 ms historical
                 // wait only as a ceiling rather than paying it for every cell.

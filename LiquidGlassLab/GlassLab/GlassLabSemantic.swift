@@ -164,8 +164,26 @@ struct GlassLabSemanticResolution {
 final class GlassLabSemanticRuntime {
     static let shared = GlassLabSemanticRuntime()
 
-    private static let glassByteCount = 40
-    private static let glassMetadataSymbol = "$s7SwiftUI6_GlassVN"
+    private struct GlassABIProfile {
+        let size: Int
+        let stride: Int
+    }
+
+    private struct RuntimeValueLayout: Equatable {
+        let size: Int
+        let stride: Int
+        let flagsAndExtraInhabitants: UInt
+    }
+
+    /// `_Glass` is private and changed layout between the measured macOS 26
+    /// and macOS 27 runtimes. Keep an explicit allowlist rather than treating
+    /// any coincidentally equal public/private size as ABI compatibility.
+    private static let glassABIProfiles: [Int: GlassABIProfile] = [
+        26: GlassABIProfile(size: 41, stride: 48),
+        27: GlassABIProfile(size: 40, stride: 40),
+    ]
+    private static let publicGlassMetadataSymbol = "$s7SwiftUI5GlassVN"
+    private static let privateGlassMetadataSymbol = "$s7SwiftUI6_GlassVN"
     private typealias GlassGetter = @convention(thin) () -> Glass
     private typealias TextFactory = @convention(thin) (
         Color?,
@@ -252,17 +270,35 @@ final class GlassLabSemanticRuntime {
     private func uncachedAvailabilityMessage(
         for usage: GlassLabSemanticUsage
     ) -> String? {
-        guard MemoryLayout<Glass>.size == Self.glassByteCount else {
-            return "Unavailable: public Glass layout is \(MemoryLayout<Glass>.size) bytes; this probe requires 40."
-        }
         guard let handle = frameworkHandle else {
             return "Unavailable: \(loadError ?? "SwiftUICore could not be loaded.")"
         }
-        guard let privateSize = privateGlassByteCount(in: handle) else {
+        let majorVersion = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        guard let profile = Self.glassABIProfiles[majorVersion] else {
+            return "Unavailable: macOS \(majorVersion) has no verified Glass ABI profile."
+        }
+        guard let publicLayout = runtimeValueLayout(
+            symbol: Self.publicGlassMetadataSymbol,
+            in: handle
+        ) else {
+            return "Unavailable: public Glass metadata is absent on this runtime."
+        }
+        guard publicLayout.size == MemoryLayout<Glass>.size,
+              publicLayout.stride == MemoryLayout<Glass>.stride else {
+            return "Unavailable: public Glass metadata disagrees with its runtime MemoryLayout."
+        }
+        guard publicLayout.size == profile.size,
+              publicLayout.stride == profile.stride else {
+            return "Unavailable: public Glass layout is \(publicLayout.size)/\(publicLayout.stride) bytes; the verified macOS \(majorVersion) profile requires \(profile.size)/\(profile.stride)."
+        }
+        guard let privateLayout = runtimeValueLayout(
+            symbol: Self.privateGlassMetadataSymbol,
+            in: handle
+        ) else {
             return "Unavailable: private `_Glass` metadata is absent on this runtime."
         }
-        guard privateSize == Self.glassByteCount else {
-            return "Unavailable: private `_Glass` layout is \(privateSize) bytes; this probe requires 40."
+        guard privateLayout == publicLayout else {
+            return "Unavailable: public Glass and private `_Glass` runtime layouts do not match."
         }
         guard dlsym(handle, usage.symbolName) != nil else {
             return "Unavailable: this private SwiftUI Usage is absent on the current macOS runtime."
@@ -271,23 +307,36 @@ final class GlassLabSemanticRuntime {
     }
 
     /// Swift value metadata stores its Value Witness Table pointer one word
-    /// before the metadata address; VWT slot 8 is the runtime size. Checking
-    /// both public and private sizes before the ABI cast makes layout drift a
-    /// visible Unavailable state instead of an unsafe function call.
-    private func privateGlassByteCount(
+    /// before the metadata address. VWT slots 8, 9, and 10 contain size,
+    /// stride, and the combined flags/extra-inhabitant word. Checking all
+    /// three before the ABI cast makes layout drift a visible Unavailable
+    /// state instead of an unsafe function call.
+    private func runtimeValueLayout(
+        symbol: String,
         in handle: UnsafeMutableRawPointer
-    ) -> Int? {
-        guard let metadata = dlsym(handle, Self.glassMetadataSymbol) else {
+    ) -> RuntimeValueLayout? {
+        guard let metadata = dlsym(handle, symbol) else {
             return nil
         }
         let pointerSize = MemoryLayout<UnsafeRawPointer>.size
         let witnessTable = metadata
             .advanced(by: -pointerSize)
             .load(as: UnsafeRawPointer.self)
-        return Int(witnessTable.load(
-            fromByteOffset: 8 * MemoryLayout<UInt>.size,
-            as: UInt.self
-        ))
+        let wordSize = MemoryLayout<UInt>.size
+        return RuntimeValueLayout(
+            size: Int(witnessTable.load(
+                fromByteOffset: 8 * wordSize,
+                as: UInt.self
+            )),
+            stride: Int(witnessTable.load(
+                fromByteOffset: 9 * wordSize,
+                as: UInt.self
+            )),
+            flagsAndExtraInhabitants: witnessTable.load(
+                fromByteOffset: 10 * wordSize,
+                as: UInt.self
+            )
+        )
     }
 }
 
