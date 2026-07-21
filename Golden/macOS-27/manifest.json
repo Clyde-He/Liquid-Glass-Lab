@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "status": "accepted",
+  "platform": {
+    "product": "macOS",
+    "version": "27.0",
+    "build": "26A5378n",
+    "architecture": "arm64"
+  },
+  "capturedAt": "2026-07-20",
+  "fixtures": [
+    {
+      "id": "recipe-matrix",
+      "file": "recipe-matrix.json",
+      "sha256": "3ba86700d84786f430fee9928f8d8ddf47d03f4ed27226c344fb965b3b0be35c",
+      "entryCount": 1008,
+      "axes": {
+        "main": [
+          false,
+          true
+        ],
+        "subdued": [
+          false,
+          true
+        ],
+        "variant": "0...20",
+        "subvariant": [
+          null,
+          "menu",
+          "sheet",
+          "camera"
+        ],
+        "width": [
+          480
+        ],
+        "height": [
+          24,
+          200,
+          600
+        ],
+        "cornerRadius": [
+          16
+        ]
+      },
+      "environment": {
+        "hostType": "Panel",
+        "windowMargin": 40,
+        "scrim": false,
+        "reducedTintOpacity": false,
+        "adaptiveAppearance": 2,
+        "tint": null,
+        "overridesEnabled": false
+      },
+      "notes": [
+        "Canonical active-session Main × Subdued × Variant × Subvariant × representative-Height sweep.",
+        "Validated as 1,008 unique rows: every row appActive=true and actual key=false; requested and actual Main match in all rows.",
+        "inputMaxHeadroom is retained raw but classified as display/runtime-volatile by compare.mjs after same-build captures changed from the 9999 sentinel to 1.2 while every other comparable Shader, Rim, and geometry value remained stable."
+      ]
+    },
+    {
+      "id": "semantic-usage-trees",
+      "file": "semantic-usage-trees.json",
+      "sha256": "b97180c2c9efd32c5105e0dc56d578cf99a5ecd5df9ca379f45a79f1b52eeedf",
+      "formatVersion": 2,
+      "entryCount": 48,
+      "axes": {
+        "main": [
+          false,
+          true
+        ],
+        "roleTag": "0...23"
+      },
+      "environment": {
+        "hostType": "Panel",
+        "windowMargin": 40,
+        "width": 480,
+        "height": 200,
+        "cornerRadius": 16
+      },
+      "notes": [
+        "Canonical SwiftUI Semantic Usage layer/filter/effect inventory across real Main Off/On participation.",
+        "Validated as 48 unique rows: all 24 runtime roles are available, every row has a snapshot and actual key=false, and requested/actual Main match in all rows.",
+        "CGColor values are canonical model/component strings without process-local object addresses; inputColorMatrix retains its runtime NSValue byte description because those bytes are material data rather than pointer identity."
+      ]
+    },
+    {
+      "id": "formula-analysis",
+      "file": "formula-analysis.json",
+      "sha256": "7695ddc86cc277f50b2df370135bbfc0f4b868cd184f32de1db818bf97d6af26",
+      "sampleCount": 426,
+      "notes": [
+        "Derived from the accepted application-active formula sweep.",
+        "Contains observed ranges, size formulas, and context differences."
+      ]
+    },
+    {
+      "id": "window-context-matrix",
+      "file": "window-context-matrix.json",
+      "sha256": "aded9cbf7d3326be401c6f0d10dedd7eda8f3ded0a48ee2daad3dea11f0ff0f4",
+      "entryCount": 19,
+      "notes": [
+        "Signed app-bundle audit of Window/Panel class, style, key eligibility, transparency, shadow, level, and spoofing.",
+        "Used to rule out host construction as a direct Recipe selector once real participation is controlled."
+      ]
+    }
+  ]
+}
