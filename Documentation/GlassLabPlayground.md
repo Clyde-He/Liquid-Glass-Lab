@@ -224,11 +224,15 @@ location, raw locator, and a disclosure of declared properties. Property state
 Core Animation metadata.
 
 The live state label is `Present` or `Overridden`; an enabled Glass Filter/Rim
-Override whose target is absent is reported as `Dormant`. Runtime object
-replacement cannot be inferred from the stable structural export ID, so
-`Replaced` remains explicitly deferred until the generic editor tracks live
-object identity and reconstruction events. The page retains the raw Layer tree
-and can copy a deterministic full pass/property report.
+Override whose target is absent is reported as `Dormant`. `Replaced` is latched
+when a known structural pass slot receives a different reference-backed live
+object. The tracker stores only non-owning process-local `ObjectIdentifier`
+tokens: it does not retain stale CAFilter/effect instances or add pointer data
+to deterministic JSON/signatures. Sampling pauses off the Pass Inventory page,
+so Recipe controls remain cheap, while the tokens survive those edits and are
+compared when the page returns. Changing Renderer resets the tracker. The page
+retains the raw Layer tree and can copy a deterministic full pass/property
+report including the current state of each pass.
 
 Semantic values are deliberately read-only in this first pass. A CA input only
 becomes a Knob after its owning Usage/pass, accepted value type, mutation

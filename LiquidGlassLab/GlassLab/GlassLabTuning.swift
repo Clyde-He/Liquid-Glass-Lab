@@ -1355,6 +1355,15 @@ enum GlassLabTuning {
         let passes: [String: PassAuditPassRecord]
     }
 
+    /// Process-local identity evidence for the live inspector. ObjectIdentifier
+    /// is non-owning, so keeping this capture cannot extend the lifetime of a
+    /// private CAFilter/effect after Core Animation replaces it. These tokens
+    /// intentionally stay out of Codable fixtures and deterministic signatures.
+    struct LivePassAuditCapture {
+        let snapshot: PassAuditSnapshot
+        let objectIdentityBySlot: [String: ObjectIdentifier]
+    }
+
     /// Recursively inventories every known Core Animation pass location under
     /// NSGlassEffectView. Masks are separate layer trees rather than ordinary
     /// sublayers, so they receive an explicit structural path and cycle guard.
@@ -1362,9 +1371,20 @@ enum GlassLabTuning {
     static func capturePassAuditSnapshot(
         from glass: NSGlassEffectView
     ) -> PassAuditSnapshot? {
+        captureLivePassAudit(from: glass)?.snapshot
+    }
+
+    /// Captures the deterministic recursive snapshot plus non-owning identity
+    /// tokens keyed by structural pass slot for view-lifetime replacement
+    /// tracking across Recipe edits.
+    @MainActor
+    static func captureLivePassAudit(
+        from glass: NSGlassEffectView
+    ) -> LivePassAuditCapture? {
         guard let root = glass.layer else { return nil }
         var layers: [String: PassAuditLayerRecord] = [:]
         var passes: [String: PassAuditPassRecord] = [:]
+        var objectIdentityBySlot: [String: ObjectIdentifier] = [:]
         var visited: Set<ObjectIdentifier> = []
 
         func visit(_ layer: CALayer, path: String) {
@@ -1388,14 +1408,16 @@ enum GlassLabTuning {
                 location: "filters",
                 layerPath: path,
                 layerClass: layerClass,
-                into: &passes
+                into: &passes,
+                objectIdentityBySlot: &objectIdentityBySlot
             )
             capturePassObjects(
                 (layer.backgroundFilters ?? []).compactMap { $0 as? NSObject },
                 location: "backgroundFilters",
                 layerPath: path,
                 layerClass: layerClass,
-                into: &passes
+                into: &passes,
+                objectIdentityBySlot: &objectIdentityBySlot
             )
             if let compositingFilter = layer.compositingFilter as? NSObject {
                 capturePassObjects(
@@ -1403,7 +1425,8 @@ enum GlassLabTuning {
                     location: "compositingFilter",
                     layerPath: path,
                     layerClass: layerClass,
-                    into: &passes
+                    into: &passes,
+                    objectIdentityBySlot: &objectIdentityBySlot
                 )
             }
             if let effect = effectObject(on: layer) {
@@ -1412,7 +1435,8 @@ enum GlassLabTuning {
                     location: "effect",
                     layerPath: path,
                     layerClass: layerClass,
-                    into: &passes
+                    into: &passes,
+                    objectIdentityBySlot: &objectIdentityBySlot
                 )
             }
 
@@ -1428,12 +1452,16 @@ enum GlassLabTuning {
 
         let rootClass = String(describing: type(of: root))
         visit(root, path: "root:\(rootClass)")
-        return makePassAuditSnapshot(layers: layers, passes: passes)
+        return LivePassAuditCapture(
+            snapshot: makePassAuditSnapshot(layers: layers, passes: passes),
+            objectIdentityBySlot: objectIdentityBySlot
+        )
     }
 
     static func passAuditReport(
         _ snapshot: PassAuditSnapshot,
-        header: String
+        header: String,
+        passStates: [String: String] = [:]
     ) -> String {
         var lines = [
             header,
@@ -1474,6 +1502,7 @@ enum GlassLabTuning {
                 "  \(pass.location) · \(pass.name ?? pass.objectClass)"
                     + " · class=\(pass.objectClass)"
                     + " · owner=\(pass.layerClass)"
+                    + " · state=\(passStates[pass.id] ?? "Present")"
             )
             lines.append("    locator=\(pass.layerPath)")
             for key in pass.properties.keys.sorted() {
@@ -1495,7 +1524,8 @@ enum GlassLabTuning {
         location: String,
         layerPath: String,
         layerClass: String,
-        into passes: inout [String: PassAuditPassRecord]
+        into passes: inout [String: PassAuditPassRecord],
+        objectIdentityBySlot: inout [String: ObjectIdentifier]
     ) {
         for (index, object) in objects.enumerated() {
             let objectClass = String(describing: type(of: object))
@@ -1504,7 +1534,8 @@ enum GlassLabTuning {
             // of exporting only its bridged `__NSCFConstantString` class.
             let name = filterName(object)
                 ?? (object as? NSString).map { $0 as String }
-            let id = "\(layerPath)|\(location)[\(index)]|\(objectClass)|\(name ?? "-")"
+            let slot = "\(layerPath)|\(location)[\(index)]"
+            let id = "\(slot)|\(objectClass)|\(name ?? "-")"
             let properties = location == "effect"
                 ? captureEffectProperties(on: object)
                 : captureFilterProperties(on: object)
@@ -1517,6 +1548,12 @@ enum GlassLabTuning {
                 name: name,
                 properties: properties
             )
+            // Foundation value objects (most notably a compositing-filter
+            // NSString) may be re-bridged on every getter call. Their pointer
+            // identity does not describe a live Core Animation pass instance.
+            if !(object is NSString), !(object is NSNumber), !(object is NSValue) {
+                objectIdentityBySlot[slot] = ObjectIdentifier(object)
+            }
         }
     }
 

@@ -72,6 +72,8 @@ struct GlassLabView: View {
     @State private var isCapturingSemanticTrees = false
     @State private var liveSnapshot: LiveReadoutSnapshot?
     @State private var passInventorySnapshot: GlassLabTuning.PassAuditSnapshot?
+    @State private var passObjectIdentityBySlot: [String: ObjectIdentifier] = [:]
+    @State private var replacedPassSlots: Set<String> = []
     @State private var semanticSnapshot: GlassLabSemanticSnapshot?
     @State private var shaderOverrideBaseline: LiveReadoutSnapshot?
     @State private var highlightOverrideBaseline: LiveReadoutSnapshot?
@@ -399,6 +401,10 @@ struct GlassLabView: View {
                 LabeledContent("Passes") {
                     Text(String(snapshot.passes.count)).monospacedDigit()
                 }
+                LabeledContent("Replaced") {
+                    Text(String(items.filter { replacedPassSlots.contains($0.slotID) }.count))
+                        .monospacedDigit()
+                }
                 LabeledContent("Topology") {
                     Text(String(snapshot.topologySignature.prefix(12)))
                         .font(.system(.body, design: .monospaced))
@@ -429,7 +435,7 @@ struct GlassLabView: View {
             Button("Copy Pass Inventory Report") { copyPassInventoryReport() }
                 .disabled(snapshot == nil)
 
-            Text("Present, Overridden, and Dormant describe the current live/Override relationship. Runtime object replacement is not inferred from structural JSON identity; explicit Replaced tracking remains part of the writable generic-editor phase.")
+            Text("Present, Overridden, Dormant, and Replaced describe the live tree. Replaced is latched when a structural pass slot receives a new reference-backed object. Sampling pauses off this page, while non-owning process-local identity tokens survive Recipe edits and reset when the Renderer changes.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -1285,6 +1291,7 @@ struct GlassLabView: View {
         let familyCount: Int
 
         var id: String { record.id }
+        var slotID: String { "\(record.layerPath)|\(record.location)" }
     }
 
     private func passInventoryItems(
@@ -1358,6 +1365,9 @@ struct GlassLabView: View {
         for item: PassInventoryItem,
         state: GlassLabState
     ) -> String {
+        if replacedPassSlots.contains(item.slotID) {
+            return "Replaced"
+        }
         if item.family == "glassBackground", state.shaderOverridesEnabled {
             return "Overridden"
         }
@@ -1610,11 +1620,42 @@ struct GlassLabView: View {
     }
 
     private func publishPassInventorySnapshot() {
-        let snapshot = selectedReadoutGlass.flatMap {
-            GlassLabTuning.capturePassAuditSnapshot(from: $0)
+        guard let glass = selectedReadoutGlass,
+              let capture = GlassLabTuning.captureLivePassAudit(from: glass) else {
+            if passInventorySnapshot != nil {
+                passInventorySnapshot = nil
+            }
+            return
         }
+
+        let currentIdentities = capture.objectIdentityBySlot
+        var replacements = Set(replacedPassSlots.filter {
+            currentIdentities[$0] != nil
+        })
+        for (slot, identity) in currentIdentities {
+            if let previous = passObjectIdentityBySlot[slot], previous != identity {
+                replacements.insert(slot)
+            }
+        }
+        if currentIdentities != passObjectIdentityBySlot {
+            passObjectIdentityBySlot = currentIdentities
+        }
+        if replacements != replacedPassSlots {
+            replacedPassSlots = replacements
+        }
+
+        let snapshot = capture.snapshot
         if snapshot != passInventorySnapshot {
             passInventorySnapshot = snapshot
+        }
+    }
+
+    private func resetPassReplacementTracking() {
+        if !passObjectIdentityBySlot.isEmpty {
+            passObjectIdentityBySlot = [:]
+        }
+        if !replacedPassSlots.isEmpty {
+            replacedPassSlots = []
         }
     }
 
@@ -1631,6 +1672,7 @@ struct GlassLabView: View {
         case .semanticUsage:
             if liveSnapshot != nil { liveSnapshot = nil }
             if passInventorySnapshot != nil { passInventorySnapshot = nil }
+            resetPassReplacementTracking()
             let snapshot = GlassLabSemanticSnapshot.capture(
                 from: state.testWindow.liveSemanticLayerRoot
             )
@@ -1847,7 +1889,14 @@ struct GlassLabView: View {
             + " variant=\(state.variant)"
             + " subvariant=\(state.subvariant.isEmpty ? "<nil>" : state.subvariant)"
             + " subdued=\(state.isSubdued)"
-        let report = GlassLabTuning.passAuditReport(snapshot, header: header)
+        let passStates = Dictionary(uniqueKeysWithValues: passInventoryItems(snapshot).map {
+            ($0.record.id, passState(for: $0, state: state))
+        })
+        let report = GlassLabTuning.passAuditReport(
+            snapshot,
+            header: header,
+            passStates: passStates
+        )
         state.reportOutput = report
         copyToPasteboard(report)
     }
