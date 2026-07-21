@@ -18,9 +18,7 @@ import UniformTypeIdentifiers
 struct GlassLabView: View {
     private enum RecipePage: String, CaseIterable, Identifiable {
         case general = "General"
-        case glassFilter = "Glass Filter"
-        case rimHighlight = "Rim Highlight"
-        case passInventory = "Pass Inventory"
+        case passes = "Passes"
 
         var id: Self { self }
     }
@@ -66,6 +64,7 @@ struct GlassLabView: View {
 
     let state: GlassLabState
     @State private var selectedRecipePage = RecipePage.general
+    @State private var selectedPassSlotID: String?
     @State private var selectedSemanticPage = SemanticPage.general
     @State private var isCapturingMatrix = false
     @State private var isCapturingPassAudit = false
@@ -242,73 +241,11 @@ struct GlassLabView: View {
 
             generalWindowSections(state: state)
 
-                case .glassFilter:
-            Section("Glass Filter Inspector") {
-                Text(readoutDescription)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Text("Each row shows its effective Min and Max beneath its name; hover a row for the private input key and the range's source (Core Animation metadata, the measured Recipe Matrix, or an authoring fallback). While an Override is enabled the value field at the row's end accepts exact numbers; clearing it reverts that key to the live value.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Toggle("Override Glass Filter", isOn: shaderOverridesEnabledBinding)
-                        .disabled(snapshot?.shaderInputKeys == nil && !state.shaderOverridesEnabled)
-                    Text("Enabling captures and locks the current numeric, typed-input, and render-bounds values. Disabling discards that snapshot and restores the system Recipe; enabling again captures the new current values.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-
-                Button("Reset Filter Overrides") { resetShaderOverrides() }
-                    .disabled(!state.shaderOverridesEnabled)
-            }
-
-            ForEach(GlassLabTuning.ShaderGroup.allCases) { group in
-                Section(group.sectionTitle) {
-                    shaderGroupControls(
-                        group,
-                        knobs: inspectorShaderGroups.first { $0.group == group }?.knobs ?? [],
+                case .passes:
+                    passNavigatorSections(
                         state: state,
-                        snapshot: snapshot
-                    )
-                }
-            }
-
-            Section("Pipeline · Render Bounds") {
-                geometryControls(state: state, snapshot: snapshot)
-            }
-
-                case .rimHighlight:
-            Section("Rim Highlight Inspector") {
-                Text(readoutDescription)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Text("Each row shows its effective Min and Max beneath its name; hover a row for the private input key and the range's source. While an Override is enabled the value field at the row's end accepts exact numbers; clearing it reverts that key to the live value.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Toggle("Override Rim Highlight", isOn: highlightOverridesEnabledBinding)
-                        .disabled(snapshot?.highlightInputKeys == nil && !state.highlightOverridesEnabled)
-                    Text("Enabling captures and locks the current Rim pass. Variants without that pass show Pass Absent and cannot start a Rim Override.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-
-                Button("Reset Rim Overrides") { resetHighlightOverrides() }
-                    .disabled(!state.highlightOverridesEnabled)
-            }
-
-            ForEach(GlassLabTuning.HighlightGroup.allCases) { group in
-                Section(group.sectionTitle) {
-                    highlightGroupControls(group, state: state, snapshot: snapshot)
-                }
-            }
-
-                case .passInventory:
-                    passInventorySections(
-                        state: state,
-                        snapshot: passInventorySnapshot
+                        liveSnapshot: snapshot,
+                        passSnapshot: passInventorySnapshot
                     )
                 }
 
@@ -324,6 +261,116 @@ struct GlassLabView: View {
         }
         .formStyle(.grouped)
         .disabled(isCapturingMatrix || isCapturingPassAudit || isCapturingSemanticTrees)
+        }
+    }
+
+    @ViewBuilder
+    private func glassFilterEditorSections(
+        state labState: GlassLabState,
+        snapshot: LiveReadoutSnapshot?
+    ) -> some View {
+        @Bindable var state = labState
+
+        Section("Glass Filter Inspector") {
+            Text(readoutDescription)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Text("This selected live pass uses the accepted named-filter mutation path. Each row shows its effective Min and Max beneath its name; hover for the private input key and range source.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("Override Glass Filter", isOn: shaderOverridesEnabledBinding)
+                    .disabled(snapshot?.shaderInputKeys == nil && !state.shaderOverridesEnabled)
+                Text("Enabling captures and locks the current numeric, typed-input, and render-bounds values. Disabling discards that snapshot and restores the system Recipe.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button("Reset Filter Overrides") { resetShaderOverrides() }
+                .disabled(!state.shaderOverridesEnabled)
+        }
+
+        ForEach(GlassLabTuning.ShaderGroup.allCases) { group in
+            Section(group.sectionTitle) {
+                shaderGroupControls(
+                    group,
+                    knobs: inspectorShaderGroups.first { $0.group == group }?.knobs ?? [],
+                    state: state,
+                    snapshot: snapshot
+                )
+            }
+        }
+
+        Section("Owner Layer · Render Margin") {
+            geometryControls(
+                state: state,
+                snapshot: snapshot,
+                keys: ["backdropMarginWidth"]
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func rimHighlightEditorSections(
+        state labState: GlassLabState,
+        snapshot: LiveReadoutSnapshot?
+    ) -> some View {
+        @Bindable var state = labState
+
+        Section("Rim Highlight Inspector") {
+            Text(readoutDescription)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Text("This selected live pass uses the accepted SDF effect copy/reassign mutation path. Each row shows its effective Min and Max beneath its name.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("Override Rim Highlight", isOn: highlightOverridesEnabledBinding)
+                    .disabled(snapshot?.highlightInputKeys == nil && !state.highlightOverridesEnabled)
+                Text("Enabling captures and locks the current Rim pass. Variants without that pass report the Override as Dormant without creating one.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button("Reset Rim Overrides") { resetHighlightOverrides() }
+                .disabled(!state.highlightOverridesEnabled)
+        }
+
+        ForEach(GlassLabTuning.HighlightGroup.allCases) { group in
+            Section(group.sectionTitle) {
+                highlightGroupControls(group, state: state, snapshot: snapshot)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func outputEffectEditorSections(
+        state labState: GlassLabState,
+        snapshot: LiveReadoutSnapshot?
+    ) -> some View {
+        @Bindable var state = labState
+
+        Section("Output Effect Inspector") {
+            Text(readoutDescription)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Text("The accepted Output mutation contract copies the current CASDFOutputEffect, changes minimum/maximum, and reassigns it to the owning layer without presentation actions. It shares the existing Glass Filter Override lifecycle.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Toggle("Override Render Bounds", isOn: shaderOverridesEnabledBinding)
+                .disabled(snapshot?.geometryKeys.isEmpty != false && !state.shaderOverridesEnabled)
+            Button("Reset Filter Overrides") { resetShaderOverrides() }
+                .disabled(!state.shaderOverridesEnabled)
+        }
+
+        Section("Pipeline · Output Bounds") {
+            geometryControls(
+                state: state,
+                snapshot: snapshot,
+                keys: ["sdfOutputMinimum", "sdfOutputMaximum"]
+            )
         }
     }
 
@@ -380,11 +427,13 @@ struct GlassLabView: View {
     }
 
     @ViewBuilder
-    private func passInventorySections(
+    private func passNavigatorSections(
         state labState: GlassLabState,
-        snapshot: GlassLabTuning.PassAuditSnapshot?
+        liveSnapshot: LiveReadoutSnapshot?,
+        passSnapshot: GlassLabTuning.PassAuditSnapshot?
     ) -> some View {
-        let items = snapshot.map(passInventoryItems) ?? []
+        let items = passSnapshot.map(passInventoryItems) ?? []
+        let selectedItem = selectedPassItem(in: items)
         let acceptedPropertyCount = items.reduce(into: 0) { count, item in
             count += item.record.properties.filter { key, property in
                 GlassLabTuning.classifyPassProperty(
@@ -395,20 +444,29 @@ struct GlassLabView: View {
             }.count
         }
 
-        Section("Recursive Pass Inspector") {
+        Section("Pass Navigator") {
             Text(readoutDescription)
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Text("Read-only inventory of every direct filter, background filter, compositing filter, and object-backed effect in the current NSGlassEffectView tree. Declared property capability is kept separate from value, nil, and unreadable states.")
+            Text("Select one live pass instance. Accepted mutation contracts mount their editor below; every other instance keeps an independent read-only page until its controlled mutation audit is accepted.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
-            if let snapshot {
+            if !items.isEmpty {
+                Picker("Pass Instance", selection: $selectedPassSlotID) {
+                    ForEach(items) { item in
+                        Text(passInventorySectionTitle(item))
+                            .tag(Optional(item.slotID))
+                    }
+                }
+            }
+
+            if let passSnapshot {
                 LabeledContent("Layers") {
-                    Text(String(snapshot.layers.count)).monospacedDigit()
+                    Text(String(passSnapshot.layers.count)).monospacedDigit()
                 }
                 LabeledContent("Passes") {
-                    Text(String(snapshot.passes.count)).monospacedDigit()
+                    Text(String(passSnapshot.passes.count)).monospacedDigit()
                 }
                 LabeledContent("Replaced") {
                     Text(String(items.filter { replacedPassSlots.contains($0.slotID) }.count))
@@ -418,14 +476,14 @@ struct GlassLabView: View {
                     Text(String(acceptedPropertyCount)).monospacedDigit()
                 }
                 LabeledContent("Topology") {
-                    Text(String(snapshot.topologySignature.prefix(12)))
+                    Text(String(passSnapshot.topologySignature.prefix(12)))
                         .font(.system(.body, design: .monospaced))
-                        .help(snapshot.topologySignature)
+                        .help(passSnapshot.topologySignature)
                 }
                 LabeledContent("Values") {
-                    Text(String(snapshot.valueSignature.prefix(12)))
+                    Text(String(passSnapshot.valueSignature.prefix(12)))
                         .font(.system(.body, design: .monospaced))
-                        .help(snapshot.valueSignature)
+                        .help(passSnapshot.valueSignature)
                 }
             }
 
@@ -445,110 +503,45 @@ struct GlassLabView: View {
             }
 
             Button("Copy Pass Inventory Report") { copyPassInventoryReport() }
-                .disabled(snapshot == nil)
+                .disabled(passSnapshot == nil)
 
-            Text("Present, Overridden, Dormant, and Replaced describe the live tree. Replaced is latched when a structural pass slot receives a new reference-backed object. Sampling pauses off this page, while non-owning process-local identity tokens survive Recipe edits and reset when the Renderer changes.")
+            Text("Present, Overridden, Dormant, and Replaced describe the live tree. The selected structural slot survives Recipe edits when it still exists; duplicate families remain independently addressable by their locator and ordinal.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
 
-        if snapshot == nil {
-            Section("Observed Passes") {
+        if passSnapshot == nil {
+            Section("Selected Pass") {
                 Text("No Recipe layer tree is available yet.")
                     .foregroundStyle(.secondary)
             }
         } else if items.isEmpty {
-            Section("Observed Passes") {
+            Section("Selected Pass") {
                 Text("The current layer tree contains no inspectable pass objects.")
                     .foregroundStyle(.secondary)
             }
-        } else {
-            ForEach(items) { item in
-                Section(passInventorySectionTitle(item)) {
-                    LabeledContent("State") {
-                        Text(passState(for: item, state: labState))
-                    }
-                    LabeledContent("Object Class") {
-                        Text(item.record.objectClass)
-                            .font(.system(.body, design: .monospaced))
-                    }
-                    LabeledContent("Owner") {
-                        Text(item.record.layerClass)
-                            .font(.system(.body, design: .monospaced))
-                    }
-                    LabeledContent("Location") {
-                        Text(item.record.location)
-                            .font(.system(.body, design: .monospaced))
-                    }
-                    LabeledContent("Mutation Family") {
-                        Text(GlassLabTuning.passMutationFamily(for: item.record).rawValue)
-                            .foregroundStyle(.secondary)
-                    }
-                    LabeledContent("Contract") {
-                        Text(passMutationContractSummary(for: item))
-                            .foregroundStyle(.secondary)
-                    }
-                    if let editor = acceptedPassEditor(for: item) {
-                        Button(editor.label) {
-                            selectedRecipePage = editor.page
-                        }
-                    }
-                    LabeledContent("Structural Locator") {
-                        Text(item.record.layerPath)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
+        } else if let selectedItem {
+            selectedPassIdentitySection(selectedItem, state: labState)
 
-                    DisclosureGroup("Properties (\(item.record.properties.count))") {
-                        ForEach(item.record.properties.keys.sorted(), id: \.self) { key in
-                            if let property = item.record.properties[key] {
-                                let classification = GlassLabTuning.classifyPassProperty(
-                                    property,
-                                    key: key,
-                                    in: item.record
-                                )
-                                LabeledContent {
-                                    VStack(alignment: .trailing, spacing: 2) {
-                                        Text(property.value ?? property.state)
-                                            .font(.system(.body, design: .monospaced))
-                                            .textSelection(.enabled)
-                                        Text(classification.contract)
-                                            .font(.caption2)
-                                            .foregroundStyle(
-                                                classification.isMutationAccepted
-                                                    ? AnyShapeStyle(.green)
-                                                    : AnyShapeStyle(.secondary)
-                                            )
-                                        if !property.attributes.isEmpty {
-                                            Text(passPropertyMetadata(property.attributes))
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                                .textSelection(.enabled)
-                                        }
-                                    }
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(key)
-                                        Text(property.state.capitalized)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        Text(classification.presentation.rawValue)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                    }
+            switch selectedItem.family {
+            case "glassBackground":
+                glassFilterEditorSections(state: labState, snapshot: liveSnapshot)
+            case "CASDFKeyFillHighlightEffect":
+                rimHighlightEditorSections(state: labState, snapshot: liveSnapshot)
+            case "CASDFOutputEffect":
+                outputEffectEditorSections(state: labState, snapshot: liveSnapshot)
+            default:
+                Section("Pass Editor") {
+                    Text("Read-only until this exact pass family and property type have an accepted live-mutation and reset contract.")
+                        .foregroundStyle(.secondary)
                 }
             }
         }
 
         Section("Raw Layer Tree") {
-            if let snapshot {
+            if let passSnapshot {
                 ScrollView(.horizontal) {
-                    Text(passLayerReport(snapshot))
+                    Text(passLayerReport(passSnapshot))
                         .font(.system(size: 10, design: .monospaced))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -556,6 +549,86 @@ struct GlassLabView: View {
             } else {
                 Text("No Recipe layer tree is available yet.")
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func selectedPassIdentitySection(
+        _ item: PassInventoryItem,
+        state labState: GlassLabState
+    ) -> some View {
+        Section(passInventorySectionTitle(item)) {
+            LabeledContent("State") {
+                Text(passState(for: item, state: labState))
+            }
+            LabeledContent("Object Class") {
+                Text(item.record.objectClass)
+                    .font(.system(.body, design: .monospaced))
+            }
+            LabeledContent("Owner") {
+                Text(item.record.layerClass)
+                    .font(.system(.body, design: .monospaced))
+            }
+            LabeledContent("Location") {
+                Text(item.record.location)
+                    .font(.system(.body, design: .monospaced))
+            }
+            LabeledContent("Mutation Family") {
+                Text(GlassLabTuning.passMutationFamily(for: item.record).rawValue)
+                    .foregroundStyle(.secondary)
+            }
+            LabeledContent("Contract") {
+                Text(passMutationContractSummary(for: item))
+                    .foregroundStyle(.secondary)
+            }
+            LabeledContent("Structural Locator") {
+                Text(item.record.layerPath)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
+            DisclosureGroup("Properties (\(item.record.properties.count))") {
+                ForEach(item.record.properties.keys.sorted(), id: \.self) { key in
+                    if let property = item.record.properties[key] {
+                        let classification = GlassLabTuning.classifyPassProperty(
+                            property,
+                            key: key,
+                            in: item.record
+                        )
+                        LabeledContent {
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(property.value ?? property.state)
+                                    .font(.system(.body, design: .monospaced))
+                                    .textSelection(.enabled)
+                                Text(classification.contract)
+                                    .font(.caption2)
+                                    .foregroundStyle(
+                                        classification.isMutationAccepted
+                                            ? AnyShapeStyle(.green)
+                                            : AnyShapeStyle(.secondary)
+                                    )
+                                if !property.attributes.isEmpty {
+                                    Text(passPropertyMetadata(property.attributes))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(key)
+                                Text(property.state.capitalized)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(classification.presentation.rawValue)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -933,10 +1006,13 @@ struct GlassLabView: View {
 
     private func geometryControls(
         state labState: GlassLabState,
-        snapshot: LiveReadoutSnapshot?
+        snapshot: LiveReadoutSnapshot?,
+        keys: Set<String>? = nil
     ) -> some View {
         @Bindable var state = labState
-        let knobs = GlassLabTuning.geometryKnobs
+        let knobs = GlassLabTuning.geometryKnobs.filter {
+            keys?.contains($0.key) ?? true
+        }
         let isEditable = state.shaderOverridesEnabled && snapshot != nil
 
         return Group {
@@ -1401,19 +1477,14 @@ struct GlassLabView: View {
         return "\(item.channel) · \(item.family)\(instance)"
     }
 
-    private func acceptedPassEditor(
-        for item: PassInventoryItem
-    ) -> (page: RecipePage, label: String)? {
-        switch item.family {
-        case "glassBackground":
-            return (.glassFilter, "Open Accepted Glass Filter Editor")
-        case "CASDFKeyFillHighlightEffect":
-            return (.rimHighlight, "Open Accepted Rim Editor")
-        case "CASDFOutputEffect":
-            return (.glassFilter, "Open Accepted Render Bounds Editor")
-        default:
-            return nil
+    private func selectedPassItem(
+        in items: [PassInventoryItem]
+    ) -> PassInventoryItem? {
+        if let selectedPassSlotID,
+           let selected = items.first(where: { $0.slotID == selectedPassSlotID }) {
+            return selected
         }
+        return items.first(where: { $0.family == "glassBackground" }) ?? items.first
     }
 
     private func passMutationContractSummary(
@@ -1453,6 +1524,9 @@ struct GlassLabView: View {
             return "Replaced"
         }
         if item.family == "glassBackground", state.shaderOverridesEnabled {
+            return "Overridden"
+        }
+        if item.family == "CASDFOutputEffect", state.shaderOverridesEnabled {
             return "Overridden"
         }
         if item.record.objectClass == "CASDFKeyFillHighlightEffect",
@@ -1729,6 +1803,11 @@ struct GlassLabView: View {
         }
 
         let snapshot = capture.snapshot
+        let items = passInventoryItems(snapshot)
+        let reconciledSelection = selectedPassItem(in: items)?.slotID
+        if selectedPassSlotID != reconciledSelection {
+            selectedPassSlotID = reconciledSelection
+        }
         if snapshot != passInventorySnapshot {
             passInventorySnapshot = snapshot
         }
@@ -1748,7 +1827,7 @@ struct GlassLabView: View {
         case .recipe:
             if semanticSnapshot != nil { semanticSnapshot = nil }
             publishLiveReadoutSnapshot()
-            if selectedRecipePage == .passInventory {
+            if selectedRecipePage == .passes {
                 publishPassInventorySnapshot()
             } else if passInventorySnapshot != nil {
                 passInventorySnapshot = nil

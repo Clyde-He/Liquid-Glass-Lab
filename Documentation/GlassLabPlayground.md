@@ -202,39 +202,45 @@ The control window first selects `NSGlass` or `SwiftUI` in Navigation, then
 presents renderer-specific page controls so only the current task's controls
 are mounted:
 
-- Recipe: `General`, `Glass Filter`, `Rim Highlight`, and `Pass Inventory`;
+- Recipe: `General` and `Passes`;
 - Semantic Usage: `General` and `Layer Inspector`.
 
 Recipe General contains geometry, Recipe selectors, test-window context, and
-matrix export. The Filter/Rim pages retain their independent Overrides and Knob
-groups. Pass Inventory reuses the Recursive exporter traversal to show every
-live filter, background filter, compositing filter, object-backed effect, and
-mask-owned layer tree without assuming a first Shader or Rim instance.
+matrix export. Passes reuses the Recursive exporter traversal and mounts one
+selected live pass instance at a time without assuming a first Shader or Rim
+instance. `glassBackground`, key-fill highlight, and Output effects reuse their
+accepted editors inline; every other filter, compositing filter, or object-backed
+effect has an independently selected read-only page until its mutation contract
+is accepted.
 Semantic General contains the named Usage, its runtime tag and availability,
 shared geometry, and the same controlled window context. Its Layer Inspector
 flattens the live SwiftUI/Core Animation composition and shows layer paths,
 CAFilter inputs, and object-backed SDF effect values.
 
-Pass Inventory is sampled only while its page is mounted so normal Slider and
-Override refreshes do not repeatedly read the complete property surface. Passes
-are grouped by channel/family, ordered by structural locator, and numbered when
-a family has multiple instances. Each pass exposes owner class, object class,
-location, raw locator, and a disclosure of declared properties. Property state
-(`value`, `nil`, or `unreadable`) is shown separately from its stable value and
-Core Animation metadata.
+The recursive Pass snapshot is sampled only while Passes is mounted so normal
+Slider and Override refreshes do not repeatedly read the complete property
+surface. Passes are grouped by channel/family, ordered by structural locator,
+and numbered when a family has multiple instances. The Picker is keyed by
+structural slot, so two instances of the same family remain separate and the
+selection survives Recipe changes while that slot still exists. When it
+disappears, selection falls back to `glassBackground` and then the first observed
+pass. The selected page exposes owner class, object class, location, raw locator,
+and a disclosure of declared properties. Property state (`value`, `nil`, or
+`unreadable`) is shown separately from its stable value and Core Animation
+metadata.
 
 The live state label is `Present` or `Overridden`; an enabled Glass Filter/Rim
 Override whose target is absent is reported as `Dormant`. `Replaced` is latched
 when a known structural pass slot receives a different reference-backed live
 object. The tracker stores only non-owning process-local `ObjectIdentifier`
 tokens: it does not retain stale CAFilter/effect instances or add pointer data
-to deterministic JSON/signatures. Sampling pauses off the Pass Inventory page,
+to deterministic JSON/signatures. Sampling pauses off the Passes page,
 so Recipe controls remain cheap, while the tokens survive those edits and are
 compared when the page returns. Changing Renderer resets the tracker. The page
 retains the raw Layer tree and can copy a deterministic full pass/property
 report including the current state of each pass.
 
-Pass Inventory also exposes the P0.3 editor contract without assuming every
+Passes also exposes the P0.3 editor contract without assuming every
 declared value is a numeric Knob. Each pass is classified as CAFilter Inputs,
 SDF Effect Copy/Reassign, Compositing Mode, or unknown/read-only. Property
 metadata selects a distinct Numeric, Percentage, Angle, Boolean, Color, Point,
@@ -243,12 +249,13 @@ presentation. Dependencies, matrices/arrays, and discrete compositing modes
 remain explicitly read-only.
 
 An `Accepted` label means the same mutation path is already exercised by the
-existing editor: `glassBackground` opens Glass Filter, key-fill highlight opens
-Rim Highlight, and Output minimum/maximum open Render Bounds. All newly
-observed foreground, Glass Highlight, Gradient, Shadow, displacement, and
-compositing families stay read-only until their controlled mutation audit is
-accepted. The accepted-contract count therefore describes properties with a
-known write/reset lifecycle; it is not a count of generic sliders on the page.
+inline selected-pass editor: `glassBackground` mounts Glass Filter, key-fill
+highlight mounts Rim Highlight, and Output mounts its minimum/maximum Render
+Bounds. All newly observed foreground, Glass Highlight, Gradient, Shadow,
+displacement, and compositing families stay read-only until their controlled
+mutation audit is accepted. The accepted-contract count therefore describes
+properties with a known write/reset lifecycle; it is not a count of generic
+sliders on the page.
 
 Semantic values are deliberately read-only in this first pass. A CA input only
 becomes a Knob after its owning Usage/pass, accepted value type, mutation
