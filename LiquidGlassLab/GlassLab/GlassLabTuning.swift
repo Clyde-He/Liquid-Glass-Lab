@@ -1431,6 +1431,65 @@ enum GlassLabTuning {
         return makePassAuditSnapshot(layers: layers, passes: passes)
     }
 
+    static func passAuditReport(
+        _ snapshot: PassAuditSnapshot,
+        header: String
+    ) -> String {
+        var lines = [
+            header,
+            "topologySignature=\(snapshot.topologySignature)",
+            "valueSignature=\(snapshot.valueSignature)",
+            "layers=\(snapshot.layers.count) passes=\(snapshot.passes.count)",
+            "",
+            "layers:",
+        ]
+        for key in snapshot.layers.keys.sorted() {
+            guard let layer = snapshot.layers[key] else { continue }
+            lines.append(
+                "  \(key) · \(layer.layerClass)"
+                    + String(
+                        format: " · frame=(%.1f,%.1f,%.1f×%.1f)",
+                        layer.frame.x,
+                        layer.frame.y,
+                        layer.frame.width,
+                        layer.frame.height
+                    )
+                    + String(format: " · opacity=%.4g", layer.opacity)
+                    + (layer.hasMask ? " · MASK" : "")
+                    + (layer.isHidden ? " · HIDDEN" : "")
+                    + (layer.masksToBounds ? " · CLIPS" : "")
+            )
+        }
+
+        lines.append("")
+        lines.append("passes:")
+        let records = snapshot.passes.values.sorted {
+            [$0.layerPath, $0.location, $0.objectClass, $0.name ?? "", $0.id]
+                .joined(separator: "|")
+                < [$1.layerPath, $1.location, $1.objectClass, $1.name ?? "", $1.id]
+                .joined(separator: "|")
+        }
+        for pass in records {
+            lines.append(
+                "  \(pass.location) · \(pass.name ?? pass.objectClass)"
+                    + " · class=\(pass.objectClass)"
+                    + " · owner=\(pass.layerClass)"
+            )
+            lines.append("    locator=\(pass.layerPath)")
+            for key in pass.properties.keys.sorted() {
+                guard let property = pass.properties[key] else { continue }
+                let attributes = property.attributes.keys.sorted().map {
+                    "\($0)=\(property.attributes[$0]!)"
+                }.joined(separator: ", ")
+                lines.append(
+                    "    \(key) [\(property.state)] = \(property.value ?? "<nil>")"
+                        + (attributes.isEmpty ? "" : " {\(attributes)}")
+                )
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
     private static func capturePassObjects(
         _ objects: [NSObject],
         location: String,

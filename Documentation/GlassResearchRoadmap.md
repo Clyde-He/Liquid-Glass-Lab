@@ -35,7 +35,7 @@ work, not an optional refinement.
 
 | Priority | Track | Current state |
 |---|---|---|
-| P0 | AppKit observed-pass completeness and control | macOS 26/27 audits and semantic matcher accepted; value classification and generic editor pending |
+| P0 | AppKit observed-pass completeness and control | Audits and semantic matcher accepted; read-only Recursive Inspector implemented; replacement tracking, value classification, and generic editor pending |
 | P1 | Material Strength and system preset-curve research | Blocked on target-topology P0 closure |
 | P2 | Recipe-axis closure | Fixed macOS 26/27 products captured; targeted axes remain |
 | P3 | Pass injection/transplant | Deferred, high risk, not required for Override |
@@ -107,19 +107,33 @@ mutation before closing this item.
 
 ### P0.2 — Recursive Pass Inspector
 
-Replace fixed “first matching pass” assumptions with a dynamic inventory of the
-current live composition:
+The first read-only stage is implemented. It reuses the accepted Recursive
+exporter traversal, samples only while the Pass Inventory page is mounted, and
+shows every observed pass with channel/family grouping, duplicate ordinals,
+owner/object classes, raw structural locator, and declared property
+state/value/metadata. The same snapshot supplies a raw Layer tree and copyable
+deterministic report.
 
-- show every layer, mask-owned tree, filter, background filter, compositing
+`Present`, `Overridden`, and absent-target `Dormant` states are now explicit.
+`Replaced` remains open because stable export IDs intentionally do not encode
+process-local object identity. Add live identity/reconstruction tracking before
+the generic editor can claim that state or retain a reference across a Recipe
+rebuild.
+
+Current status against the acceptance checklist:
+
+- [x] show every layer, mask-owned tree, filter, background filter, compositing
   filter, and object-backed effect;
-- group instances by stable structural locator, owning layer role/class, pass
+- [x] group instances by stable structural locator, owning layer role/class, pass
   class/name, and ordinal where duplicates remain;
-- distinguish multiple instances of one class, such as Variant 14's two
+- [x] distinguish multiple instances of one class, such as Variant 14's two
   `CASDFGlassHighlightEffect` objects;
-- display declared capability independently from absent, nil, unreadable, and
+- [x] display declared capability independently from absent, nil, unreadable, and
   resolved values;
-- show `Present`, `Overridden`, `Dormant`, and `Replaced` state explicitly;
-- retain a raw tree/report view even when a property is not yet editable.
+- [x] show `Present`, `Overridden`, and `Dormant` state explicitly;
+- [ ] track live object replacement and show `Replaced` without retaining a
+  stale object reference;
+- [x] retain a raw tree/report view even when a property is not yet editable.
 
 Structural paths are diagnostic evidence, not permanent API. Cross-version
 matching should prefer pass family, owner role/class, nearby topology, and

@@ -20,6 +20,7 @@ struct GlassLabView: View {
         case general = "General"
         case glassFilter = "Glass Filter"
         case rimHighlight = "Rim Highlight"
+        case passInventory = "Pass Inventory"
 
         var id: Self { self }
     }
@@ -70,6 +71,7 @@ struct GlassLabView: View {
     @State private var isCapturingPassAudit = false
     @State private var isCapturingSemanticTrees = false
     @State private var liveSnapshot: LiveReadoutSnapshot?
+    @State private var passInventorySnapshot: GlassLabTuning.PassAuditSnapshot?
     @State private var semanticSnapshot: GlassLabSemanticSnapshot?
     @State private var shaderOverrideBaseline: LiveReadoutSnapshot?
     @State private var highlightOverrideBaseline: LiveReadoutSnapshot?
@@ -101,6 +103,9 @@ struct GlassLabView: View {
         .onChange(of: recipeStructureTrigger) {
             state.testWindow.sync(with: state)
             scheduleLiveReadoutRefresh(refreshSchema: true)
+        }
+        .onChange(of: selectedRecipePage) {
+            scheduleLiveReadoutRefresh()
         }
         .onReceive(liveContextNotifications) { notification in
             if notification.name == NSApplication.didBecomeActiveNotification {
@@ -297,6 +302,12 @@ struct GlassLabView: View {
                     highlightGroupControls(group, state: state, snapshot: snapshot)
                 }
             }
+
+                case .passInventory:
+                    passInventorySections(
+                        state: state,
+                        snapshot: passInventorySnapshot
+                    )
                 }
 
                 case .semanticUsage:
@@ -364,6 +375,143 @@ struct GlassLabView: View {
         }
 
         generalWindowSections(state: state)
+    }
+
+    @ViewBuilder
+    private func passInventorySections(
+        state labState: GlassLabState,
+        snapshot: GlassLabTuning.PassAuditSnapshot?
+    ) -> some View {
+        let items = snapshot.map(passInventoryItems) ?? []
+
+        Section("Recursive Pass Inspector") {
+            Text(readoutDescription)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Text("Read-only inventory of every direct filter, background filter, compositing filter, and object-backed effect in the current NSGlassEffectView tree. Declared property capability is kept separate from value, nil, and unreadable states.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            if let snapshot {
+                LabeledContent("Layers") {
+                    Text(String(snapshot.layers.count)).monospacedDigit()
+                }
+                LabeledContent("Passes") {
+                    Text(String(snapshot.passes.count)).monospacedDigit()
+                }
+                LabeledContent("Topology") {
+                    Text(String(snapshot.topologySignature.prefix(12)))
+                        .font(.system(.body, design: .monospaced))
+                        .help(snapshot.topologySignature)
+                }
+                LabeledContent("Values") {
+                    Text(String(snapshot.valueSignature.prefix(12)))
+                        .font(.system(.body, design: .monospaced))
+                        .help(snapshot.valueSignature)
+                }
+            }
+
+            LabeledContent("Glass Filter Override") {
+                Text(passOverrideState(
+                    isEnabled: labState.shaderOverridesEnabled,
+                    isPresent: items.contains { $0.family == "glassBackground" }
+                ))
+            }
+            LabeledContent("Rim Override") {
+                Text(passOverrideState(
+                    isEnabled: labState.highlightOverridesEnabled,
+                    isPresent: items.contains {
+                        $0.record.objectClass == "CASDFKeyFillHighlightEffect"
+                    }
+                ))
+            }
+
+            Button("Copy Pass Inventory Report") { copyPassInventoryReport() }
+                .disabled(snapshot == nil)
+
+            Text("Present, Overridden, and Dormant describe the current live/Override relationship. Runtime object replacement is not inferred from structural JSON identity; explicit Replaced tracking remains part of the writable generic-editor phase.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        if snapshot == nil {
+            Section("Observed Passes") {
+                Text("No Recipe layer tree is available yet.")
+                    .foregroundStyle(.secondary)
+            }
+        } else if items.isEmpty {
+            Section("Observed Passes") {
+                Text("The current layer tree contains no inspectable pass objects.")
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            ForEach(items) { item in
+                Section(passInventorySectionTitle(item)) {
+                    LabeledContent("State") {
+                        Text(passState(for: item, state: labState))
+                    }
+                    LabeledContent("Object Class") {
+                        Text(item.record.objectClass)
+                            .font(.system(.body, design: .monospaced))
+                    }
+                    LabeledContent("Owner") {
+                        Text(item.record.layerClass)
+                            .font(.system(.body, design: .monospaced))
+                    }
+                    LabeledContent("Location") {
+                        Text(item.record.location)
+                            .font(.system(.body, design: .monospaced))
+                    }
+                    LabeledContent("Structural Locator") {
+                        Text(item.record.layerPath)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+
+                    DisclosureGroup("Properties (\(item.record.properties.count))") {
+                        ForEach(item.record.properties.keys.sorted(), id: \.self) { key in
+                            if let property = item.record.properties[key] {
+                                LabeledContent {
+                                    VStack(alignment: .trailing, spacing: 2) {
+                                        Text(property.value ?? property.state)
+                                            .font(.system(.body, design: .monospaced))
+                                            .textSelection(.enabled)
+                                        if !property.attributes.isEmpty {
+                                            Text(passPropertyMetadata(property.attributes))
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                                .textSelection(.enabled)
+                                        }
+                                    }
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(key)
+                                        Text(property.state.capitalized)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Section("Raw Layer Tree") {
+            if let snapshot {
+                ScrollView(.horizontal) {
+                    Text(passLayerReport(snapshot))
+                        .font(.system(size: 10, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                Text("No Recipe layer tree is available yet.")
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     @ViewBuilder
@@ -1129,6 +1277,127 @@ struct GlassLabView: View {
         let geometry: [String: Double]
     }
 
+    private struct PassInventoryItem: Identifiable {
+        let record: GlassLabTuning.PassAuditPassRecord
+        let channel: String
+        let family: String
+        let ordinal: Int
+        let familyCount: Int
+
+        var id: String { record.id }
+    }
+
+    private func passInventoryItems(
+        _ snapshot: GlassLabTuning.PassAuditSnapshot
+    ) -> [PassInventoryItem] {
+        let records = snapshot.passes.values.sorted { lhs, rhs in
+            let left = [
+                String(passChannelRank(passChannel(lhs))),
+                passChannel(lhs),
+                passFamily(lhs),
+                lhs.layerPath,
+                lhs.location,
+                lhs.id,
+            ].joined(separator: "|")
+            let right = [
+                String(passChannelRank(passChannel(rhs))),
+                passChannel(rhs),
+                passFamily(rhs),
+                rhs.layerPath,
+                rhs.location,
+                rhs.id,
+            ].joined(separator: "|")
+            return left < right
+        }
+        let counts = Dictionary(grouping: records) {
+            "\(passChannel($0))|\(passFamily($0))"
+        }.mapValues(\.count)
+        var nextOrdinal: [String: Int] = [:]
+        return records.map { record in
+            let channel = passChannel(record)
+            let family = passFamily(record)
+            let group = "\(channel)|\(family)"
+            let ordinal = (nextOrdinal[group] ?? 0) + 1
+            nextOrdinal[group] = ordinal
+            return PassInventoryItem(
+                record: record,
+                channel: channel,
+                family: family,
+                ordinal: ordinal,
+                familyCount: counts[group] ?? 1
+            )
+        }
+    }
+
+    private func passChannel(_ pass: GlassLabTuning.PassAuditPassRecord) -> String {
+        String(pass.location.prefix { $0 != "[" })
+    }
+
+    private func passFamily(_ pass: GlassLabTuning.PassAuditPassRecord) -> String {
+        pass.name ?? pass.objectClass
+    }
+
+    private func passChannelRank(_ channel: String) -> Int {
+        switch channel {
+        case "filters": 0
+        case "backgroundFilters": 1
+        case "compositingFilter": 2
+        case "effect": 3
+        default: 4
+        }
+    }
+
+    private func passInventorySectionTitle(_ item: PassInventoryItem) -> String {
+        let instance = item.familyCount > 1
+            ? " · \(item.ordinal)/\(item.familyCount)"
+            : ""
+        return "\(item.channel) · \(item.family)\(instance)"
+    }
+
+    private func passState(
+        for item: PassInventoryItem,
+        state: GlassLabState
+    ) -> String {
+        if item.family == "glassBackground", state.shaderOverridesEnabled {
+            return "Overridden"
+        }
+        if item.record.objectClass == "CASDFKeyFillHighlightEffect",
+           state.highlightOverridesEnabled {
+            return "Overridden"
+        }
+        return "Present"
+    }
+
+    private func passOverrideState(isEnabled: Bool, isPresent: Bool) -> String {
+        guard isEnabled else { return "Off" }
+        return isPresent ? "Overridden" : "Dormant"
+    }
+
+    private func passPropertyMetadata(_ attributes: [String: String]) -> String {
+        attributes.keys.sorted().map { key in
+            "\(key)=\(attributes[key]!)"
+        }.joined(separator: " · ")
+    }
+
+    private func passLayerReport(_ snapshot: GlassLabTuning.PassAuditSnapshot) -> String {
+        snapshot.layers.keys.sorted().compactMap { key in
+            guard let layer = snapshot.layers[key] else { return nil }
+            return key
+                + " · \(layer.layerClass)"
+                + String(
+                    format: " · frame=(%.1f,%.1f,%.1f×%.1f)",
+                    layer.frame.x,
+                    layer.frame.y,
+                    layer.frame.width,
+                    layer.frame.height
+                )
+                + String(format: " · opacity=%.4g", layer.opacity)
+                + (layer.hasMask ? " · MASK" : "")
+                + (layer.isHidden ? " · HIDDEN" : "")
+                + (layer.masksToBounds ? " · CLIPS" : "")
+        }.joined(separator: "\n")
+    }
+
     private var selectedReadoutGlass: NSGlassEffectView? {
         state.testWindow.liveGlass
     }
@@ -1340,13 +1609,28 @@ struct GlassLabView: View {
         }
     }
 
+    private func publishPassInventorySnapshot() {
+        let snapshot = selectedReadoutGlass.flatMap {
+            GlassLabTuning.capturePassAuditSnapshot(from: $0)
+        }
+        if snapshot != passInventorySnapshot {
+            passInventorySnapshot = snapshot
+        }
+    }
+
     private func publishCurrentRendererSnapshot() {
         switch state.rendererMode {
         case .recipe:
             if semanticSnapshot != nil { semanticSnapshot = nil }
             publishLiveReadoutSnapshot()
+            if selectedRecipePage == .passInventory {
+                publishPassInventorySnapshot()
+            } else if passInventorySnapshot != nil {
+                passInventorySnapshot = nil
+            }
         case .semanticUsage:
             if liveSnapshot != nil { liveSnapshot = nil }
+            if passInventorySnapshot != nil { passInventorySnapshot = nil }
             let snapshot = GlassLabSemanticSnapshot.capture(
                 from: state.testWindow.liveSemanticLayerRoot
             )
@@ -1546,6 +1830,24 @@ struct GlassLabView: View {
             + " appActive=\(NSApp.isActive)"
             + " appearance=\(window?.effectiveAppearance.name.rawValue ?? "?")"
         let report = GlassLabTuning.diagnosticsReport(for: glass, header: header)
+        state.reportOutput = report
+        copyToPasteboard(report)
+    }
+
+    private func copyPassInventoryReport() {
+        guard let snapshot = passInventorySnapshot else {
+            state.reportOutput = "The Recipe surface has no recursive pass inventory yet."
+            return
+        }
+        let header = "== \(state.windowHostType.rawValue) recursive pass inventory =="
+            + " requestedMain=\(state.isTestWindowMain)"
+            + " actualKey=\(state.testWindow.isActuallyKey)"
+            + " actualMain=\(state.testWindow.isActuallyMain)"
+            + " appActive=\(NSApp.isActive)"
+            + " variant=\(state.variant)"
+            + " subvariant=\(state.subvariant.isEmpty ? "<nil>" : state.subvariant)"
+            + " subdued=\(state.isSubdued)"
+        let report = GlassLabTuning.passAuditReport(snapshot, header: header)
         state.reportOutput = report
         copyToPasteboard(report)
     }

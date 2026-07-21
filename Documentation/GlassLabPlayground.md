@@ -202,15 +202,33 @@ The control window first selects `NSGlass` or `SwiftUI` in Navigation, then
 presents renderer-specific page controls so only the current task's controls
 are mounted:
 
-- Recipe: `General`, `Glass Filter`, and `Rim Highlight`;
+- Recipe: `General`, `Glass Filter`, `Rim Highlight`, and `Pass Inventory`;
 - Semantic Usage: `General` and `Layer Inspector`.
 
 Recipe General contains geometry, Recipe selectors, test-window context, and
 matrix export. The Filter/Rim pages retain their independent Overrides and Knob
-groups. Semantic General contains the named Usage, its runtime tag and
-availability, shared geometry, and the same controlled window context. Its
-Layer Inspector flattens the live SwiftUI/Core Animation composition and shows
-layer paths, CAFilter inputs, and object-backed SDF effect values.
+groups. Pass Inventory reuses the Recursive exporter traversal to show every
+live filter, background filter, compositing filter, object-backed effect, and
+mask-owned layer tree without assuming a first Shader or Rim instance.
+Semantic General contains the named Usage, its runtime tag and availability,
+shared geometry, and the same controlled window context. Its Layer Inspector
+flattens the live SwiftUI/Core Animation composition and shows layer paths,
+CAFilter inputs, and object-backed SDF effect values.
+
+Pass Inventory is sampled only while its page is mounted so normal Slider and
+Override refreshes do not repeatedly read the complete property surface. Passes
+are grouped by channel/family, ordered by structural locator, and numbered when
+a family has multiple instances. Each pass exposes owner class, object class,
+location, raw locator, and a disclosure of declared properties. Property state
+(`value`, `nil`, or `unreadable`) is shown separately from its stable value and
+Core Animation metadata.
+
+The live state label is `Present` or `Overridden`; an enabled Glass Filter/Rim
+Override whose target is absent is reported as `Dormant`. Runtime object
+replacement cannot be inferred from the stable structural export ID, so
+`Replaced` remains explicitly deferred until the generic editor tracks live
+object identity and reconstruction events. The page retains the raw Layer tree
+and can copy a deterministic full pass/property report.
 
 Semantic values are deliberately read-only in this first pass. A CA input only
 becomes a Knob after its owning Usage/pass, accepted value type, mutation
