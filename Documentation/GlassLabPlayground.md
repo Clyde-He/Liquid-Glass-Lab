@@ -210,8 +210,20 @@ matrix export. Passes reuses the Recursive exporter traversal and mounts one
 selected live pass instance at a time without assuming a first Shader or Rim
 instance. `glassBackground`, key-fill highlight, and Output effects reuse their
 accepted editors inline; every other filter, compositing filter, or object-backed
-effect has an independently selected read-only page until its mutation contract
-is accepted.
+effect states its read-only contract inline until its mutation contract is
+accepted. The page is a single scroll with one selector: a two-row header
+(the Pass Instance Picker with its live state, and one global Override
+toggle/Reset — identity rides in the row's hover help), then a `Controls`
+header above every accepted Glass, Rim, or Output semantic group, each its
+own tinted card sitting directly on the page background — the section keeps
+its title but draws no enclosing box behind the cards. The global
+Override drives both internal channels at once: enabling captures the Glass
+Filter payload (including Output/geometry values) and the Rim pass when each
+exists; a pass that appears later joins by cycling the switch; disabling
+discards both baselines and rebuilds the system glass. A titled `Audit`
+section closes the page with two collapsed disclosures: `Properties` (identity
+plus the complete declared-property list) and `Diagnostics` (capture context,
+counts, signatures, report copying, and the raw recursive layer tree).
 Semantic General contains the named Usage, its runtime tag and availability,
 shared geometry, and the same controlled window context. Its Layer Inspector
 flattens the live SwiftUI/Core Animation composition and shows layer paths,
@@ -224,13 +236,14 @@ and numbered when a family has multiple instances. The Picker is keyed by
 structural slot, so two instances of the same family remain separate and the
 selection survives Recipe changes while that slot still exists. When it
 disappears, selection falls back to `glassBackground` and then the first observed
-pass. The selected page exposes owner class, object class, location, raw locator,
-and a disclosure of declared properties. Property state (`value`, `nil`, or
-`unreadable`) is shown separately from its stable value and Core Animation
-metadata.
+pass. The `Properties` disclosure exposes owner class, object class, location,
+raw locator, and every declared property as one row. Property state (`value`,
+`nil`, or `unreadable`) is shown separately from its stable value; Core
+Animation metadata rides in the row's hover help.
 
-The live state label is `Present` or `Overridden`; an enabled Glass Filter/Rim
-Override whose target is absent is reported as `Dormant`. `Replaced` is latched
+The live state label is `Present` or `Overridden`; a channel whose pass was
+absent when the global Override was enabled simply stays un-captured and its
+pass reads `Present`. `Replaced` is latched
 when a known structural pass slot receives a different reference-backed live
 object. The tracker stores only non-owning process-local `ObjectIdentifier`
 tokens: it does not retain stale CAFilter/effect instances or add pointer data
