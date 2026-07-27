@@ -119,6 +119,12 @@ enum GlassLabTuning {
                 applyHighlightValues(state.highlightOverrides, to: layer)
             }
         }
+        if state.vibrantMatrixOverridesEnabled {
+            applyVibrantColorMatrixOverrides(
+                state.vibrantMatrixOverrides,
+                to: glass
+            )
+        }
     }
 
     /// Stamps one dragged value onto the live tree. Continuous drag streams
@@ -1364,6 +1370,101 @@ enum GlassLabTuning {
         let objectIdentityBySlot: [String: ObjectIdentifier]
     }
 
+    /// One readback from the deliberately narrow glassForeground Aberration
+    /// probe. Model and presentation values stay separate so a successful KVC
+    /// write cannot be mistaken for a rendered mutation. Object identity is
+    /// retained only long enough to report whether Core Animation replaced the
+    /// pass during the settling window; it is never serialized or displayed.
+    struct ForegroundAberrationProbeObservation: Equatable {
+        let modelState: String
+        let modelValue: String?
+        let presentationState: String
+        let presentationValue: String?
+        let animationKeyPaths: [String]
+        let objectIdentity: ObjectIdentifier
+        let layerOpacity: Double
+        let layerIsHidden: Bool
+        let sourceSublayerName: String?
+    }
+
+    /// Readback for one exact `vibrantColorMatrix` structural slot. The matrix
+    /// stays opaque at the public boundary: the probe records only its first
+    /// Float coefficient and a digest of all 80 bytes, while the mutation path
+    /// preserves the runtime's original Objective-C type encoding and every
+    /// untouched byte.
+    struct VibrantColorMatrixProbeObservation: Equatable {
+        let modelBooleanValues: [String: String]
+        let presentationBooleanValues: [String: String]
+        let modelMatrixFirstCoefficient: Float
+        let presentationMatrixFirstCoefficient: Float?
+        let modelMatrixDigest: String
+        let presentationMatrixDigest: String?
+        let animationKeyPaths: [String]
+        let objectIdentity: ObjectIdentifier
+        let layerOpacity: Double
+        let layerIsHidden: Bool
+
+        var modelValueSignature: String {
+            let booleans = modelBooleanValues.keys.sorted().map {
+                "\($0)=\(modelBooleanValues[$0]!)"
+            }.joined(separator: ",")
+            return "\(booleans)|matrix=\(modelMatrixDigest)"
+        }
+
+        var presentationValueSignature: String? {
+            guard let presentationMatrixDigest else { return nil }
+            let booleans = presentationBooleanValues.keys.sorted().map {
+                "\($0)=\(presentationBooleanValues[$0]!)"
+            }.joined(separator: ",")
+            return "\(booleans)|matrix=\(presentationMatrixDigest)"
+        }
+    }
+
+    struct CAFilterPassLocator: Equatable {
+        let layerPath: String
+        let location: String
+        let objectClass: String
+        let name: String
+
+        var slotID: String {
+            "\(layerPath)|\(location)"
+        }
+    }
+
+    enum VibrantBooleanOverrideValue: String, CaseIterable, Identifiable {
+        case nilValue = "nil"
+        case off = "0"
+        case on = "1"
+
+        var id: Self { self }
+
+        var displayName: String {
+            switch self {
+            case .nilValue: "nil"
+            case .off: "Off"
+            case .on: "On"
+            }
+        }
+
+        var objectValue: NSNumber? {
+            switch self {
+            case .nilValue: nil
+            case .off: NSNumber(value: false)
+            case .on: NSNumber(value: true)
+            }
+        }
+    }
+
+    /// Captured, typed payload for one exact same-named matrix-filter slot.
+    /// The 4×5 matrix is stored as 20 Doubles for SwiftUI editing, but every
+    /// stamp re-boxes Float values with the runtime's original ObjC encoding.
+    struct VibrantColorMatrixOverridePayload: Equatable {
+        let locator: CAFilterPassLocator
+        var booleanValues: [String: VibrantBooleanOverrideValue]
+        let matrixObjCType: String
+        var matrixCoefficients: [Double]
+    }
+
     enum PassMutationFamily: String, Equatable {
         case caFilterInputs = "CAFilter Inputs"
         case sdfEffectCopy = "SDF Effect · Copy/Reassign"
@@ -1439,6 +1540,17 @@ enum GlassLabTuning {
                 isMutationAccepted: false
             )
         }
+        let passFamily = pass.name ?? pass.objectClass
+        if passFamily == "vibrantColorMatrix",
+           family == .caFilterInputs,
+           presentation == .boolean || presentation == .colorMatrix {
+            return PassPropertyEditorClassification(
+                mutationFamily: family,
+                presentation: presentation,
+                contract: "Accepted · Matrix Pass Override",
+                isMutationAccepted: true
+            )
+        }
         if [.colorMatrix, .numberArray, .colorArray, .timingFunctionArray]
             .contains(presentation) {
             return PassPropertyEditorClassification(
@@ -1449,7 +1561,6 @@ enum GlassLabTuning {
             )
         }
 
-        let passFamily = pass.name ?? pass.objectClass
         let acceptedRoute: String?
         switch passFamily {
         case "glassBackground":
@@ -1484,13 +1595,499 @@ enum GlassLabTuning {
         )
     }
 
+    /// Captures the exact Variant-14 foreground field under audit. This is not
+    /// a generic pass editor: keeping the family and key hard-coded prevents an
+    /// unmeasured CAFilter input from becoming writable by accident.
+    @MainActor
+    static func captureForegroundAberrationAmountProbe(
+        from glass: NSGlassEffectView,
+        matching pass: PassAuditPassRecord
+    ) -> ForegroundAberrationProbeObservation? {
+        let key = "inputAberrationAmount"
+        guard pass.name == "glassForeground",
+              let target = liveCAFilterPassTarget(for: pass, under: glass),
+              filterInputKeys(target.filter).contains(key) else { return nil }
+
+        let modelValue = target.filter.value(forKey: key)
+        let presentationFilter = target.layer.presentation().flatMap {
+            caFilterObject(channel: target.channel, index: target.index, on: $0)
+        }
+        let presentationValue = presentationFilter.flatMap { filter in
+            filterInputKeys(filter).contains(key) ? filter.value(forKey: key) : nil
+        }
+        let presentationState: String
+        if presentationFilter == nil {
+            presentationState = "unavailable"
+        } else {
+            presentationState = presentationValue == nil ? "nil" : "value"
+        }
+        let source = filterInputKeys(target.filter).contains("inputSourceSublayerName")
+            ? target.filter.value(forKey: "inputSourceSublayerName") as? String
+            : nil
+
+        return ForegroundAberrationProbeObservation(
+            modelState: modelValue == nil ? "nil" : "value",
+            modelValue: modelValue.map { stableDescription($0) },
+            presentationState: presentationState,
+            presentationValue: presentationValue.map { stableDescription($0) },
+            animationKeyPaths: attachedAnimationKeyPaths(on: target.layer),
+            objectIdentity: ObjectIdentifier(target.filter),
+            layerOpacity: Double(target.layer.opacity),
+            layerIsHidden: target.layer.isHidden,
+            sourceSublayerName: source
+        )
+    }
+
+    /// Writes only glassForeground.inputAberrationAmount through the owning
+    /// layer's named-filter key path. `nil`, explicit zero, and a clearly
+    /// nonzero value are the three controlled P0.4 cases.
+    @MainActor
+    @discardableResult
+    static func applyForegroundAberrationAmountProbe(
+        _ value: Double?,
+        to glass: NSGlassEffectView,
+        matching pass: PassAuditPassRecord
+    ) -> Bool {
+        let key = "inputAberrationAmount"
+        guard pass.name == "glassForeground",
+              let target = liveCAFilterPassTarget(for: pass, under: glass),
+              filterInputKeys(target.filter).contains(key),
+              let name = filterName(target.filter) else { return false }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        target.layer.setValue(
+            value,
+            forKeyPath: "\(target.channel).\(name).\(key)"
+        )
+        CATransaction.commit()
+        return true
+    }
+
+    private static let vibrantColorMatrixBooleanKeys = [
+        "inputBackdropAware",
+        "inputClamp",
+        "inputClampPreserveHue",
+    ]
+
+    private struct ColorMatrixPayload {
+        let objCType: String
+        var bytes: [UInt8]
+
+        var firstCoefficient: Float? {
+            guard bytes.count == 80 else { return nil }
+            return bytes.withUnsafeBytes { rawBuffer in
+                rawBuffer.loadUnaligned(as: Float.self)
+            }
+        }
+
+        var coefficients: [Double]? {
+            guard bytes.count == 80 else { return nil }
+            return bytes.withUnsafeBytes { rawBuffer in
+                (0..<20).map { index in
+                    let value = rawBuffer.loadUnaligned(
+                        fromByteOffset: index * MemoryLayout<Float>.size,
+                        as: Float.self
+                    )
+                    return Double(value)
+                }
+            }
+        }
+
+        var digest: String {
+            SHA256.hash(data: Data(bytes)).map {
+                String(format: "%02x", $0)
+            }.joined()
+        }
+
+        func nsValue() -> NSValue? {
+            guard bytes.count == 80 else { return nil }
+            let type = Array(objCType.utf8CString)
+            return type.withUnsafeBufferPointer { typeBuffer in
+                bytes.withUnsafeBytes { byteBuffer in
+                    guard let typeAddress = typeBuffer.baseAddress,
+                          let byteAddress = byteBuffer.baseAddress else { return nil }
+                    return NSValue(bytes: byteAddress, objCType: typeAddress)
+                }
+            }
+        }
+    }
+
+    /// Captures all four declared inputs on one exact matrix-filter slot and
+    /// independently samples the matching presentation filter. The caller
+    /// captures the peer slot at the same boundaries to prove that structural
+    /// addressing does not accidentally mutate both same-named filters.
+    @MainActor
+    static func captureVibrantColorMatrixProbe(
+        from glass: NSGlassEffectView,
+        matching pass: PassAuditPassRecord
+    ) -> VibrantColorMatrixProbeObservation? {
+        guard pass.name == "vibrantColorMatrix",
+              let target = liveCAFilterPassTarget(for: pass, under: glass),
+              vibrantColorMatrixBooleanKeys.allSatisfy(
+                  filterInputKeys(target.filter).contains
+              ),
+              filterInputKeys(target.filter).contains("inputColorMatrix"),
+              let modelMatrix = colorMatrixPayload(
+                  target.filter.value(forKey: "inputColorMatrix")
+              ),
+              let modelFirst = modelMatrix.firstCoefficient else { return nil }
+
+        let presentationFilter = target.layer.presentation().flatMap {
+            caFilterObject(channel: target.channel, index: target.index, on: $0)
+        }
+        let presentationMatrix = presentationFilter.flatMap {
+            colorMatrixPayload($0.value(forKey: "inputColorMatrix"))
+        }
+
+        return VibrantColorMatrixProbeObservation(
+            modelBooleanValues: vibrantColorMatrixBooleanValues(on: target.filter),
+            presentationBooleanValues: presentationFilter.map {
+                vibrantColorMatrixBooleanValues(on: $0)
+            } ?? [:],
+            modelMatrixFirstCoefficient: modelFirst,
+            presentationMatrixFirstCoefficient: presentationMatrix?.firstCoefficient,
+            modelMatrixDigest: modelMatrix.digest,
+            presentationMatrixDigest: presentationMatrix?.digest,
+            animationKeyPaths: attachedAnimationKeyPaths(on: target.layer),
+            objectIdentity: ObjectIdentifier(target.filter),
+            layerOpacity: Double(target.layer.opacity),
+            layerIsHidden: target.layer.isHidden
+        )
+    }
+
+    /// Writes a deliberately distinct value to every Boolean input on the
+    /// selected slot: authored values are inverted and nil inputs become true.
+    /// This validates all three declared Boolean key paths in one controlled
+    /// case while leaving the matrix bytes untouched.
+    @MainActor
+    @discardableResult
+    static func applyVibrantColorMatrixBooleanProbe(
+        to glass: NSGlassEffectView,
+        matching pass: PassAuditPassRecord
+    ) -> Bool {
+        guard pass.name == "vibrantColorMatrix",
+              let target = liveCAFilterPassTarget(for: pass, under: glass),
+              let name = filterName(target.filter),
+              vibrantColorMatrixBooleanKeys.allSatisfy(
+                  filterInputKeys(target.filter).contains
+              ) else { return false }
+
+        let values = vibrantColorMatrixBooleanKeys.map { key -> (String, NSNumber) in
+            let current = target.filter.value(forKey: key) as? NSNumber
+            let next = current == nil || !current!.boolValue
+            return (key, NSNumber(value: next))
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (key, value) in values {
+            target.layer.setValue(
+                value,
+                forKeyPath: "\(target.channel).\(name).\(key)"
+            )
+        }
+        CATransaction.commit()
+        return true
+    }
+
+    /// Nudges only the first Float of the selected slot's 4×5 color matrix.
+    /// Re-boxing uses the live NSValue's original Objective-C type encoding,
+    /// so this is an atomic 80-byte value write rather than an invented public
+    /// matrix representation.
+    @MainActor
+    @discardableResult
+    static func applyVibrantColorMatrixNudgeProbe(
+        delta: Float = 0.25,
+        to glass: NSGlassEffectView,
+        matching pass: PassAuditPassRecord
+    ) -> Bool {
+        guard pass.name == "vibrantColorMatrix",
+              let target = liveCAFilterPassTarget(for: pass, under: glass),
+              let name = filterName(target.filter),
+              var matrix = colorMatrixPayload(
+                  target.filter.value(forKey: "inputColorMatrix")
+              ),
+              let first = matrix.firstCoefficient,
+              first.isFinite,
+              delta.isFinite else { return false }
+
+        var next = first + delta
+        withUnsafeBytes(of: &next) { source in
+            matrix.bytes.replaceSubrange(0..<MemoryLayout<Float>.size, with: source)
+        }
+        guard let value = matrix.nsValue() else { return false }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        target.layer.setValue(
+            value,
+            forKeyPath: "\(target.channel).\(name).inputColorMatrix"
+        )
+        CATransaction.commit()
+        return true
+    }
+
+    private static func vibrantColorMatrixBooleanValues(
+        on filter: NSObject
+    ) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: vibrantColorMatrixBooleanKeys.map { key in
+            let value = filter.value(forKey: key) as? NSNumber
+            return (key, value.map { $0.boolValue ? "1" : "0" } ?? "nil")
+        })
+    }
+
+    private static func colorMatrixPayload(_ value: Any?) -> ColorMatrixPayload? {
+        guard let value = value as? NSValue else { return nil }
+        var size = 0
+        NSGetSizeAndAlignment(value.objCType, &size, nil)
+        guard size == 80 else { return nil }
+        var bytes = [UInt8](repeating: 0, count: size)
+        bytes.withUnsafeMutableBytes { buffer in
+            if let address = buffer.baseAddress {
+                value.getValue(address, size: size)
+            }
+        }
+        return ColorMatrixPayload(
+            objCType: String(cString: value.objCType),
+            bytes: bytes
+        )
+    }
+
+    /// Captures both live matrix slots as a typed Override baseline. This is
+    /// intentionally limited to the validated `vibrantColorMatrix` family.
+    @MainActor
+    static func captureVibrantColorMatrixOverrides(
+        from glass: NSGlassEffectView
+    ) -> [String: VibrantColorMatrixOverridePayload] {
+        guard let capture = captureLivePassAudit(from: glass) else { return [:] }
+        var result: [String: VibrantColorMatrixOverridePayload] = [:]
+        for pass in capture.snapshot.passes.values
+        where pass.name == "vibrantColorMatrix" {
+            guard let payload = captureVibrantColorMatrixOverride(
+                from: glass,
+                matching: pass
+            ) else { continue }
+            result[payload.locator.slotID] = payload
+        }
+        return result
+    }
+
+    /// Reads one exact live matrix slot without creating Override state. The
+    /// Pass editor uses this while locked so the disabled controls show the
+    /// system Recipe rather than a zero-filled editing fallback.
+    @MainActor
+    static func captureVibrantColorMatrixOverride(
+        from glass: NSGlassEffectView,
+        matching pass: PassAuditPassRecord
+    ) -> VibrantColorMatrixOverridePayload? {
+        guard pass.name == "vibrantColorMatrix",
+              let target = liveCAFilterPassTarget(for: pass, under: glass),
+              let matrix = colorMatrixPayload(
+                  target.filter.value(forKey: "inputColorMatrix")
+              ),
+              let coefficients = matrix.coefficients,
+              coefficients.count == 20 else { return nil }
+
+        let booleanValues = Dictionary(
+            uniqueKeysWithValues: vibrantColorMatrixBooleanKeys.map { key in
+                let number = target.filter.value(forKey: key) as? NSNumber
+                let value: VibrantBooleanOverrideValue
+                if let number {
+                    value = number.boolValue ? .on : .off
+                } else {
+                    value = .nilValue
+                }
+                return (key, value)
+            }
+        )
+        let locator = CAFilterPassLocator(
+            layerPath: pass.layerPath,
+            location: pass.location,
+            objectClass: pass.objectClass,
+            name: pass.name!
+        )
+        return VibrantColorMatrixOverridePayload(
+            locator: locator,
+            booleanValues: booleanValues,
+            matrixObjCType: matrix.objCType,
+            matrixCoefficients: coefficients
+        )
+    }
+
+    /// Stamps the full atomic payload for every captured matrix slot. Each KVC
+    /// write may replace its CAFilter, so the owning-layer named-filter path is
+    /// deliberately resolved for every restamp rather than retaining objects.
+    @MainActor
+    static func applyVibrantColorMatrixOverrides(
+        _ overrides: [String: VibrantColorMatrixOverridePayload],
+        to glass: NSGlassEffectView
+    ) {
+        for slotID in overrides.keys.sorted() {
+            guard let payload = overrides[slotID],
+                  payload.matrixCoefficients.count == 20,
+                  let target = liveCAFilterPassTarget(
+                      for: payload.locator,
+                      under: glass
+                  ),
+                  let name = filterName(target.filter) else { continue }
+
+            for key in vibrantColorMatrixBooleanKeys {
+                guard let value = payload.booleanValues[key] else { continue }
+                target.layer.setValue(
+                    value.objectValue,
+                    forKeyPath: "\(target.channel).\(name).\(key)"
+                )
+            }
+
+            var bytes = [UInt8]()
+            bytes.reserveCapacity(80)
+            for coefficient in payload.matrixCoefficients {
+                var value = Float(coefficient)
+                withUnsafeBytes(of: &value) { bytes.append(contentsOf: $0) }
+            }
+            let matrix = ColorMatrixPayload(
+                objCType: payload.matrixObjCType,
+                bytes: bytes
+            )
+            guard let value = matrix.nsValue() else { continue }
+            target.layer.setValue(
+                value,
+                forKeyPath: "\(target.channel).\(name).inputColorMatrix"
+            )
+        }
+    }
+
+    private struct LiveCAFilterPassTarget {
+        let layer: CALayer
+        let filter: NSObject
+        let channel: String
+        let index: Int
+    }
+
+    /// Resolves an exported structural slot back to the current live layer.
+    /// Paths remain diagnostic and process-local here; no path is persisted as
+    /// a cross-version semantic identity.
+    private static func liveCAFilterPassTarget(
+        for pass: PassAuditPassRecord,
+        under glass: NSGlassEffectView
+    ) -> LiveCAFilterPassTarget? {
+        guard let name = pass.name else { return nil }
+        return liveCAFilterPassTarget(
+            for: CAFilterPassLocator(
+                layerPath: pass.layerPath,
+                location: pass.location,
+                objectClass: pass.objectClass,
+                name: name
+            ),
+            under: glass
+        )
+    }
+
+    private static func liveCAFilterPassTarget(
+        for locator: CAFilterPassLocator,
+        under glass: NSGlassEffectView
+    ) -> LiveCAFilterPassTarget? {
+        let channel = String(locator.location.prefix { $0 != "[" })
+        guard channel == "filters" || channel == "backgroundFilters",
+              let bracket = locator.location.firstIndex(of: "["),
+              let close = locator.location[bracket...].firstIndex(of: "]"),
+              let index = Int(
+                  locator.location[locator.location.index(after: bracket)..<close]
+              ),
+              let root = glass.layer else { return nil }
+
+        var visited: Set<ObjectIdentifier> = []
+        var matchedLayer: CALayer?
+        func visit(_ layer: CALayer, path: String) {
+            guard matchedLayer == nil,
+                  visited.insert(ObjectIdentifier(layer)).inserted else { return }
+            if path == locator.layerPath {
+                matchedLayer = layer
+                return
+            }
+            for (childIndex, child) in (layer.sublayers ?? []).enumerated() {
+                let childClass = String(describing: type(of: child))
+                visit(
+                    child,
+                    path: "\(path).sublayers[\(childIndex)]:\(childClass)"
+                )
+            }
+            if let mask = layer.mask {
+                let maskClass = String(describing: type(of: mask))
+                visit(mask, path: "\(path).mask:\(maskClass)")
+            }
+        }
+
+        let rootClass = String(describing: type(of: root))
+        visit(root, path: "root:\(rootClass)")
+        guard let layer = matchedLayer,
+              let filter = caFilterObject(channel: channel, index: index, on: layer),
+              String(describing: type(of: filter)) == locator.objectClass,
+              filterName(filter) == locator.name else { return nil }
+        return LiveCAFilterPassTarget(
+            layer: layer,
+            filter: filter,
+            channel: channel,
+            index: index
+        )
+    }
+
+    private static func caFilterObject(
+        channel: String,
+        index: Int,
+        on layer: CALayer
+    ) -> NSObject? {
+        let objects: [NSObject]
+        switch channel {
+        case "filters":
+            objects = (layer.filters ?? []).compactMap { $0 as? NSObject }
+        case "backgroundFilters":
+            objects = (layer.backgroundFilters ?? []).compactMap { $0 as? NSObject }
+        default:
+            return nil
+        }
+        guard objects.indices.contains(index) else { return nil }
+        return objects[index]
+    }
+
+    private static func attachedAnimationKeyPaths(on layer: CALayer) -> [String] {
+        var descriptions: [String] = []
+        for key in layer.animationKeys() ?? [] {
+            guard let animation = layer.animation(forKey: key) else { continue }
+            let paths = propertyKeyPaths(in: animation)
+            if paths.isEmpty {
+                descriptions.append(key)
+            } else {
+                descriptions.append(contentsOf: paths.map { "\(key):\($0)" })
+            }
+        }
+        return descriptions.sorted()
+    }
+
+    private static func propertyKeyPaths(in animation: CAAnimation) -> [String] {
+        if let property = animation as? CAPropertyAnimation,
+           let keyPath = property.keyPath {
+            return [keyPath]
+        }
+        if let group = animation as? CAAnimationGroup {
+            var paths: [String] = []
+            for child in group.animations ?? [] {
+                paths.append(contentsOf: propertyKeyPaths(in: child))
+            }
+            return paths
+        }
+        return []
+    }
+
     private static func passPropertyPresentation(
         key: String,
         attributes: [String: String]
     ) -> PassPropertyPresentation {
         let type = attributes["type"] ?? ""
         let subtype = attributes["subtype"] ?? ""
-        if type == "bool" || subtype == "bool" {
+        if type == "bool"
+            || subtype == "bool"
+            || vibrantColorMatrixBooleanKeys.contains(key) {
             return .boolean
         }
         switch type {

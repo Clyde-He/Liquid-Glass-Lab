@@ -480,6 +480,55 @@ Finally, the captured layer geometry contains three values:
 `CASDFOutputEffect.maximum`. `minimum = -10000` is a Recipe sentinel, while its
 published authoring range is `-200...0`.
 
+Each common Regular/Clear tree also contains two independently owned
+`vibrantColorMatrix` filters. Each filter publishes three optional Boolean
+inputs (`inputBackdropAware`, `inputClamp`, and
+`inputClampPreserveHue`) plus one 80-byte, 4 × 5 Float color matrix. Together
+the common five-pass topology publishes 110 properties. The accepted editor
+now controls 109 of them; the only read-only property is the
+`glassBackground.inputSourceSublayerName` dependency string.
+
+### Two vibrant color-matrix roles
+
+The two same-named filters are not interchangeable copies and should not be
+treated as two generic top-level material knobs. They grade pixels already
+produced by different intermediate branches:
+
+| Slot | Observed owner and gate | Authored mode | Current role assessment |
+|---|---|---|---|
+| 1 | Full-size `CALayer` in the first SDF subtree, beside the clipped `CAPortalLayer` branch | `inputBackdropAware = 1`; Clamp values nil | Content/Vibrancy color grade is the leading hypothesis. Its placement and backdrop-aware mode support that interpretation, but rendered contribution has not yet been visually isolated. |
+| 2 | The same `CASDFLayer @2` that owns `CASDFKeyFillHighlightEffect`; owner opacity is 0 for Main Off and 1 for Main On in the accepted audit | `inputClamp = 1`; BackdropAware and PreserveHue nil | High-confidence Rim post-grade: the Rim effect generates the highlight field, then this filter remaps its resulting color before composition. It is inert when the owning Rim layer is gated off. |
+
+The accepted runtime exposed these representative 4 × 5 Float payloads. Rows
+are output R/G/B/A; columns are input R/G/B/A plus Bias:
+
+```text
+Slot 1
+  0.798030  -0.679514  -0.068516   0   0.95
+ -0.201955   0.320556  -0.068601   0   0.95
+ -0.202022  -0.679388   0.931410   0   0.95
+  0           0           0          0   0
+
+Slot 2
+  2.649200  -1.180300  -0.118900   0   0.15
+ -0.350700   1.819900  -0.119200   0   0.15
+ -0.350900  -1.179900   2.880900   0   0.15
+  0           0           0          1   0
+```
+
+Diagonal gains, negative cross-channel terms, and Bias values establish that
+these are real non-identity color transforms. They do not by themselves prove
+a user-facing meaning for each coefficient; the filter operates on an
+intermediate branch rather than directly on the final composited surface.
+Mutation acceptance therefore means “safe to write, read back, relocate, and
+reset,” not “twenty product knobs have been discovered.”
+
+The raw grids remain research controls. The P1 candidate is a semantic scalar
+per role that interpolates an identity matrix to the captured system matrix:
+`Content Vibrancy Grade` for Slot 1 if visual isolation confirms the hypothesis,
+and `Rim Color Grade` for Slot 2. Slot 2 should normally be coordinated with
+the Rim group rather than presented as an independent material effect.
+
 ## Private mutation contracts
 
 Every observed private mutation path has a non-obvious contract; violating it
@@ -488,6 +537,25 @@ silently no-ops or crashes.
 - `glassBackground` inputs: filter objects attached to a layer are immutable.
   Writes must go through the layer as
   `layer.setValue(_, forKeyPath: "filters.glassBackground.<inputKey>")`.
+- The first Variant-14 `glassForeground` probe confirms the same owning-layer
+  contract for `inputAberrationAmount`. From a fresh value of zero, requests
+  for nil, explicit zero, and one all matched both immediate and 350 ms model/
+  presentation readback. Every write replaced the CAFilter object, including
+  the zero-to-zero write; owner opacity stayed one, the layer stayed visible,
+  source `@0` stayed attached, and no CAAnimation key path was present. Each
+  fresh-tree run returned the before value to zero. This accepts the write,
+  readback, object-lifetime, and reconstruction evidence only; rendered visual
+  contribution and a promoted safe range remain unaccepted.
+- Both `vibrantColorMatrix` instances follow the same named-filter owning-layer
+  write contract, but they must be addressed by their complete structural
+  slots rather than by family name alone. A controlled
+  `Variant 1/2 × Main Off/On × Slot 1/2` suite passed all eight cases: all three
+  Boolean values and one matrix coefficient matched immediate and settled
+  model/presentation readback, the peer slot stayed unchanged, a fresh Recipe
+  restored the baseline, and no animation key path appeared. Every Boolean or
+  matrix write replaced the installed CAFilter object. The editor therefore
+  stores optional Booleans explicitly and atomically re-boxes the full 80-byte
+  matrix, then rediscovers and restamps both slots after Recipe replacement.
 - SDF effects (`CASDFKeyFillHighlightEffect`, `CASDFOutputEffect`, ...) behave
   as value objects: mutate a copy and reassign it to the layer's `effect`.
   In-place mutation of the installed effect is ignored.
@@ -517,18 +585,20 @@ silently no-ops or crashes.
 
 ## Complete transplant checklist
 
-Cloning the active recipe onto a neither-key-nor-main window requires four
+Cloning the active recipe onto a neither-key-nor-main window requires five
 groups; each was individually observed to be necessary:
 
 1. All populated numeric `glassBackground` inputs (66 on this build), the
    three fill colors, and `inputShadowOffset`. The source-layer string is
    diagnostic/read-only.
-2. Layer geometry: `CABackdropLayer.marginWidth` and both
+2. Both structurally distinct `vibrantColorMatrix` filters: three optional
+   Boolean inputs and the complete 4 × 5 Float matrix for each slot.
+3. Layer geometry: `CABackdropLayer.marginWidth` and both
    `CASDFOutputEffect.minimum` / `maximum`. Without them the transplanted outer passes
    hard-clip at the outline — the "clipped ring" artifact.
-3. The rim pass: layer opacity gate, all 21 numeric/Boolean effect values, and
+4. The rim pass: layer opacity gate, all 21 numeric/Boolean effect values, and
    full key/fill colors (with alpha projections available separately).
-4. Host-window room: a window's backing surface hard-clips everything at its
+5. Host-window room: a window's backing surface hard-clips everything at its
    frame (only the native WindowServer window shadow may draw outside it), so
    the glass must sit inset by at least `marginWidth` inside a transparent
    window.

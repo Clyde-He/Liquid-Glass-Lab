@@ -208,19 +208,21 @@ are mounted:
 Recipe General contains geometry, Recipe selectors, test-window context, and
 matrix export. Passes reuses the Recursive exporter traversal and mounts one
 selected live pass instance at a time without assuming a first Shader or Rim
-instance. `glassBackground`, key-fill highlight, and Output effects reuse their
-accepted editors inline; every other filter, compositing filter, or object-backed
-effect states its read-only contract inline until its mutation contract is
-accepted. The page is a single scroll with one selector: a two-row header
+instance. `glassBackground`, both `vibrantColorMatrix` slots, key-fill
+highlight, and Output effects reuse their accepted editors inline; every other
+filter, compositing filter, or object-backed effect states its read-only
+contract inline until its mutation contract is accepted. The page is a single
+scroll with one selector: a two-row header
 (the Pass Instance Picker with its live state, and one global Override
 toggle/Reset — identity rides in the row's hover help), then a `Controls`
-header above every accepted Glass, Rim, or Output semantic group, each its
+header above every accepted Glass, Matrix, Rim, or Output semantic group, each its
 own tinted card sitting directly on the page background — the section keeps
 its title but draws no enclosing box behind the cards. The global
-Override drives both internal channels at once: enabling captures the Glass
-Filter payload (including Output/geometry values) and the Rim pass when each
-exists; a pass that appears later joins by cycling the switch; disabling
-discards both baselines and rebuilds the system glass. A titled `Audit`
+Override drives all accepted internal channels at once: enabling captures the
+Glass Filter payload (including Output/geometry values), both structurally
+distinct `vibrantColorMatrix` payloads, and the Rim pass when each exists; a
+pass that appears later joins by cycling the switch; disabling discards the
+baselines and rebuilds the system glass. A titled `Audit`
 section closes the page with two collapsed disclosures: `Properties` (identity
 plus the complete declared-property list) and `Diagnostics` (capture context,
 counts, signatures, report copying, and the raw recursive layer tree).
@@ -259,16 +261,50 @@ SDF Effect Copy/Reassign, Compositing Mode, or unknown/read-only. Property
 metadata selects a distinct Numeric, Percentage, Angle, Boolean, Color, Point,
 Size, Color Matrix, String, source/image dependency, or typed-array
 presentation. Dependencies, matrices/arrays, and discrete compositing modes
-remain explicitly read-only.
+remain explicitly read-only unless that concrete family has an accepted typed
+contract.
 
 An `Accepted` label means the same mutation path is already exercised by the
 inline selected-pass editor: `glassBackground` mounts Glass Filter, key-fill
 highlight mounts Rim Highlight, and Output mounts its minimum/maximum Render
-Bounds. All newly observed foreground, Glass Highlight, Gradient, Shadow,
-displacement, and compositing families stay read-only until their controlled
-mutation audit is accepted. The accepted-contract count therefore describes
-properties with a known write/reset lifecycle; it is not a count of generic
-sliders on the page.
+Bounds. Each `vibrantColorMatrix` slot mounts three optional Boolean selectors
+and a complete 4 × 5 Float matrix editor. All newly observed foreground, Glass
+Highlight, Gradient, Shadow, displacement, and compositing families stay
+read-only until their controlled mutation audit is accepted. The
+accepted-contract count therefore describes properties with a known
+write/reset lifecycle; it is not a count of generic sliders on the page.
+
+The Matrix editor is backed by a fixed Regular/Clear validation suite. It runs
+both structural slots through `Variant 1/2 × Main Off/On`, writes all three
+Boolean inputs and one matrix coefficient, checks immediate and settled
+model/presentation values, proves peer-slot isolation, and rebuilds the Recipe
+to verify reset. All eight cases pass on the accepted runtime. Every write
+replaces its CAFilter object, so Override retains values and locators—not
+private objects—and replays them after Main, Variant, host, or layout
+reconstruction. The common five-pass topology now reports 109 accepted
+properties out of 110; only the source-layer dependency string remains
+read-only.
+
+The two slots remain deliberately structural in the research UI. Slot 1 is the
+Content/Vibrancy-grade candidate because it sits beside the Portal branch and
+is backdrop-aware; Slot 2 is the Rim color grade because it shares the
+key-fill-highlight `CASDFLayer` and follows that layer's Main opacity gate.
+These labels describe evidence and current confidence, not public API names.
+With Override Off, a targeted live decoder fills all three Boolean selectors
+and all 20 matrix fields as disabled system values. Enabling Override captures
+those same values in place and makes them editable; a failed decode displays
+`unavailable` rather than a zero matrix.
+
+Selecting Variant 14's `glassForeground` exposes a deliberately narrow
+Aberration Mutation Probe rather than an accepted editor. `Prepare Baseline`
+establishes the accepted Panel-neither 480×200@16, Margin-40 context. Each
+`nil`, explicit-zero, or nonzero run rebuilds a fresh Recipe tree, writes only
+`inputAberrationAmount` through the owning layer's named-filter key path, then
+records immediate and settled model/presentation values, CAAnimation key
+paths, pass replacement, owner opacity/visibility, and the source-layer name.
+`Rebuild / Reset` discards the private filter tree. The probe stays outside the
+global Override payload and does not change the property's read-only contract
+label until rendered output and a safe promoted range are accepted.
 
 Semantic values are deliberately read-only in this first pass. A CA input only
 becomes a Knob after its owning Usage/pass, accepted value type, mutation
@@ -280,6 +316,8 @@ Toggles control editability, not visibility:
 
 - `Override Glass Filter` captures the current numeric, color, point, nil, and
   layer-geometry state, then unlocks those controls;
+- `Override Matrix Passes` captures both structural slots, including explicit
+  nil/Off/On Boolean state and all 20 Float coefficients per slot;
 - `Override Rim Highlight` captures and unlocks the separate SDF rim pass;
 - locked controls continue to show the current system Recipe.
 
@@ -319,8 +357,8 @@ semantic angle bounds, or the Playground authoring fallback. A Slider whose
 input is currently `nil` renders dimmed at its fallback position instead of
 implying a resolved value.
 
-The trailing value field is the row's authoritative number. While that row's
-Override family is enabled it accepts exact entry: committed text sets the
+The trailing value field is the row's authoritative number. While the global
+Override is enabled it accepts exact entry: committed text sets the
 override, and clearing the field removes that key's override so the row
 follows the live value again. Typed rows (colors, points) surface their
 current value in the caption instead, tinted when overridden.
@@ -330,6 +368,8 @@ Typed inputs keep typed UI and storage:
 - Boolean metadata → Toggle;
 - `CGColor` → ColorPicker;
 - point values → independent numeric fields;
+- accepted color matrices → complete 4 × 5 Float grids plus explicit optional
+  Boolean selectors;
 - source-layer strings → read-only diagnostics;
 - numeric values → slider plus exact value readout.
 
@@ -352,17 +392,13 @@ an older Override. Reset restores edits to the baseline captured when that
 Override was most recently enabled.
 
 Stopping writes is not enough to restore a mutated private filter tree: same-
-Recipe setter bounces can preserve installed values. Therefore disabling either
-Override family replaces only the `NSGlassEffectView`, keeps the host window and
-its real participation, reapplies the selected Recipe, and then reapplies any
-other Override family that remains enabled. Reset keeps Override enabled and
-restamps the captured baseline instead.
-
-`Reset Filter Overrides` restores numeric Shader, typed Shader, nil, and
-layer-geometry values to the captured baseline. `Reset Rim Overrides` does the
-same for Rim values, colors, and nil states. The underlying private mutation
-contracts are documented in the Runtime document's “Private mutation
-contracts” section.
+Recipe setter bounces can preserve installed values. Therefore disabling the
+global Override replaces only the `NSGlassEffectView`, keeps the host window
+and its real participation, and reapplies the selected system Recipe. Reset
+keeps Override enabled and restamps the complete captured baseline instead:
+numeric and typed Shader values, layer geometry, both Matrix slots, and Rim
+values/colors/nil states. The underlying private mutation contracts are
+documented in the Runtime document's “Private mutation contracts” section.
 
 ## Diagnostics
 
@@ -436,7 +472,7 @@ Formula Audit rather than multiplying every canonical Recipe axis. The JSON
 uses a versioned document envelope. Its environment records Host and Window
 Margin as provenance without sweeping controls already ruled out as direct
 Recipe selectors. Capture fixes Scrim and Reduced Tint Opacity Off, Adaptive
-Appearance at 2, and Tint at nil. Both Overrides must be disabled so
+Appearance at 2, and Tint at nil. The global Override must be disabled so
 transplanted values cannot contaminate the system baseline.
 
 The exporter asks for the destination before capture, prevents idle display
@@ -455,7 +491,7 @@ user's original values are restored when capture ends.
 `Export Recursive Pass Audit (JSON)` is the structural complement to the
 compact Recipe Matrix. It requires the Panel host and fixes Width 480, Height
 200, Corner Radius 16, Window Margin 40, Scrim/Reduced Tint Opacity Off,
-Adaptive Appearance 2, Tint nil, and both Overrides disabled. It captures:
+Adaptive Appearance 2, Tint nil, and the global Override disabled. It captures:
 
 ```text
 2 Main states × 2 Subdued states × 21 Variants × 4 Subvariant states

@@ -122,7 +122,7 @@ final class GlassLabGlassHost: NSView {
               let state,
               !state.isCapturingRecipeMatrix,
               !isRestampingAfterLayout,
-              state.shaderOverridesEnabled || state.highlightOverridesEnabled else { return }
+              state.hasActiveOverrides else { return }
         isRestampingAfterLayout = true
         defer { isRestampingAfterLayout = false }
         GlassLabTuning.applyOverrides(from: state, to: candidate)

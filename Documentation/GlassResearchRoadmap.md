@@ -35,8 +35,8 @@ work, not an optional refinement.
 
 | Priority | Track | Current state |
 |---|---|---|
-| P0 | AppKit observed-pass completeness and control | Audits, per-instance Pass navigator, replacement tracking, and typed mutation classification implemented; new-family mutation contracts and generic writes pending |
-| P1 | Material Strength and system preset-curve research | Blocked on target-topology P0 closure |
+| P0 | AppKit observed-pass completeness and control | Regular/Clear target topology closed: all five passes have accepted controls; V14/V19 outlier-family audits remain separate |
+| P1 | Material Strength and system preset-curve research | Ready to start against the closed Regular/Clear target topology |
 | P2 | Recipe-axis closure | Fixed macOS 26/27 products captured; targeted axes remain |
 | P3 | Pass injection/transplant | Deferred, high risk, not required for Override |
 | P4 | Broader SwiftUI private authoring | Role inventory and fixed-context trees complete |
@@ -179,10 +179,14 @@ than being coerced into `Double`.
 Only previously validated mutation contracts are promoted: selecting
 `glassBackground` mounts Glass Filter Override,
 `CASDFKeyFillHighlightEffect` mounts Rim Override, and
-`CASDFOutputEffect.minimum/maximum` mount Render Bounds on that pass page.
-Common Variant 0 therefore reports 101 accepted property contracts; Variant 14
-reports only the two Output bounds. Its `glassForeground`, duplicate Glass
-Highlights, Gradient, Shadow, and `plusD`/`plusL` remain read-only until P0.4.
+`CASDFOutputEffect.minimum/maximum` mount Render Bounds on that pass page. Each
+of the two structurally distinct `vibrantColorMatrix` filters mounts three
+optional Boolean inputs plus its complete 4 × 5 Float matrix. The common
+Regular/Clear five-pass topology therefore reports 109 accepted property
+contracts out of 110; the remaining source-layer dependency string is
+intentionally read-only. Variant 14's `glassForeground`, duplicate Glass
+Highlights, Gradient, Shadow, and `plusD`/`plusL` remain read-only until their
+separate outlier-topology work continues in P0.4.
 
 Current status:
 
@@ -192,8 +196,10 @@ Current status:
 - [x] keep duplicate instances independently addressable by structural slot and
   ordinal;
 - [x] expose accepted existing-pass routes without creating an absent pass;
-- [x] keep dependencies, composite arrays/matrices, and compositing modes
-  explicitly read-only;
+- [x] keep dependencies, unaccepted composite arrays/matrices, and compositing
+  modes explicitly read-only;
+- [x] accept independently addressed typed writes for both common
+  `vibrantColorMatrix` structural slots;
 - [ ] accept controlled mutation contracts for the Variant 14 foreground,
   highlight, gradient, shadow, and compositing families;
 - [ ] add independently addressed generic writes only for accepted contracts.
@@ -218,6 +224,25 @@ chain. For `glassForeground` Aberration, compare nil where supported, explicit
 zero, and a clearly nonzero value while Refraction and layer gates stay frozen.
 Do not promote an Aberration knob into product control merely because it is
 declared or accepts a value.
+
+The first narrow `inputAberrationAmount` probe is implemented and has completed
+the accepted fixed-context nil/zero/one readback experiment. All three requests
+survived the 350 ms settling window in both model and presentation state; every
+owning-layer write replaced the immutable CAFilter object, while owner opacity,
+visibility, source `@0`, and the empty animation inventory stayed stable. A
+fresh-tree reconstruction restored zero before every run. Keep this property
+read-only until a rendered before/after capture establishes visual contribution
+and a controlled range; the remaining foreground fields and other Variant-14
+families still require their own probes.
+
+The Regular/Clear matrix-family gate is closed. A fixed
+`Variant 1/2 × Main Off/On × vibrantColorMatrix Slot 1/2` suite passed all
+eight cases. Boolean-vector and matrix-coefficient mutations matched model and
+presentation values immediately and after settling, never changed the peer
+slot, and reconstructed to the system baseline. Every write replaced the
+installed CAFilter, with no attached animation key path. The production editor
+therefore relocates by full structural slot and atomically re-boxes the matrix
+on every restamp.
 
 ### P0.5 — Override lifecycle
 
@@ -305,12 +330,28 @@ Material Strength 0...1
           `-- Discrete composition policy where required
 ```
 
+The two common `vibrantColorMatrix` slots are not planned as 20 independent
+product controls. P1 first isolates them against diagnostic color content:
+
+1. Hold the complete Recipe fixed and replace only Slot 1 or Slot 2 with an
+   identity matrix.
+2. Sweep `identity → system matrix` independently for each slot while recording
+   rendered deltas, layer gates, model/presentation state, and replacement.
+3. Confirm whether Slot 1 is a Content/Vibrancy grade; keep that name
+   provisional until the visual isolation is positive.
+4. Treat Slot 2 as the Rim post-grade and test it together with Rim amount,
+   colors, and opacity rather than assuming it is an independent contributor.
+5. Expose a semantic strength scalar only if the interpolation is continuous
+   and preserves expected hue, luminance, and alpha behavior.
+
 The curve is perceptual. It is not assumed that every property is linear, that
 every channel reaches numeric zero, that all contributors start at the same
 time, or that every Variant shares one curve.
 
 P1 can start once the intended production Variant/topology has satisfied P0;
 it does not wait for every theoretical private pass on every system surface.
+The Regular/Clear target now satisfies that gate: all five observed passes have
+accepted controls, while V14/V19 remain explicitly scoped outlier topologies.
 
 ### P1.1 — SwiftUI Materialize/Dissolve preset investigation
 

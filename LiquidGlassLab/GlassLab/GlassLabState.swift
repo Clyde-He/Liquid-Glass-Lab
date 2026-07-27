@@ -84,6 +84,18 @@ final class GlassLabState {
     var highlightColorOverrides: [String: NSColor] = [:]
     var highlightNilOverrides: Set<String> = []
 
+    // MARK: Color-matrix pass overrides (two exact structural slots)
+
+    var vibrantMatrixOverridesEnabled = false
+    var vibrantMatrixOverrides:
+        [String: GlassLabTuning.VibrantColorMatrixOverridePayload] = [:]
+
+    var hasActiveOverrides: Bool {
+        shaderOverridesEnabled
+            || highlightOverridesEnabled
+            || vibrantMatrixOverridesEnabled
+    }
+
     // MARK: Test-window context
 
     var isTestWindowVisible = true
