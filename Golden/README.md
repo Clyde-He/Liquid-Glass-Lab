@@ -27,6 +27,11 @@ Golden/
   macOS-27/
 ```
 
+What the exporter must produce, and why each axis exists, is specified in
+[`CAPTURE-SPEC.md`](CAPTURE-SPEC.md). That document is derived from the claims
+that have to stay re-derivable rather than from what the archive currently
+holds, and it is the authority on what belongs in `unified/`.
+
 ## The unified archive
 
 Every learning reads `<os>/unified/`, not the per-study fixtures. The three
