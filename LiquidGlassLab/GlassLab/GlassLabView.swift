@@ -4939,9 +4939,16 @@ struct GlassLabView: View {
         let arguments = ProcessInfo.processInfo.arguments
         let sizeFlag = arguments.firstIndex(of: "--capture-size-study")
         let resizeFlag = arguments.firstIndex(of: "--verify-resize-restamp")
+        let removalWarmupFlag = arguments.firstIndex(
+            of: "--verify-removal-warmup"
+        )
         let goldenFlag = arguments.firstIndex(of: "--capture-golden")
         let planFlag = arguments.firstIndex(of: "--print-golden-plan")
-        guard let flagIndex = sizeFlag ?? resizeFlag ?? goldenFlag ?? planFlag,
+        guard let flagIndex = sizeFlag
+                ?? resizeFlag
+                ?? removalWarmupFlag
+                ?? goldenFlag
+                ?? planFlag,
               arguments.index(after: flagIndex) < arguments.endIndex
                 || planFlag != nil else {
             return
@@ -4985,6 +4992,17 @@ struct GlassLabView: View {
                 let passed = (result["passed"] as? Bool) == true
                 report = "== Resize restamp check ==\n"
                     + "Steps: \((result["steps"] as? [Any])?.count ?? 0)\n"
+                    + "Result: \(passed ? "PASSED" : "FAILED")"
+                if !passed { exitCode = 2 }
+            } else if removalWarmupFlag != nil {
+                let result = try await performRemovalWarmupCheck()
+                payload = try JSONSerialization.data(
+                    withJSONObject: result,
+                    options: [.prettyPrinted, .sortedKeys]
+                )
+                let passed = (result["passed"] as? Bool) == true
+                report = "== Removal warm-up check ==\n"
+                    + "Cells: \((result["cells"] as? [Any])?.count ?? 0)\n"
                     + "Result: \(passed ? "PASSED" : "FAILED")"
                 if !passed { exitCode = 2 }
             } else {
@@ -5115,6 +5133,165 @@ struct GlassLabView: View {
         )
     }
 
+    /// Verifies the lifecycle seam that compact glass exposes: removal must
+    /// start from the settled endpoint of a real insertion, not from either a
+    /// directly-created Presented view or the later long-lived Recipe.
+    @MainActor
+    private func performRemovalWarmupCheck() async throws -> [String: Any] {
+        let glassSize = CGSize(width: 480, height: 48)
+        let appearance = GlassLabTestAppearance.light
+        let backdrop = GlassLabBackdropMode.light
+        let tintPreset = GlassLabTintPreset.none
+        let keys = [
+            "inputFaceOpacity",
+            "inputFaceColorMatrixBlack",
+            "inputFaceColorMatrixWhite",
+            "inputClamp",
+        ]
+
+        state.rendererMode = .semanticUsage
+        selectedSemanticPage = .transition
+        materializeAnimationMode = .linear
+        materializeLinearDuration = 1
+        configureSemanticTransitionProbe()
+
+        func selectedBackgroundInputs(
+            from snapshot: GlassLabSemanticTransitionSnapshot
+        ) -> [String: String] {
+            guard let background = snapshot.model.filters.first(where: {
+                $0.name == "glassBackground"
+            }) else {
+                return [:]
+            }
+            let inputs = Dictionary(
+                background.inputs.map { ($0.key, $0.value) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            return Dictionary(
+                uniqueKeysWithValues: keys.compactMap { key in
+                    inputs[key].map { (key, $0) }
+                }
+            )
+        }
+
+        func maximumDifference(
+            _ lhs: [String: String],
+            _ rhs: [String: String]
+        ) -> Double? {
+            let differences = keys.compactMap { key -> Double? in
+                guard let lhsValue = lhs[key].flatMap(Double.init),
+                      let rhsValue = rhs[key].flatMap(Double.init) else {
+                    return nil
+                }
+                return abs(lhsValue - rhsValue)
+            }
+            guard differences.count == keys.count else { return nil }
+            return differences.max()
+        }
+
+        var cells: [[String: Any]] = []
+        for usage in [
+            GlassLabSemanticUsage.regular,
+            GlassLabSemanticUsage.clear,
+        ] {
+            for requestedMain in [false, true] {
+                let insertion = try await performMaterializeCapture(
+                    usage: usage,
+                    direction: .insertion,
+                    animationMode: .linear,
+                    linearDuration: 1,
+                    requestedMain: requestedMain,
+                    tint: tintPreset.descriptor,
+                    tintColor: tintPreset.color,
+                    appearance: appearance,
+                    backdrop: backdrop,
+                    glassSize: glassSize
+                )
+                // Resolve the alternative history explicitly. This is the
+                // endpoint the old removal harness accidentally captured.
+                materializePresented = true
+                state.testWindow.resetSemanticTransitionProbe(presented: true)
+                let directlyPresented = try await
+                    captureSettledMaterializePreflight()
+                let removal = try await performMaterializeCapture(
+                    usage: usage,
+                    direction: .removal,
+                    animationMode: .linear,
+                    linearDuration: 1,
+                    requestedMain: requestedMain,
+                    tint: tintPreset.descriptor,
+                    tintColor: tintPreset.color,
+                    appearance: appearance,
+                    backdrop: backdrop,
+                    glassSize: glassSize
+                )
+                guard let insertionEndpoint = insertion.samples.last?.snapshot,
+                      let removalPreflight = removal.samples.first?.snapshot else {
+                    throw TintStudyError.missingSemanticSnapshot
+                }
+                let expected = selectedBackgroundInputs(
+                    from: insertionEndpoint
+                )
+                let staticEndpoint = selectedBackgroundInputs(
+                    from: directlyPresented
+                )
+                let actual = selectedBackgroundInputs(
+                    from: removalPreflight
+                )
+                let insertionDifference = maximumDifference(expected, actual)
+                let staticDifference = maximumDifference(
+                    staticEndpoint,
+                    actual
+                )
+                // Independent compact Main-On insertions have a measured
+                // terminal jitter. Exact equality is preferred; otherwise the
+                // warm-up must be decisively closer to the Materialized
+                // endpoint than to the directly-presented static Recipe.
+                let followsMaterializedEndpoint =
+                    insertionDifference.map { $0 <= 0.001 } == true
+                    || {
+                        guard let insertionDifference,
+                              let staticDifference,
+                              staticDifference > 0.01 else {
+                            return false
+                        }
+                        return insertionDifference < staticDifference * 0.5
+                    }()
+                cells.append([
+                    "usage": usage.displayName,
+                    "requestedMain": requestedMain,
+                    "insertionEndpoint": expected,
+                    "directlyPresentedEndpoint": staticEndpoint,
+                    "removalPreflight": actual,
+                    "maximumDifferenceFromInsertion":
+                        insertionDifference ?? NSNull(),
+                    "maximumDifferenceFromDirectlyPresented":
+                        staticDifference ?? NSNull(),
+                    "passed":
+                        expected.count == keys.count
+                        && staticEndpoint.count == keys.count
+                        && actual.count == keys.count
+                        && followsMaterializedEndpoint,
+                ])
+            }
+        }
+
+        let failureCount = cells.filter {
+            ($0["passed"] as? Bool) != true
+        }.count
+        return [
+            "formatVersion": 1,
+            "capturedAt": ISO8601DateFormatter().string(from: Date()),
+            "operatingSystem":
+                ProcessInfo.processInfo.operatingSystemVersionString,
+            "shortSide": 48,
+            "keys": keys,
+            "cells": cells,
+            "failureCount": failureCount,
+            "passed": failureCount == 0,
+        ]
+    }
+
     private func exportMaterializeStudy() {
         guard let document = materializeStudyDocument else {
             materializeStudyStatus =
@@ -5176,12 +5353,14 @@ struct GlassLabView: View {
         materializeCaptureStatus =
             "Settling \(direction.rawValue.lowercased()) start endpoint…"
         let initialPresented = direction.initialPresentedState
+        let preflight: GlassLabSemanticTransitionSnapshot
         if direction == .removal {
             // Prepare removal through the real lifecycle: a fresh hidden
-            // subtree materializes in, then reaches its long-lived Recipe
-            // before it is removed. At shortSide 48 the animation endpoint
-            // briefly uses a different face grade before settling back to the
-            // static Recipe; the capture must preserve that distinction.
+            // subtree materializes in, then Materialize Out starts from the
+            // same settled insertion endpoint recorded by an insertion run.
+            // At shortSide 48 that endpoint has a different face grade from
+            // the long-lived static Recipe, so waiting for general Recipe
+            // stability here would silently replace the endpoint under study.
             materializePresented = false
             state.testWindow.resetSemanticTransitionProbe(presented: false)
             // Let the absent subtree commit before publishing the presented
@@ -5189,6 +5368,7 @@ struct GlassLabView: View {
             // constructs an already-presented static Recipe instead of
             // running the warm-up materialization.
             _ = try await captureSettledMaterializePreflight()
+            let warmupStart = Date()
             materializePresented = true
             let warmupDuration = animationMode == .linear
                 ? linearDuration
@@ -5198,16 +5378,17 @@ struct GlassLabView: View {
                 animationMode: .linear,
                 linearDuration: warmupDuration
             )
-            try await Task.sleep(
-                for: .seconds(warmupDuration + 0.12)
+            preflight = try await captureMaterializedInsertionEndpoint(
+                startedAt: warmupStart,
+                duration: warmupDuration
             )
         } else {
             materializePresented = initialPresented
             state.testWindow.resetSemanticTransitionProbe(
                 presented: initialPresented
             )
+            preflight = try await captureSettledMaterializePreflight()
         }
-        let preflight = try await captureSettledMaterializePreflight()
         var samples = [
             GlassLabMaterializeSample(
                 phase: "preflight",
@@ -5328,6 +5509,47 @@ struct GlassLabView: View {
             context: context,
             samples: samples
         )
+    }
+
+    /// Captures the same terminal state as an ordinary insertion run: the
+    /// animation duration plus its 100 ms settled observation. Do not use the
+    /// general Recipe-stability loop here. A compact glass can leave this
+    /// Materialized endpoint and adopt its long-lived static face grade later,
+    /// which is precisely the history-dependent state removal must preserve.
+    @MainActor
+    private func captureMaterializedInsertionEndpoint(
+        startedAt start: Date,
+        duration animationDuration: Double
+    ) async throws -> GlassLabSemanticTransitionSnapshot {
+        let remaining = animationDuration - Date().timeIntervalSince(start)
+        if remaining > 0 {
+            try await Task.sleep(for: .seconds(remaining))
+        }
+        try Task.checkCancellation()
+        try await requireMaterializeContext()
+        guard captureCurrentMaterializeSnapshot() != nil else {
+            throw TintStudyError.missingSemanticSnapshot
+        }
+        // An insertion run records its requested endpoint first, then waits
+        // 100 ms and records the settled endpoint. Preserve both the clock
+        // origin and that intervening full-tree read; compact Main-On grading
+        // can still move inside this small terminal window.
+        try await Task.sleep(for: .milliseconds(100))
+        try await requireMaterializeContext()
+        guard let snapshot = captureCurrentMaterializeSnapshot() else {
+            throw TintStudyError.missingSemanticSnapshot
+        }
+        let faceProgress = snapshot.model.filters
+            .first { $0.name == "glassBackground" }?
+            .inputs
+            .first { $0.key == "inputFaceOpacity" }
+            .flatMap { Double($0.value) }
+        guard let faceProgress, faceProgress >= 0.999 else {
+            throw TintStudyError.contextRejected(
+                "Materialize In warm-up did not reach its presented endpoint"
+            )
+        }
+        return snapshot
     }
 
     /// Context truth and material endpoint stability are separate conditions.

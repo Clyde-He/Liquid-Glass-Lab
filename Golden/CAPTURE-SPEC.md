@@ -144,11 +144,14 @@ Nine samples per run spanning `g = 0` to `g = 1`.
 
 Every run gets a fresh transition-view identity. Insertion starts from a
 committed hidden subtree. Removal first performs a real Materialize In on a
-fresh hidden subtree, waits for the long-lived Recipe to stabilize, and only
-then captures Materialize Out. This prevents a directly constructed Presented
-view or a coalesced false→true update from standing in for the actual removal
-lifecycle. A completed removal has no `glassBackground`; that missing terminal
-tree is the observation of `g = 0`.
+fresh hidden subtree, captures the same settled insertion endpoint used by an
+insertion run (100 ms after its animation endpoint), and immediately starts
+Materialize Out from that exact tree. It must not wait for the compact glass to
+adopt its later long-lived static face grade. This prevents a directly
+constructed Presented view, a coalesced false→true update, or an over-settled
+Recipe from standing in for the actual removal lifecycle. A completed removal
+has no `glassBackground`; that missing terminal tree is the observation of
+`g = 0`.
 
 Backdrop is a slice rather than a full axis because it is *proven* not to reach
 model state — but the axis has to survive so the proof can be re-derived on the

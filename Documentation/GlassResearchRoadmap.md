@@ -836,8 +836,19 @@ Two follow-ups came out of it, both now specified in
   also the case a strength control actually meets, since it reads its baseline
   from whatever tree it is handed — but the other case is real too, and the spec
   now requires each removal to perform a real Materialize In on a fresh hidden
-  subtree first. Until that lands the divergence figures here describe the
-  long-lived path.
+  subtree first. The harness implements that lifecycle and takes the removal
+  preflight from the same animation-endpoint-plus-100-ms observation as an
+  insertion run; it deliberately does not run the later long-lived Recipe
+  stability wait. The checked-in archive still predates that harness change, so
+  its divergence figures continue to describe the long-lived path until the
+  dynamic section is recaptured. A dedicated 48pt regression now compares the
+  insertion endpoint, the directly-presented endpoint, and the removal
+  preflight for Regular/Clear × Main Off/On. Two consecutive macOS 26.6 runs
+  passed all four cells. They also exposed small terminal jitter between
+  independent Regular insertions (for example `0.7838` rather than exactly
+  `0.8`), while the distance from the directly-presented grade stayed an order
+  of magnitude larger; the regression therefore tests endpoint provenance
+  rather than brittle string identity.
 - **Appearance on the static side.** The first direct capture pinned appearance
   to Light. That was an improvement over the earlier archive's uncontrolled
   `null`, but it made appearance a constant rather than an axis, so "which

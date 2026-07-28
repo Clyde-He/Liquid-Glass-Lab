@@ -588,6 +588,22 @@ stays at the baseline 40 instead of tracking `0.35 · shortSide`, which
 under-insets the largest surface visually but leaves model values, the only
 thing this study reads, unaffected.
 
+To verify that compact removal starts from the endpoint of a real insertion
+rather than a directly-created or over-settled Recipe:
+
+```sh
+LiquidGlassLab.app/Contents/MacOS/LiquidGlassLab \
+  --verify-removal-warmup /path/to/removal-warmup-check.json
+```
+
+The check compares the insertion settled endpoint, a directly-presented
+long-lived endpoint, and the removal preflight at 48pt for Regular/Clear × Main
+Off/On, including both face-grade matrices, `inputClamp`, and face opacity.
+Exact insertion/removal agreement passes immediately. When the system's compact
+Main-On terminal jitter makes two independent insertions differ, the removal
+preflight must still be decisively closer to the Materialized endpoint than to
+the directly-presented Recipe.
+
 ### NSGlass Materialize background transplant
 
 The Recipe `Materialize` page answers a narrower question than the Semantic
