@@ -1,20 +1,22 @@
 #!/usr/bin/env node
 
 // Verifies the whole archive: file integrity first, then every accepted
-// learning re-derived from the fixtures.
+// learning re-derived from it.
 //
 //   node Golden/tools/verify.mjs                 # every OS directory
 //   node Golden/tools/verify.mjs --os macOS-27   # one of them
 //   node Golden/tools/verify.mjs --verbose       # show each assertion
 //
-// A learning is skipped, not failed, when the OS directory lacks the fixture
-// it needs. That is the point: bringing up a new OS means capturing fixtures
-// until the skips turn into passes, and the run tells you which are left.
+// A learning is skipped, not failed, in exactly two situations: the OS
+// directory lacks the section it needs, or the archive swept too little to
+// decide the claim (the learning calls `expect.unverifiable`). Both print the
+// reason. Nothing else may report green — a claim nothing checked must never
+// look the same as a claim that held.
 
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import {
-  LearningFailure, goldenDirectory, makeExpect, makeFixtureLoader,
+  LearningFailure, Unverifiable, goldenDirectory, loadUnified, makeExpect,
   osDirectories, readManifest, sha256,
 } from "./lib/golden.mjs";
 
@@ -24,7 +26,7 @@ const onlyOS = args.find((a) => a.startsWith("--os="))?.slice("--os=".length)
   ?? (args.includes("--os") ? args[args.indexOf("--os") + 1] : null);
 
 const GREEN = "[32m", RED = "[31m", DIM = "[2m";
-const YELLOW = "[33m", RESET = "[0m";
+const YELLOW = "[33m", CYAN = "[36m", RESET = "[0m";
 const supportsColor = process.stdout.isTTY;
 const paint = (color, text) => (supportsColor ? `${color}${text}${RESET}` : text);
 
@@ -78,7 +80,37 @@ async function checkIntegrity(osDirectory) {
     if (!registered.has(name)) problems.push(`${name}: on disk but unregistered`);
   }
 
-  return { manifest, problems, count: (manifest.fixtures ?? []).length };
+  // The unified sections carry their own checksums in unified/meta.json rather
+  // than the manifest, because they are transcoded output and are regenerated
+  // as a set whenever a source fixture changes.
+  const unifiedDirectory = path.join(directory, "unified");
+  let unifiedCount = 0;
+  try {
+    const meta = JSON.parse(
+      await readFile(path.join(unifiedDirectory, "meta.json"), "utf8")
+    );
+    for (const [name, entry] of Object.entries(meta.sections ?? {})) {
+      unifiedCount += 1;
+      try {
+        const bytes = await readFile(path.join(unifiedDirectory, entry.file));
+        if (sha256(bytes) !== entry.sha256) {
+          problems.push(`unified/${entry.file}: sha256 mismatch — rerun unify.mjs`);
+        }
+      } catch {
+        problems.push(`unified/${entry.file}: listed in meta but missing`);
+      }
+      if (entry.rows === 0) problems.push(`unified/${name}: no rows`);
+    }
+  } catch {
+    problems.push("unified/meta.json: missing — run unify.mjs");
+  }
+
+  return {
+    manifest,
+    problems,
+    count: (manifest.fixtures ?? []).length,
+    unifiedCount,
+  };
 }
 
 // MARK: - Learnings
@@ -92,10 +124,43 @@ async function loadLearnings() {
   for (const file of files) {
     const module = await import(path.join(directory, file));
     for (const learning of module.default ?? []) {
-      learnings.push({ ...learning, file });
+      learnings.push({ kind: "per-version", ...learning, file });
     }
   }
   return learnings;
+}
+
+const tally = { passed: 0, failed: 0, skipped: 0 };
+
+/** Runs one learning body, printing a single outcome line plus observations. */
+async function run(learning, body) {
+  const observations = [];
+  try {
+    await body(makeExpect(observations));
+    tally.passed += 1;
+    console.log(`    ${paint(GREEN, "✓")} ${learning.id}`);
+  } catch (error) {
+    if (error instanceof Unverifiable) {
+      tally.skipped += 1;
+      console.log(
+        `    ${paint(YELLOW, "–")} ${learning.id} `
+        + `${paint(DIM, `unverifiable: ${error.message}`)}`
+      );
+      return;
+    }
+    tally.failed += 1;
+    console.log(`    ${paint(RED, "✗")} ${learning.id}`);
+    console.log(`        ${paint(DIM, learning.claim)}`);
+    console.log(`        ${paint(RED, error.message)}`);
+    if (!(error instanceof LearningFailure) && error.stack) {
+      console.log(paint(DIM, `        ${error.stack.split("\n")[1]?.trim()}`));
+    }
+  }
+  if (verbose) {
+    for (const observation of observations) {
+      console.log(`        ${paint(DIM, observation)}`);
+    }
+  }
 }
 
 // MARK: - Run
@@ -109,10 +174,14 @@ console.log(`\n${paint(DIM, "Integrity")}`);
 let integrityFailed = false;
 const manifests = new Map();
 for (const osDirectory of targets) {
-  const { manifest, problems, count } = await checkIntegrity(osDirectory);
+  const { manifest, problems, count, unifiedCount } =
+    await checkIntegrity(osDirectory);
   manifests.set(osDirectory, manifest);
   if (problems.length === 0) {
-    console.log(`  ${paint(GREEN, "ok")}   ${osDirectory}  ${count} fixtures`);
+    console.log(
+      `  ${paint(GREEN, "ok")}   ${osDirectory}  ${count} fixtures, `
+      + `${unifiedCount} unified sections`
+    );
   } else {
     integrityFailed = true;
     console.log(`  ${paint(RED, "fail")} ${osDirectory}`);
@@ -120,61 +189,60 @@ for (const osDirectory of targets) {
   }
 }
 
+const archives = new Map();
+for (const osDirectory of targets) {
+  archives.set(osDirectory, await loadUnified(osDirectory));
+}
+
 console.log(`\n${paint(DIM, "Learnings")}`);
-let passed = 0, failed = 0, skipped = 0;
 
 for (const osDirectory of targets) {
   const manifest = manifests.get(osDirectory);
   const platform = manifest.platform ?? {};
   console.log(
-    `\n  ${osDirectory} ${paint(DIM, `(${platform.version ?? "?"} / ${platform.build ?? "?"})`)}`
+    `\n  ${osDirectory} `
+    + paint(DIM, `(${platform.version ?? "?"} / ${platform.build ?? "?"})`)
   );
-  const fixture = makeFixtureLoader(osDirectory, manifest);
+  const sections = archives.get(osDirectory);
 
   for (const learning of learnings) {
-    const loaded = {};
-    let missing = null;
-    for (const id of learning.fixtures ?? []) {
-      const document = await fixture(id);
-      if (document === null) { missing = id; break; }
-      loaded[id] = document;
-    }
+    if (learning.kind === "cross-version") continue;
+    const missing = (learning.sections ?? []).find((name) => !sections[name]);
     if (missing) {
-      skipped += 1;
+      tally.skipped += 1;
       console.log(
         `    ${paint(YELLOW, "–")} ${learning.id} ${paint(DIM, `no ${missing}`)}`
       );
       continue;
     }
+    await run(learning, (expect) =>
+      learning.verify({ sections, expect, osDirectory })
+    );
+  }
+}
 
-    const observations = [];
-    try {
-      await learning.verify({
-        fixtures: loaded,
-        expect: makeExpect(observations),
-      });
-      passed += 1;
-      console.log(`    ${paint(GREEN, "✓")} ${learning.id}`);
-    } catch (error) {
-      failed += 1;
-      const isAssertion = error instanceof LearningFailure;
-      console.log(`    ${paint(RED, "✗")} ${learning.id}`);
-      console.log(`        ${paint(DIM, learning.claim)}`);
-      console.log(`        ${paint(RED, error.message)}`);
-      if (!isAssertion && error.stack) {
-        console.log(paint(DIM, `        ${error.stack.split("\n")[1]?.trim()}`));
-      }
+const crossVersion = learnings.filter((l) => l.kind === "cross-version");
+if (crossVersion.length > 0) {
+  console.log(
+    `\n  ${paint(CYAN, "cross-version")} ${paint(DIM, targets.join(" ↔ "))}`
+  );
+  for (const learning of crossVersion) {
+    if (targets.length < 2) {
+      tally.skipped += 1;
+      console.log(
+        `    ${paint(YELLOW, "–")} ${learning.id} `
+        + paint(DIM, "needs two OS directories")
+      );
+      continue;
     }
-    if (verbose) {
-      for (const observation of observations) {
-        console.log(`        ${paint(DIM, observation)}`);
-      }
-    }
+    await run(learning, (expect) => learning.verify({ archives, expect }));
   }
 }
 
 console.log(
-  `\n${passed} passed, ${failed} failed, ${skipped} skipped`
-  + `${skipped ? paint(DIM, "  (skipped = fixture not captured on that OS)") : ""}`
+  `\n${tally.passed} passed, ${tally.failed} failed, ${tally.skipped} skipped`
+  + (tally.skipped
+    ? paint(DIM, "  (skipped = section not captured, or axis never swept)")
+    : "")
 );
-if (failed > 0 || integrityFailed) process.exitCode = 1;
+if (tally.failed > 0 || integrityFailed) process.exitCode = 1;

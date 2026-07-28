@@ -19,11 +19,57 @@ version:
 
 ```text
 Golden/
-  learnings/    executable assertions, one file per fixture family
-  tools/        verifier, comparator, and per-study analyzers
+  learnings/    executable assertions, grouped by what they claim
+  tools/        verifier, unifier, comparator, and per-study analyzers
   macOS-26/
+    unified/    the three sections every learning reads
+    *.json      the per-study capture fixtures they are derived from
   macOS-27/
 ```
+
+## The unified archive
+
+Every learning reads `<os>/unified/`, not the per-study fixtures. The three
+sections there address rows by one shared **cell coordinate**, defined in
+[`tools/lib/cell.mjs`](tools/lib/cell.mjs):
+
+```text
+variant · subvariant · main · subdued · appearance · backdrop · tint
+        · width · height · cornerRadius · host · direction
+```
+
+| section | one row per | carries |
+| --- | --- | --- |
+| `static-scalar` | Recipe cell | resolved shader inputs, highlight, colors |
+| `static-tree` | Recipe cell | recursive layer/pass inventory and signatures |
+| `dynamic` | Materialize run | N progress samples of the model-side tree |
+
+One coordinate for all three buys three things. Cross-version comparison
+becomes a key match rather than a pairing routine written once per fixture.
+Static and dynamic rows become directly comparable, so a settled `g = 1` sample
+and a static Recipe row are the same address. And a new axis is a new field
+rather than a new fixture format.
+
+A cell field is **`null` when the capture did not control that axis** — not
+false, not a default. The archived sweeps leave real holes: the static sweeps
+never recorded appearance, and the SwiftUI Materialize sweep has no Subdued
+concept. Recording those as null is what makes a learning that needs them skip
+loudly instead of passing by luck.
+
+The sections are **derived**. They are transcoded from the per-study fixtures by
+
+```sh
+node Golden/tools/unify.mjs            # both OS directories
+node Golden/tools/unify.mjs macOS-26 --dry-run
+```
+
+Regenerate them whenever a source fixture changes; `verify.mjs` fails on a stale
+checksum. They are committed rather than generated on demand so a fresh clone
+can verify without a build step. They are also five times smaller than their
+sources — 12 MB against 63 MB on macOS 26 — because they drop the presentation
+tree, the structured layer dictionaries, and the animation branch, none of which
+any accepted learning reads. Once the exporter emits this shape directly the
+per-study fixtures can be retired and the archive shrinks.
 
 Every OS directory contains a `manifest.json` describing the default OS build
 and capture date, capture conditions, fixture schemas, entry counts, and
@@ -40,6 +86,9 @@ Two manifest fields carry weight:
 - **`role`** separates `canonical` evidence from a `control` (a repeat or
   contrast kept as provenance) and from `derived` output computed off other
   fixtures. Only canonical fixtures should be cited as a result.
+
+These are the source captures. Each one feeds a unified section, and which
+section is recorded in `unified/meta.json` under `generatedFrom`.
 
 The current macOS 27 directory contains:
 
@@ -71,10 +120,15 @@ The current macOS 26 baseline contains:
   48/200/400 sweep that measured the transition's geometry inflation.
 
 The two Materialize fixtures are the evidence behind P1's baseline-driven
-curve. They are not a superset of the static fixtures and cannot replace them:
-they cover only Variants 1 and 2 with a nil subvariant, in exchange for
-appearance, backdrop, Tint, direction, and progress axes the static sweeps do
-not have.
+curve and merge into the single `dynamic` section. They are not a superset of
+the static fixtures and cannot replace them: they cover only Variants 1 and 2
+with a nil subvariant, in exchange for appearance, backdrop, Tint, direction,
+and progress axes the static sweeps do not have.
+
+Their coverage overlaps on four cells, captured in separate sessions. The
+unifier keeps both copies rather than deduplicating: they are the only
+cross-session repeatability evidence the dynamic archive has, and a learning
+asserts that their settled endpoints agree on every channel.
 
 ## Verifying the archive
 
@@ -85,25 +139,54 @@ from the fixtures:
 node Golden/tools/verify.mjs
 ```
 
-Integrity covers checksums, unregistered files, and fixtures whose embedded OS
-build disagrees with the manifest entry filing them. Learnings live in
-`Golden/learnings/` — each one is a finding from `Documentation/` written as an
-executable assertion, naming the claim it encodes and the document it came from.
+Integrity covers manifest checksums, unregistered files, fixtures whose embedded
+OS build disagrees with the manifest entry filing them, and the unified
+sections' own checksums from `unified/meta.json`.
 
-A learning is **skipped**, not failed, when an OS directory lacks the fixture it
-needs. That is the intended workflow for bringing up a new OS: capture fixtures
-until the skips turn into passes, and the run tells you which are left.
+Learnings live in `Golden/learnings/` — each one is a finding from
+`Documentation/` written as an executable assertion, naming the claim it encodes
+and the document it came from.
 
 ```sh
 node Golden/tools/verify.mjs --os macOS-27   # one directory
 node Golden/tools/verify.mjs --verbose       # show each assertion
 ```
 
+### Two kinds of learning
+
+A **per-version** learning answers "does this hold on this OS". A
+**cross-version** learning (`kind: "cross-version"`) receives every loaded
+archive at once and answers a different question: *what changed, and does
+`LiquidGlassLab/GlassMaterial` still hold*. Those are the ones that turn a
+version bump into a work list. The current set checks that both versions address
+the same cells, that the topology determinants and variant classes survived,
+that no channel the strength curve classifies has vanished, and that the size
+formulas kept their shape where their constants moved.
+
+### Green means checked
+
+A learning may report only three outcomes, and **a claim nothing checked must
+never look like a claim that held**:
+
+- **pass** — the assertion ran against real rows;
+- **skip, section missing** — this OS has not captured what the learning reads;
+- **skip, unverifiable** — the section exists but the axis the claim needs was
+  never swept. The learning calls `expect.unverifiable(reason)` and the reason
+  says what capture would settle it.
+
+The third outcome exists because the earlier suite used an `ok(true, "not
+present here")` escape hatch, and two learnings sat green for weeks having
+verified nothing. Both are now honest skips, and both name the fix: sweep a
+second corner radius, and add one transposed size pair so two rows share a short
+side at different width and height.
+
 Learnings assert **structure, not per-version values**. `inputInnerRefractionAmount`
 is proportional-below-a-cap on both macOS 26 and 27, but the ratio differs
-(-0.8·S versus -0.5·S), so the learning asserts the shape and records the values
-in its claim. A learning that hard-codes a measured constant will fail on the
-next OS for no useful reason.
+(-0.8·S versus -0.5·S), so the learning asserts the shape and reports the values.
+A learning that hard-codes a measured constant will fail on the next OS for no
+useful reason. The same rule kills universal ratios: 0.35·S bleed and 0.4·S
+shadow height belong to the Variant 1 family, not to the material system —
+Variant 9 resolves 0.071·S outer refraction and Variants 4, 5, and 11 are capped.
 
 ## Comparing an OS capture
 

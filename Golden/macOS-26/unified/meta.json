@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "operatingSystem": null,
+  "generatedFrom": {
+    "static-scalar": [
+      "recipe-matrix"
+    ],
+    "static-tree": [
+      "recursive-pass-audit"
+    ],
+    "dynamic": [
+      "materialize-environment-matrix",
+      "materialize-geometry-sweep"
+    ]
+  },
+  "role": "derived",
+  "sections": {
+    "static-scalar": {
+      "file": "static-scalar.json",
+      "rows": 1008,
+      "repeatedCells": 0,
+      "bytes": 2323823,
+      "sha256": "3a36c3c88789c8790ea714fd15ec9af753b039a7aadb8399bff1ba1b00775366",
+      "sourceFixtures": [
+        "recipe-matrix"
+      ],
+      "swept": [
+        "variant",
+        "subvariant",
+        "main",
+        "subdued",
+        "height"
+      ]
+    },
+    "static-tree": {
+      "file": "static-tree.json",
+      "rows": 336,
+      "repeatedCells": 0,
+      "bytes": 6600145,
+      "sha256": "aa83fb4e5d791f07be180e4ec223fa04706ba65ed046431e1224f3aad45dde8b",
+      "sourceFixtures": [
+        "recursive-pass-audit"
+      ],
+      "swept": [
+        "variant",
+        "subvariant",
+        "main",
+        "subdued"
+      ]
+    },
+    "dynamic": {
+      "file": "dynamic.json",
+      "rows": 76,
+      "repeatedCells": 4,
+      "bytes": 3919332,
+      "sha256": "9fb05c63c60d2e0e0519a7a81f2ba70aae33a1409ce0ac94c22ed03813a6b7b7",
+      "sourceFixtures": [
+        "materialize-environment-matrix",
+        "materialize-geometry-sweep"
+      ],
+      "swept": [
+        "variant",
+        "main",
+        "appearance",
+        "backdrop",
+        "tint",
+        "height",
+        "direction"
+      ]
+    }
+  }
+}

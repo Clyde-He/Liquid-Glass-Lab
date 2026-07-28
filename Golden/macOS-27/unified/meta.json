@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "operatingSystem": null,
+  "generatedFrom": {
+    "static-scalar": [
+      "recipe-matrix"
+    ],
+    "static-tree": [
+      "recursive-pass-audit"
+    ]
+  },
+  "role": "derived",
+  "sections": {
+    "static-scalar": {
+      "file": "static-scalar.json",
+      "rows": 1008,
+      "repeatedCells": 0,
+      "bytes": 2952620,
+      "sha256": "00846393fbbbb4efcfe83ea9a7ee134391bec8ddeb1ce0d4db502fe677c35bfc",
+      "sourceFixtures": [
+        "recipe-matrix"
+      ],
+      "swept": [
+        "variant",
+        "subvariant",
+        "main",
+        "subdued",
+        "height"
+      ]
+    },
+    "static-tree": {
+      "file": "static-tree.json",
+      "rows": 336,
+      "repeatedCells": 0,
+      "bytes": 7935746,
+      "sha256": "333dbf6b7878a06ee2a83febaa9614756fcfd490737b9f5ea2342d19072df6a7",
+      "sourceFixtures": [
+        "recursive-pass-audit"
+      ],
+      "swept": [
+        "variant",
+        "subvariant",
+        "main",
+        "subdued"
+      ]
+    }
+  }
+}

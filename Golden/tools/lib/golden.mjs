@@ -1,9 +1,14 @@
 // Shared loading and assertion helpers for the learning suite.
 //
 // A "learning" is one accepted finding from Documentation/, expressed as an
-// executable assertion over archived fixtures. The point is that re-validating
-// the whole body of knowledge on a new OS becomes one command instead of a
-// manual reread.
+// executable assertion over the archive. The point is that re-validating the
+// whole body of knowledge on a new OS becomes one command instead of a manual
+// reread.
+//
+// Learnings read the unified archive under `<os>/unified/`, whose three
+// sections all address rows by the same cell coordinate (see cell.mjs). A
+// learning declares the sections it needs and, if it is a `cross-version` one,
+// receives every OS at once.
 
 import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
@@ -14,6 +19,8 @@ import { fileURLToPath } from "node:url";
 export const goldenDirectory = path.dirname(
   path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 );
+
+export const SECTIONS = ["static-scalar", "static-tree", "dynamic"];
 
 /** OS directories present in the archive, e.g. ["macOS-26", "macOS-27"]. */
 export async function osDirectories() {
@@ -33,27 +40,23 @@ export async function readManifest(osDirectory) {
 }
 
 /**
- * Loads fixtures by manifest id, caching per run. Returns null for a fixture
- * this OS directory does not have, which is how a learning reports "not
- * applicable here" rather than failing.
+ * Loads the unified sections of one OS directory. A section this OS has not
+ * captured resolves to null, which is how a learning reports "not applicable
+ * here" rather than failing.
  */
-export function makeFixtureLoader(osDirectory, manifest) {
-  const cache = new Map();
-  return async function fixture(id) {
-    if (cache.has(id)) return cache.get(id);
-    const entry = (manifest.fixtures ?? []).find((item) => item.id === id);
-    if (!entry) {
-      cache.set(id, null);
-      return null;
+export async function loadUnified(osDirectory) {
+  const directory = path.join(goldenDirectory, osDirectory, "unified");
+  const sections = {};
+  for (const name of SECTIONS) {
+    try {
+      sections[name] = JSON.parse(
+        await readFile(path.join(directory, `${name}.json`), "utf8")
+      );
+    } catch {
+      sections[name] = null;
     }
-    const raw = await readFile(
-      path.join(goldenDirectory, osDirectory, entry.file),
-      "utf8"
-    );
-    const parsed = JSON.parse(raw);
-    cache.set(id, parsed);
-    return parsed;
-  };
+  }
+  return sections;
 }
 
 export function sha256(bytes) {
@@ -63,6 +66,14 @@ export function sha256(bytes) {
 // MARK: - Assertions
 
 export class LearningFailure extends Error {}
+
+/**
+ * Thrown when the archive cannot decide the claim either way — the axis the
+ * learning needs was never swept. This exists because the alternative, an
+ * `ok(true, "not present here")` escape hatch, reports green for a claim
+ * nothing checked. A learning that cannot run must say so out loud.
+ */
+export class Unverifiable extends Error {}
 
 /** Every assertion records what it checked so a pass is still auditable. */
 export function makeExpect(observations) {
@@ -114,48 +125,53 @@ export function makeExpect(observations) {
       }
       record(label, `worst ${worst.value.toPrecision(3)} ≤ ${limit}`);
     },
+    /** The archive cannot settle this claim. Reported as a skip, never a pass. */
+    unverifiable(reason) {
+      throw new Unverifiable(reason);
+    },
+    /** Guard form: skip unless the archive swept enough to decide anything. */
+    requireSamples(count, minimum, label) {
+      if (count < minimum) {
+        throw new Unverifiable(`${label} — ${count} available, need ${minimum}`);
+      }
+      record(label, `${count}`);
+    },
   };
 }
 
-// MARK: - Fixture shape helpers
+// MARK: - Unified fixture shape helpers
 
-export const inputValue = (inputs, key) =>
-  inputs?.find((entry) => entry.key === key)?.value ?? null;
-
-export const glassBackground = (snapshot) =>
-  snapshot?.model?.filters?.find((f) => f.name === "glassBackground") ?? null;
-
-export function numeric(value) {
+export const numeric = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
+};
+
+/** Inputs are `{key: value}` maps in the unified archive. */
+export const filterNamed = (sample, name) =>
+  sample?.filters?.find((filter) => filter.name === name) ?? null;
+
+export const glassBackground = (sample) => filterNamed(sample, "glassBackground");
+
+export const glassInput = (sample, key) =>
+  numeric(glassBackground(sample)?.inputs?.[key]);
 
 /** `g` is the transition's normalized progress, observable as face opacity. */
-export function progressOf(snapshot) {
-  const filter = glassBackground(snapshot);
-  return filter ? numeric(inputValue(filter.inputs, "inputFaceOpacity")) : null;
-}
+export const progressOf = (sample) =>
+  sample?.progress ?? glassInput(sample, "inputFaceOpacity");
 
-export function shortSideOf(context) {
-  return Math.min(context.glassWidth, context.glassHeight);
-}
-
-export function isClear(transition) {
-  return String(transition.usage ?? "").includes("Clear");
-}
-
-/** The endpoint sample of a transition: the one settled at g = 1. */
-export function endpointFilter(transition) {
+/** The settled sample of a run, i.e. the one at g = 1. Null if it never got there. */
+export function endpointSample(run) {
   let best = null;
-  for (const sample of transition.samples ?? []) {
-    const filter = glassBackground(sample.snapshot);
-    if (!filter) continue;
-    const g = numeric(inputValue(filter.inputs, "inputFaceOpacity"));
+  for (const sample of run.samples ?? []) {
+    const g = progressOf(sample);
     if (g === null) continue;
-    if (!best || g > best.g) best = { g, filter };
+    if (!best || g > best.g) best = { g, sample };
   }
-  return best && best.g > 0.999 ? best.filter : null;
+  return best && best.g > 0.999 ? best.sample : null;
 }
+
+export const endpointInputs = (run) =>
+  glassBackground(endpointSample(run))?.inputs ?? null;
 
 // MARK: - The measured curve, mirrored from LiquidGlassLab/GlassMaterial
 
@@ -206,6 +222,13 @@ export function channelTable({ clear, main }) {
   table.inputClamp = { start: 1, shape: clear ? "clamp" : "linear" };
   return table;
 }
+
+/** Every channel the table knows about, independent of context. */
+export const ALL_CHANNELS = [
+  ...LINEAR_FROM_ZERO, ...LINEAR_FROM_ONE, ...HEIGHT_FAMILY,
+  "inputBlurOpacity1", "inputBlurOpacity2", "inputBlurOpacity3",
+  "inputBlurOpacity4", "inputClamp",
+];
 
 export function resolveChannel(channel, g, endpoint, inflation) {
   const shape = SHAPES[channel.shape];

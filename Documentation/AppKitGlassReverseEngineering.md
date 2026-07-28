@@ -72,6 +72,62 @@ participation: a window that is genuinely key **or** genuinely main receives the
 active recipe; a window that is neither receives the flat recipe. This is an
 internal environment state, not the value returned by an overridden getter.
 
+### The 21 variants are three structural classes, not one family
+
+Re-deriving the 336-row recursive inventory as executable assertions
+(`Golden/learnings/static-topology.mjs`) shows the variant vocabulary is not
+homogeneous. Both macOS 26.6 and macOS 27.0 agree on the split:
+
+| class | variants | inventory |
+| --- | --- | --- |
+| `glassBackground` | 19 of 21 | the familiar backdrop-filter topology |
+| empty | 13 | no passes at all, in every subvariant/Main/Subdued cell |
+| `glassForeground` | 14 | eleven passes, its own shadow, two glass highlights, a gradient, and `plusL`/`plusD` compositing |
+
+This matters to anything that resolves a material by looking up a
+`glassBackground` filter: on Variants 13 and 14 the lookup legitimately finds
+nothing. That is a material fact, not a capture failure, and a strength control
+has to answer for those two rather than fall through a nil.
+
+Topology is a pure function of variant, subvariant, and **Subdued**. Main never
+changes it — participation moves resolved values only, which is what lets a
+strength curve treat Main as a value axis rather than a structural one.
+
+### Subdued is a structural axis for Variant 6 alone
+
+Of the 21 variants, exactly one changes topology under Subdued. Variant 6 loses
+its `CASDFGradientEffect` and that effect's `vibrantColorMatrix`, going from
+seven passes to five. Every other variant keeps its inventory and only moves
+values. Both archived OS versions agree.
+
+### Size-scaled inputs are proportional or inactive, never partly
+
+For any variant on any version, a size-driven input is either proportional to
+the short side at every size or identically zero at every size. No variant is
+proportional at one size and zero at another — 57 variant/input pairs per
+version, zero exceptions.
+
+Which variants are inactive is version-specific and moved substantially:
+
+| input | macOS 26.6 inactive | macOS 27.0 inactive |
+| --- | --- | --- |
+| `inputShadowHeight` | 3 of 21 | 12 of 21 |
+| `inputBleedAmount` | 10 of 21 | 11 of 21 |
+| `inputOuterRefractionAmount` | 6 of 21 | 6 of 21 |
+
+The shadow-height column is the earlier "macOS 27 zero-shadow" observation,
+now characterised: it is not size-dependent and not a capture artifact, it is a
+wholesale deactivation across nine more variants including Variant 1.
+
+A baseline-driven curve is immune to all of this — a zero endpoint yields a zero
+channel at every `g` with no special case — which is precisely the argument for
+reading endpoints from the live Recipe instead of authoring them.
+
+The ratios themselves are **per-variant, not universal**. The familiar 0.35·S
+bleed, 0.4·S shadow height, and 0.2·S outer refraction belong to the Variant 1
+family. Variant 9 resolves 0.071·S outer refraction, and Variants 4, 5, and 11
+are capped.
+
 ### Variant and subvariant are orthogonal state, but sparsely consumed
 
 The original 426-sample sweep was not a Cartesian product: it sampled the

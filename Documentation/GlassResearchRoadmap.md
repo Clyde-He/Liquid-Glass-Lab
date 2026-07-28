@@ -696,6 +696,27 @@ Exercise static high-contrast text, saturated boundaries, fine patterns, and
 moving content behind the Glass. Capture and preserve the source Recipe before
 changing any contributor.
 
+#### What the macOS 27 set has to settle — 2026-07-27
+
+The cross-version learnings now state the open question mechanically instead of
+in prose. `Golden/learnings/cross-version.mjs` reports:
+
+- **the channel table still resolves.** None of the 42 channels the strength
+  curve classifies has disappeared on macOS 27, so the abstraction survives
+  structurally. This is a hard assertion and it passes.
+- **the channel table is not complete.** macOS 27's `glassBackground` publishes
+  77 properties against macOS 26's 55. All 22 additions are unclassified —
+  aberration, blur-fill, key-fill highlight, ring shadow, and two face
+  color-matrix luma inputs.
+
+A key absent from the table is never written by the controller, so it keeps
+whatever the system last left there. Whether that is correct depends entirely on
+whether any of the 22 animates during a transition, and **only a dynamic capture
+on macOS 27 can answer it**. Until then the learning reports `unverifiable` and
+names exactly that. When the capture lands it either confirms all 22 are static
+or names the channels to classify — which is the whole reduced set, expressed as
+a test rather than a note.
+
 ### P1.3 — Curve construction
 
 Sample at minimum `0`, `0.125`, `0.25`, `0.5`, `0.75`, and `1`. For every point:
