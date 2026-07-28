@@ -313,16 +313,18 @@ export default [
     id: "curve-replays-from-read-endpoints",
     claim:
       "Reading endpoints from the Recipe and applying the five dimensionless "
-      + "shapes reproduces every continuous channel except the small-size "
-      + "adaptive face grade isolated by the cross-section learning. Away "
-      + "from the baseline geometry the remaining error stays inside "
-      + "min(5%, 4/shortSide), the bound implied by a mis-classified "
-      + "linear-vs-height channel",
+      + "shapes reproduces every continuous channel that has a range to scale, "
+      + "excepting the small-size adaptive face grade isolated by the "
+      + "cross-section learning. Away from the baseline geometry the remaining "
+      + "error stays inside min(5%, 4/shortSide), the bound implied by a "
+      + "mis-classified linear-vs-height channel. A channel whose endpoint "
+      + "equals its start is inert under G and reported rather than replayed",
     source: "GlassResearchRoadmap.md — P1.1, baseline-driven curve",
     sections: [SECTION],
     verify({ sections, expect }) {
       const runs = sections[SECTION].runs ?? [];
       const perSize = new Map();
+      const inertTransients = new Map();
       let comparisons = 0;
       let delegatedAdaptiveComparisons = 0;
 
@@ -363,6 +365,29 @@ export default [
             const end = numeric(endpoint[key]);
             const actual = numeric(inputs[key]);
             if (end === null || actual === null) continue;
+            if (
+              Math.abs(end - channel.start) < 1e-9
+              && !channel.saturationDeficitHump
+            ) {
+              // The channel is inert: its read endpoint *is* its start, so
+              // `start + (end - start) · shape(g)` is the constant start for
+              // every g. There is no range to scale and nothing the controller
+              // could author differently.
+              //
+              // A hump channel is excluded from this: `inputBlurOpacity0` reads
+              // a zero endpoint below a 64pt short side on macOS 27, yet the
+              // deficit term reproduces its full mid-transition excursion from
+              // that same zero. A zero range is not the same as no signal.
+              //
+              // The amplitude is reported below so the exclusion stays visible
+              // rather than silently swallowing a channel.
+              const seen = inertTransients.get(key);
+              const amplitude = Math.abs(actual - channel.start);
+              if (!seen || amplitude > seen.amplitude) {
+                inertTransients.set(key, { amplitude, short, start: channel.start });
+              }
+              continue;
+            }
             comparisons += 1;
             const predicted = resolveChannel(channel, g, end, inflation);
             const scale = Math.max(1, Math.abs(end - channel.start));
@@ -416,6 +441,25 @@ export default [
             + `(bound ${(bound * 100).toFixed(2)}%)`
         );
       }
+
+      // Reported, not asserted. An inert channel is excluded from the bound
+      // above; naming it and its worst excursion is what keeps that exclusion
+      // from behaving like the `ok(true, "not present here")` escape hatches
+      // this suite was built to remove.
+      const transients = [...inertTransients]
+        .filter(([, item]) => item.amplitude > 1e-6)
+        .sort((a, b) => b[1].amplitude - a[1].amplitude);
+      expect.ok(
+        true,
+        "inert channels excluded (endpoint equals start)",
+        transients.length === 0
+          ? `${inertTransients.size} inert, none with a transient`
+          : transients
+            .map(([key, item]) =>
+              `${key} lifts ${item.amplitude.toFixed(4)} off ${item.start} `
+              + `at shortSide ${item.short}`)
+            .join("; ")
+      );
     },
   },
 
@@ -495,7 +539,13 @@ export default [
     id: "endpoints-scale-with-short-side",
     claim:
       "Endpoints track shortSide, which is why the curve reads them instead of "
-      + "authoring them: bleed 0.35·S, shadow height 0.4·S, outer refraction 0.2·S",
+      + "authoring them. Every size-driven endpoint is proportional to S — "
+      + "optionally pinned to one constant beyond a floor or a cap — or else "
+      + "constant outright. The ratios and the pinned constants are "
+      + "version-specific and deliberately reported rather than asserted: "
+      + "macOS 27 moved Regular's outer refraction from 0.2·S to max(16, "
+      + "0.25·S) and retired its shadow height in favour of a size-invariant "
+      + "ring shadow. Asserting the shape is what survives a version bump",
     source: "AppKitGlassReverseEngineering.md — Geometry input is the shortest side",
     sections: [SECTION],
     verify({ sections, expect }) {
@@ -503,35 +553,164 @@ export default [
       const sizes = new Set(runs.map((run) => run.cell.shortSide));
       expect.requireSamples(sizes.size, 2, "distinct short sides");
 
-      const ratios = {
-        inputBleedAmount: 0.35,
-        inputShadowHeight: 0.4,
-        inputOuterRefractionAmount: 0.2,
-      };
-      const errors = [];
+      // The size-driven families, plus the ring shadow macOS 27 introduced so
+      // its size-invariance is measured rather than assumed.
+      const KEYS = [
+        "inputBleedAmount", "inputShadowHeight", "inputOuterRefractionAmount",
+        "inputRingShadowOffset", "inputRingShadowStrokeWidth",
+      ];
+      const groups = new Map();
       for (const run of runs) {
         const endpoint = endpointInputs(run);
         if (!endpoint) continue;
-        const short = run.cell.shortSide;
-        for (const [key, ratio] of Object.entries(ratios)) {
-          const actual = numeric(endpoint[key]);
-          // Clear carries no bleed, and outer refraction only exists under
-          // Main; both resolve to a legitimate zero rather than the ratio.
-          if (actual === null || actual === 0) continue;
-          if (key === "inputOuterRefractionAmount" && run.cell.main !== true) continue;
-          errors.push({
-            error: Math.abs(actual - ratio * short) / (ratio * short),
-            key,
-            short,
-          });
+        for (const key of KEYS) {
+          const value = numeric(endpoint[key]);
+          if (value === null) continue;
+          const id = `v${run.cell.variant}|main=${run.cell.main}|${key}`;
+          if (!groups.has(id)) groups.set(id, new Map());
+          groups.get(id).set(run.cell.shortSide, value);
         }
       }
-      expect.requireSamples(errors.length, 20, "endpoint checks");
+
+      const findings = [];
+      const inert = [];
+      for (const [id, bySize] of [...groups].sort()) {
+        if (bySize.size < 2) continue;
+        const points = [...bySize]
+          .map(([size, value]) => ({ size, value }))
+          .sort((a, b) => a.size - b.size);
+        if (points.every((point) => point.value === 0)) {
+          // A legitimate zero: Clear carries no bleed, outer refraction needs
+          // Main, and macOS 27 zeroes Regular's shadow height at every size.
+          // Recording it is the point — the previous revision skipped zeros
+          // silently, so 27 retiring a whole channel read as a pass.
+          inert.push(id);
+          continue;
+        }
+
+        const largest = points[points.length - 1];
+        const ratio = largest.value / largest.size;
+        const close = (a, b) => Math.abs(a - b) <= 1e-3 * Math.max(Math.abs(b), 1e-9);
+        const offLine = points.filter((point) => !close(point.value, ratio * point.size));
+        const constant = points.every((point) => close(point.value, largest.value));
+
+        if (constant) {
+          findings.push({ id, verdict: `constant ${largest.value}` });
+          continue;
+        }
+        // Proportional, with at most one pinned constant. Every off-line point
+        // must share that constant and sit on one side of the line: above it is
+        // a floor, below it is a cap.
+        const pinned = offLine[0]?.value;
+        const agree = offLine.every((point) => close(point.value, pinned));
+        const above = offLine.every((point) => Math.abs(point.value) > Math.abs(ratio * point.size));
+        const below = offLine.every((point) => Math.abs(point.value) < Math.abs(ratio * point.size));
+        expect.ok(
+          agree && (above || below),
+          `${id} is proportional with at most one pinned constant`,
+          `ratio ${ratio.toFixed(4)}·S, off-line ${JSON.stringify(offLine)}`
+        );
+        findings.push({
+          id,
+          verdict: offLine.length === 0
+            ? `${ratio.toFixed(4)}·S, no floor or cap inside this sweep`
+            : `${ratio.toFixed(4)}·S with a ${above ? "floor" : "cap"} at ${pinned}`,
+        });
+      }
+
+      expect.requireSamples(findings.length, 4, "size-driven endpoint groups");
+      for (const finding of findings) {
+        expect.ok(true, finding.id, finding.verdict);
+      }
+      expect.ok(
+        true,
+        "groups inert at every size",
+        inert.length === 0 ? "none" : inert.join(", ")
+      );
+    },
+  },
+
+  {
+    id: "gated-blur-overshoots-by-its-saturation-deficit",
+    claim:
+      "macOS 27 gates the backdrop blur by size, and mid-transition "
+      + "inputBlurOpacity0 overshoots its gated endpoint by exactly the amount "
+      + "that endpoint falls short of full opacity: "
+      + "endpoint·g + (1 - endpoint)·g(1 - g). The coefficient on the deficit "
+      + "is 1, not a fitted constant. Where the endpoint is already 1 — every "
+      + "Clear cell, and every macOS 26 cell — the term vanishes and the "
+      + "channel is the linear ramp measured there, so one law covers both "
+      + "systems with no version branch",
+    source: "GlassResearchRoadmap.md — P1.1, baseline-driven curve",
+    sections: [SECTION],
+    verify({ sections, expect }) {
+      const runs = sections[SECTION].runs ?? [];
+      const KEY = "inputBlurOpacity0";
+      const gated = [];
+      const saturated = [];
+      for (const run of runs) {
+        if (run.cell.tint !== "None") continue;
+        const end = numeric(endpointInputs(run)?.[KEY]);
+        if (end === null) continue;
+        for (const sample of run.samples ?? []) {
+          const value = numeric(glassBackground(sample)?.inputs?.[KEY]);
+          const g = progressOf(sample);
+          if (value === null || g === null) continue;
+          const item = { end, g, value, short: run.cell.shortSide };
+          if (Math.abs(1 - end) < 1e-9) saturated.push(item);
+          else gated.push(item);
+        }
+      }
+
+      // Without a gated endpoint there is no deficit, so the coefficient is
+      // unmeasurable. macOS 26 saturates at 1 everywhere and lands here.
+      expect.requireSamples(gated.length, 20, "samples with a gated endpoint");
+
+      // Fit the coefficient rather than assuming it, away from the turning
+      // points where g(1 - g) vanishes and the quotient is ill-conditioned.
+      const fitted = gated
+        .filter((item) => item.g > 0.2 && item.g < 0.8)
+        .map((item) =>
+          (item.value - item.end * item.g)
+          / ((1 - item.end) * item.g * (1 - item.g)));
+      const mean = fitted.reduce((sum, x) => sum + x, 0) / fitted.length;
+      expect.ok(
+        Math.abs(mean - 1) < 0.01,
+        "fitted coefficient on the saturation deficit",
+        `${mean.toFixed(4)} over ${fitted.length} samples, expected 1`
+      );
+
+      const worstOf = (items) => Math.max(
+        ...items.map((item) => Math.abs(
+          item.value - (item.end * item.g + (1 - item.end) * item.g * (1 - item.g))
+        ))
+      );
       expect.maxBelow(
-        errors,
-        (item) => item.error,
+        gated,
+        (item) => Math.abs(
+          item.value - (item.end * item.g + (1 - item.end) * item.g * (1 - item.g))
+        ),
         0.001,
-        "worst relative endpoint deviation from ratio · shortSide"
+        "worst absolute error on gated cells"
+      );
+      // The term must not disturb the cells that were already exact.
+      expect.ok(
+        saturated.length === 0 || worstOf(saturated) < 1e-6,
+        "saturated cells are left untouched",
+        saturated.length === 0
+          ? "none in this section"
+          : `worst ${worstOf(saturated).toExponential(2)} over ${saturated.length} samples`
+      );
+
+      // Reported, not asserted. inputBlurOpacity1 carries a hump in the same
+      // basis, but its coefficient is 0.2 without Main and 1/15 with it — two
+      // fitted constants whose derivation is not understood, against a worst
+      // error of 0.05 that already sits inside the replay bound. Named here so
+      // it is on the record rather than rediscovered.
+      expect.ok(
+        true,
+        "a smaller unmodelled hump on inputBlurOpacity1",
+        "coefficient 0.2 without Main, 1/15 with it; worst 0.05, left linear"
       );
     },
   },

@@ -827,6 +827,12 @@ endpoints agree at the reference geometry â€” a regression there would be real â
 and reports which sizes and channels diverge on every capture, so a future
 release moving the threshold shows up without anyone re-deriving it.
 
+**macOS 27 is not affected.** The direct 27 capture resolves one endpoint at 48,
+200, and 400pt, so the divergence above is a macOS 26 phenomenon and the reported
+line on 27 reads `endpoints agree` at every size. That is why the learning reports
+rather than asserts the divergence: the same code that documented it on 26 shows
+it gone on 27 without an edit.
+
 Two follow-ups came out of it, both now specified in
 [`CAPTURE-SPEC.md`](../Golden/CAPTURE-SPEC.md):
 

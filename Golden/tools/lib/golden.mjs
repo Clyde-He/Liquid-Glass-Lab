@@ -247,24 +247,70 @@ const HEIGHT_FAMILY = [
   "inputOuterRefractionHeight", "inputShadowHeight",
 ];
 
+// macOS 27 rebuilt Regular's shadow: `inputShadowHeight` resolves to 0 and a
+// size-invariant ring shadow takes over, arriving with a blur fill and a key
+// fill highlight. Every one of the 17 new animating inputs rides the same clock
+// as `inputFaceOpacity` — normalized against its own start each traces the face
+// profile to within 1e-3 — so all of them are linear and only the start values
+// are new. Absent on macOS 26, where the controller skips them for want of an
+// endpoint, which is why one table serves both systems with no version branch.
+const LINEAR_FROM_ZERO_27 = [
+  "inputBlurFillBlurRadius", "inputBlurFillDarkenOpacity",
+  "inputBlurFillLightenOpacity", "inputBlurFillNormalOpacity",
+  "inputKeyFillHighlightEffectOffset", "inputKeyFillHighlightHeight",
+  "inputRingShadowOffset", "inputRingShadowOpacity",
+  "inputRingShadowStrokeWidth",
+];
+const LINEAR_FROM_ONE_27 = [
+  "inputFaceColorMatrixMaxLuma", "inputFaceColorMatrixMaxLumaSDR",
+  "inputRingShadowBlurRadius", "inputRingShadowMask",
+];
+/**
+ * The starts macOS 27 introduced that are neither 0 nor 1. Measured constants,
+ * invariant across size, participation, appearance, and Variant; a wrong start
+ * bows the normalized profile away from the face curve, and none of these do.
+ */
+const LINEAR_FROM_MEASURED_27 = {
+  inputKeyFillHighlightAmount: 0.4,
+  inputKeyFillHighlightColorBias: -0.25,
+  inputKeyFillHighlightSpread: 1.309,
+  inputKeyFillHighlightSpreadSDR: 1.309,
+};
+
 /** The channel table the shipping controller uses, kept in sync by hand. */
 export function channelTable({ clear, main }) {
   const table = {};
   for (const key of LINEAR_FROM_ZERO) table[key] = { start: 0, shape: "linear" };
   for (const key of LINEAR_FROM_ONE) table[key] = { start: 1, shape: "linear" };
   for (const key of HEIGHT_FAMILY) table[key] = { start: 0, shape: "height" };
+  for (const key of LINEAR_FROM_ZERO_27) table[key] = { start: 0, shape: "linear" };
+  for (const key of LINEAR_FROM_ONE_27) table[key] = { start: 1, shape: "linear" };
+  for (const [key, start] of Object.entries(LINEAR_FROM_MEASURED_27)) {
+    table[key] = { start, shape: "linear" };
+  }
   table.inputBlurOpacity3 = { start: 0, shape: "quadratic" };
   table.inputBlurOpacity4 = { start: 0, shape: "quadratic" };
   const blur = main ? "quadratic" : "quadraticFlat";
   table.inputBlurOpacity1 = { start: 0, shape: blur };
   table.inputBlurOpacity2 = { start: 0, shape: blur };
   table.inputClamp = { start: 1, shape: clear ? "clamp" : "linear" };
+  // macOS 27 gates the backdrop blur by size, and the transition overshoots by
+  // exactly the amount the gated endpoint falls short of full opacity. See the
+  // Swift table for the derivation; the term vanishes wherever the endpoint is
+  // 1, which is every macOS 26 cell and every Clear cell on either system.
+  table.inputBlurOpacity0 = {
+    start: 0,
+    shape: "linear",
+    saturationDeficitHump: true,
+  };
   return table;
 }
 
 /** Every continuous channel the table knows about, independent of context. */
 export const CONTINUOUS_CHANNELS = [
   ...LINEAR_FROM_ZERO, ...LINEAR_FROM_ONE, ...HEIGHT_FAMILY,
+  ...LINEAR_FROM_ZERO_27, ...LINEAR_FROM_ONE_27,
+  ...Object.keys(LINEAR_FROM_MEASURED_27),
   "inputBlurOpacity1", "inputBlurOpacity2", "inputBlurOpacity3",
   "inputBlurOpacity4", "inputClamp",
 ];
@@ -284,5 +330,8 @@ export const ALL_CHANNELS = [
 export function resolveChannel(channel, g, endpoint, inflation) {
   const shape = SHAPES[channel.shape];
   const factor = channel.shape === "height" ? shape(g, inflation) : shape(g);
-  return channel.start + (endpoint - channel.start) * factor;
+  const base = channel.start + (endpoint - channel.start) * factor;
+  return channel.saturationDeficitHump
+    ? base + (1 - endpoint) * g * (1 - g)
+    : base;
 }

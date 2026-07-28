@@ -6,9 +6,16 @@
 //  dimensionless shapes.
 //
 //  Evidence behind every constant in this file lives in the direct canonical
-//  Golden/macOS-26/unified archive (104 runs, 936 samples), with the analysis
-//  written up under "P1.1" in Documentation/GlassResearchRoadmap.md. Measured
-//  on macOS 26.6 (25G5065a); macOS 27 is not yet validated.
+//  Golden/macOS-26/unified and Golden/macOS-27/unified archives (104 runs and
+//  936 samples each), with the analysis written up under "P1.1" in
+//  Documentation/GlassResearchRoadmap.md. Measured on macOS 26.6 (25G5065a) and
+//  macOS 27.0 (26A5388g).
+//
+//  Both systems are served by one table with no version branch. The shapes are
+//  identical; macOS 27 only adds channels and retunes endpoints, and endpoints
+//  are read from the live tree rather than authored here. Two measured
+//  exceptions are documented and deliberately not reproduced, both confined to
+//  mid-transition values at a small short side: see `GlassMaterialStrength`.
 //
 
 #if os(macOS)
@@ -19,10 +26,11 @@ import AppKit
 /// `start + (endpoint - start) * shape(g)`.
 ///
 /// These are invariant across appearance, backdrop, Tint, and direction at the
-/// 200pt reference geometry. They are *not* invariant across size — see
-/// `GlassMaterialBaseline`; the 48pt removal face grade is also a measured
-/// dual-endpoint exception. Discrete gates are handled separately from this
-/// continuous shape vocabulary.
+/// 200pt reference geometry, and unchanged between macOS 26 and 27. They are
+/// *not* invariant across size — see `GlassMaterialBaseline`. On macOS 26 the
+/// 48pt face grade is additionally a measured dual-endpoint exception; macOS 27
+/// resolves one endpoint at every captured size. Discrete gates are handled
+/// separately from this continuous shape vocabulary.
 public enum GlassMaterialShape: Sendable {
     /// `g`. The majority of channels.
     case linear
@@ -49,9 +57,25 @@ public enum GlassMaterialShape: Sendable {
 }
 
 public struct GlassMaterialChannel: Sendable {
-    /// The resolved value at `g = 0`, measured as exactly 0 or 1 everywhere.
+    /// The resolved value at `g = 0`. Exactly 0 or 1 on every macOS 26 channel;
+    /// macOS 27's key fill highlight added measured starts that are neither.
     public let start: Double
     public let shape: GlassMaterialShape
+    /// Adds `(1 - endpoint) · g(1 - g)` on top of the shape: a mid-transition
+    /// overshoot whose amplitude is exactly the amount the resolved endpoint
+    /// falls short of full opacity. Only meaningful for a channel that
+    /// saturates at 1, and only `inputBlurOpacity0` measures this way.
+    public let saturationDeficitHump: Bool
+
+    public init(
+        start: Double,
+        shape: GlassMaterialShape,
+        saturationDeficitHump: Bool = false
+    ) {
+        self.start = start
+        self.shape = shape
+        self.saturationDeficitHump = saturationDeficitHump
+    }
 }
 
 /// The system-resolved endpoints of one live Recipe.
@@ -128,6 +152,48 @@ public enum GlassMaterialCurve {
         }
         table["inputBlurOpacity3"] = GlassMaterialChannel(start: 0, shape: .quadratic)
         table["inputBlurOpacity4"] = GlassMaterialChannel(start: 0, shape: .quadratic)
+
+        // macOS 27 rebuilt Regular's shadow: `inputShadowHeight` resolves to 0
+        // and a size-invariant ring shadow takes over, arriving alongside a blur
+        // fill and a key fill highlight — 22 new inputs, 17 of which animate.
+        //
+        // Every one of them rides the same clock as `inputFaceOpacity`.
+        // Normalized against its own start, each traces the face profile to
+        // within 1e-3 across all 52 insertion runs, so all 17 are linear and
+        // only the start values are new. A shape that merely fits better on
+        // average — `clamp` beat linear by 40% on mean error here — was the
+        // sampling lag every channel shares, not a different curve.
+        //
+        // These keys are absent on macOS 26, where `numericValues` skips them
+        // for want of an endpoint. That is why one table serves both systems
+        // with no version branch.
+        for key in [
+            "inputBlurFillBlurRadius", "inputBlurFillDarkenOpacity",
+            "inputBlurFillLightenOpacity", "inputBlurFillNormalOpacity",
+            "inputKeyFillHighlightEffectOffset", "inputKeyFillHighlightHeight",
+            "inputRingShadowOffset", "inputRingShadowOpacity",
+            "inputRingShadowStrokeWidth",
+        ] {
+            table[key] = GlassMaterialChannel(start: 0, shape: .linear)
+        }
+        for key in [
+            "inputFaceColorMatrixMaxLuma", "inputFaceColorMatrixMaxLumaSDR",
+            "inputRingShadowBlurRadius", "inputRingShadowMask",
+        ] {
+            table[key] = GlassMaterialChannel(start: 1, shape: .linear)
+        }
+        // The starts macOS 27 introduced that are neither 0 nor 1. Measured
+        // constants, invariant across size, participation, appearance, and
+        // Variant; a wrong start bows the normalized profile away from the face
+        // curve, and none of these do.
+        for (key, start) in [
+            ("inputKeyFillHighlightAmount", 0.4),
+            ("inputKeyFillHighlightColorBias", -0.25),
+            ("inputKeyFillHighlightSpread", 1.309),
+            ("inputKeyFillHighlightSpreadSDR", 1.309),
+        ] {
+            table[key] = GlassMaterialChannel(start: start, shape: .linear)
+        }
         return table
     }()
 
@@ -144,6 +210,26 @@ public enum GlassMaterialCurve {
         table["inputClamp"] = GlassMaterialChannel(
             start: 1,
             shape: isClear ? .clamp : .linear
+        )
+        // macOS 27 gates the backdrop blur by size: Regular resolves
+        // `inputBlurOpacity0` to zero below a 64pt short side, then ramps to 0.8
+        // over 64...160pt. Mid-transition the channel overshoots that gated
+        // endpoint by exactly the amount it falls short of full opacity:
+        //
+        //     value(g) = endpoint · g + (1 - endpoint) · g(1 - g)
+        //
+        // Measured across all 448 samples on both systems: worst absolute error
+        // 0.00008, against 0.24980 for a plain linear ramp. The coefficient on
+        // the deficit is exactly 1 — nothing is fitted here.
+        //
+        // The term is self-cancelling where it should be. Clear resolves an
+        // endpoint of 1 on both systems, and macOS 26 resolves 1 for Regular at
+        // every size, so `(1 - endpoint)` is zero and this reduces to the linear
+        // ramp that was measured there. No variant or version branch is needed.
+        table["inputBlurOpacity0"] = GlassMaterialChannel(
+            start: 0,
+            shape: .linear,
+            saturationDeficitHump: true
         )
         return table
     }
@@ -164,9 +250,13 @@ public enum GlassMaterialCurve {
             hasMainParticipation: hasMainParticipation
         ) {
             guard let endpoint = baseline.numeric[key] else { continue }
-            values[key] = channel.start
+            var value = channel.start
                 + (endpoint - channel.start)
                 * channel.shape.value(at: g, geometryInflation: inflation)
+            if channel.saturationDeficitHump {
+                value += (1 - endpoint) * g * (1 - g)
+            }
+            values[key] = value
         }
         // The one measured discrete edge: Clear in DarkAqua flips at the
         // midpoint, every other context holds its captured value.

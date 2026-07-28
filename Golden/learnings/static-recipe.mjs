@@ -186,24 +186,45 @@ export default [
     id: "size-scaled-inputs-follow-simple-ratios",
     claim:
       "Size-driven inputs are proportional to shortSide, some with a cap. "
-      + "Bleed 0.35·S and shadow height 0.4·S hold uncapped across the sweep",
+      + "Bleed 0.35·S holds uncapped across the sweep on both systems; shadow "
+      + "height holds 0.4·S on macOS 26 and is retired to a flat zero on "
+      + "macOS 27, where a size-invariant ring shadow replaces it",
     source: "AppKitGlassReverseEngineering.md — Geometry input is the shortest side",
     sections: [SECTION],
     verify({ sections, expect }) {
       const rows = regularMain(sections[SECTION].rows ?? []);
       const ratios = { inputBleedAmount: 0.35, inputShadowHeight: 0.4 };
       const errors = [];
+      const zeroed = new Map();
       for (const row of rows) {
         const short = row.cell.shortSide;
         for (const [key, ratio] of Object.entries(ratios)) {
           const actual = row.inputs?.[key];
-          if (typeof actual !== "number" || actual === 0) continue;
+          if (typeof actual !== "number") continue;
+          if (actual === 0) {
+            // Counted, not skipped. The previous revision dropped zeros
+            // silently, so macOS 27 retiring shadow height outright still read
+            // as a pass on a claim nothing had checked.
+            zeroed.set(key, (zeroed.get(key) ?? 0) + 1);
+            continue;
+          }
           errors.push({
             error: Math.abs(actual - ratio * short) / (ratio * short),
             key,
             short,
           });
         }
+      }
+      // A channel is either proportional at every size or inert at every size.
+      // Half of each would mean the ratio has a floor this sweep would then
+      // have to locate, and none of these do.
+      for (const [key, count] of [...zeroed].sort()) {
+        const scaled = errors.filter((item) => item.key === key).length;
+        expect.equal(
+          scaled === 0 ? "inert everywhere" : `mixed: ${scaled} scaled, ${count} zero`,
+          "inert everywhere",
+          `${key} resolves zero on ${count} rows`
+        );
       }
       expect.requireSamples(errors.length, 3, "size-scaled samples");
       expect.maxBelow(

@@ -73,11 +73,18 @@ noted.
 | corner radius | {0, 8, 32} at 480×200 | 12 | corner radius reaches no shader input |
 | real key | `key = true` on the Panel host, Main off, Subdued {off, on} | 4 | key alone selects the active branch, which is why `GlassMaterialStrength` reads `isMainWindow \|\| isKeyWindow` |
 
-The size list is chosen to straddle every known cap: inner refraction amount
-caps at −60 (crossing at short side 75 on macOS 26, 120 on macOS 27), inner
-refraction height at 20 (crossing at 80), outer refraction floors at 16
-(crossing at 64). A sweep that misses the crossing cannot tell a cap from a
-different ratio — which is exactly how the −0.8·S versus −0.5·S difference hid.
+The size list is chosen to straddle every known cap: for Regular, inner
+refraction amount caps at −60 (crossing at short side 75 on macOS 26, 120 on
+macOS 27), inner refraction height at 20 (crossing at 80), and on macOS 27 outer
+refraction floors at 16 (crossing at 64) and the backdrop blur opacity is gated
+off below 64 then ramps to 0.8 by 160. A sweep that misses the crossing cannot
+tell a cap from a different ratio — which is exactly how the −0.8·S versus
+−0.5·S difference hid.
+
+The dynamic section's three sizes are enough to *detect* these but not to locate
+a crossing. That is deliberate: the static sweep locates them cheaply at 12
+sizes, and the dynamic section only has to confirm that the endpoint it reads
+matches the Recipe at the same cell.
 
 Short side 200 is absent from the size slice because the core product already
 captures it at the reference geometry; a slice row there would collide on the
