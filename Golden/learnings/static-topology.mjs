@@ -53,9 +53,17 @@ function repeatValueSignature(row) {
   return JSON.stringify(canonical({ layers: row.layers ?? {}, passes }));
 }
 
-/** Repeat rows are evidence about the core product, not extra product cells. */
+/**
+ * Only the core product. Repeat and appearance rows are evidence *about* that
+ * product — a second observation of a cell, and a Dark counterpart — so letting
+ * them into a product-shaped assertion inflates counts and mixes appearances
+ * into groups that are supposed to isolate one axis.
+ *
+ * A transcoded archive has no slices at all — its rows are one product — so a
+ * missing `slice` reads as core rather than as something to exclude.
+ */
 const coreRows = (document) =>
-  (document.rows ?? []).filter((row) => row.slice !== "repeat");
+  (document.rows ?? []).filter((row) => (row.slice ?? "core") === "core");
 
 /** Groups rows by a subset of cell fields. */
 function groupBy(rows, fields) {

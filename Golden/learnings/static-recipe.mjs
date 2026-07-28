@@ -50,7 +50,13 @@ export default [
       const rows = baseRows(sections[SECTION].rows ?? []);
       const groups = new Map();
       for (const row of rows) {
-        const key = [row.cell.variant, row.cell.main, row.cell.shortSide].join("|");
+        // Appearance belongs in the key. It moves resolved values, so leaving
+        // it out puts Light and Dark rows in one group and reports their real
+        // difference as a corner-radius or aspect-ratio effect.
+        const key = [
+          row.cell.variant, row.cell.main, row.cell.appearance,
+          row.cell.shortSide,
+        ].join("|");
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(row);
       }
@@ -82,7 +88,13 @@ export default [
       const rows = baseRows(sections[SECTION].rows ?? []);
       const groups = new Map();
       for (const row of rows) {
-        const key = [row.cell.variant, row.cell.main, row.cell.shortSide].join("|");
+        // Appearance belongs in the key. It moves resolved values, so leaving
+        // it out puts Light and Dark rows in one group and reports their real
+        // difference as a corner-radius or aspect-ratio effect.
+        const key = [
+          row.cell.variant, row.cell.main, row.cell.appearance,
+          row.cell.shortSide,
+        ].join("|");
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(row);
       }

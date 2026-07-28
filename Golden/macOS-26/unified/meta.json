@@ -1,15 +1,15 @@
 {
-  "capturedAt" : "2026-07-28T07:26:27Z",
+  "capturedAt" : "2026-07-28T09:20:37Z",
   "operatingSystem" : "Version 26.6 (Build 25G5065a)",
   "role" : "canonical",
   "schemaVersion" : 1,
   "sections" : {
     "dynamic" : {
-      "bytes" : 5404735,
+      "bytes" : 5406311,
       "file" : "dynamic.json",
       "repeatedCells" : 4,
       "rows" : 104,
-      "sha256" : "734aa14f124291f412110545064ade4c2146702b0bd60cc93514cc9f11a255d9",
+      "sha256" : "8d6ac1a8457eda2de89b83cb345b824684161177fcf5295c312caa3aa877324b",
       "slices" : {
         "backdrop" : 4,
         "core" : 96,
@@ -26,13 +26,13 @@
       ]
     },
     "static-scalar" : {
-      "bytes" : 974401,
+      "bytes" : 1744650,
       "file" : "static-scalar.json",
       "repeatedCells" : 0,
-      "rows" : 408,
-      "sha256" : "89f426770a32286dae2249a57338ab66d41df48d7bae9f821ba6ade7500be7c4",
+      "rows" : 744,
+      "sha256" : "913a13a0e70f923ddd5ca414ffc03a8643af4bfc14b87e651b1c24478c5a87e4",
       "slices" : {
-        "core" : 336,
+        "core" : 672,
         "cornerRadius" : 12,
         "key" : 4,
         "size" : 48,
@@ -44,18 +44,20 @@
         "main",
         "key",
         "subdued",
+        "appearance",
         "width",
         "height",
         "cornerRadius"
       ]
     },
     "static-tree" : {
-      "bytes" : 7151125,
+      "bytes" : 7574382,
       "file" : "static-tree.json",
       "repeatedCells" : 21,
-      "rows" : 357,
-      "sha256" : "9037d30dc46dea870fd6c223faba7f45015e2b03e6682ee5228a341ec3b1024b",
+      "rows" : 378,
+      "sha256" : "8d653629f65703fd30def275b9fdf0a957f91ead35e5cbdc889b9fa19f93dd82",
       "slices" : {
+        "appearance" : 21,
         "core" : 336,
         "repeat" : 21
       },
@@ -63,7 +65,8 @@
         "variant",
         "subvariant",
         "main",
-        "subdued"
+        "subdued",
+        "appearance"
       ]
     }
   }
