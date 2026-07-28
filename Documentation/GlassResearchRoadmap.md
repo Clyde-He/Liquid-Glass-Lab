@@ -36,7 +36,7 @@ work, not an optional refinement.
 | Priority | Track | Current state |
 |---|---|---|
 | P0 | AppKit observed-pass completeness and control | Regular/Clear target topology closed: all five passes have accepted controls; V14/V19 outlier-family audits remain separate |
-| P1 | Material Strength and system preset-curve research | Regular/Clear curve closed numerically across the sampled environment matrix and rebuilt as a baseline-driven scalar; visual/perceptual validation remains |
+| P1 | Material Strength and system preset-curve research | Regular/Clear curve closed on macOS 26: baseline-driven scalar, environment and geometry matrices accepted, author visual acceptance passed. Resize-reconstruction test, P1.4 cost, and the reduced macOS 27 set remain |
 | P2 | Recipe-axis closure | Fixed macOS 26/27 products captured; targeted axes remain |
 | P3 | Pass injection/transplant | Deferred, high risk, not required for Override |
 | P4 | Broader SwiftUI private authoring | Role inventory and fixed-context trees complete |
@@ -710,6 +710,22 @@ Sample at minimum `0`, `0.125`, `0.25`, `0.5`, `0.75`, and `1`. For every point:
 - compare the fitted curve with the observed Materialize/Dissolve channels and
   document every intentional divergence.
 
+#### Visual acceptance — 2026-07-27
+
+The author reviewed the baseline-driven scalar against representative content
+and against whole-view `alphaValue`, and accepted both:
+
+- perceived strength is monotonic, with no pass pop-in, hue shift, or
+  intermediate discontinuity;
+- `g = 0` leaves no residual tint, blur, refraction, shadow, or halo;
+- intermediate values stay recognizably Glass rather than reading as a faded
+  composite, which is the behavior `alphaValue` cannot produce.
+
+This is an author visual acceptance, not an instrumented measurement. Unlike
+every other accepted result in this lane it has no fixture behind it, and it
+was performed on macOS 26 only. It should be repeated before any release that
+changes the curve, the target OS, or the production surface.
+
 ### P1.4 — Runtime and performance
 
 Static cost and animated-transition cost are separate measurements. With the
@@ -729,16 +745,29 @@ sample.
 
 P1 is complete when:
 
-- the system Materialize/Dissolve behavior is classified as endpoint preset,
-  timing curve, multi-channel curve, or a combination;
-- role/Variant and direction dependence are known for the sampled domain;
-- strength `1` reproduces the accepted source Recipe;
-- strength `0` has no residue beyond the explicitly chosen endpoint;
-- intermediate points remain continuous and recognizably Glass;
-- context/resize reconstruction cannot permanently replace the authored state;
-- runtime cost is measured against whole-view alpha;
-- a consumer can expose one strength control while low-level pass inputs remain
-  implementation detail.
+- ✅ the system Materialize/Dissolve behavior is classified as endpoint preset,
+  timing curve, multi-channel curve, or a combination — it is a multi-channel
+  curve over read endpoints, with two discrete edges and a size-dependent
+  geometry term;
+- ✅ role/Variant and direction dependence are known for the sampled domain;
+- ✅ strength `1` reproduces the accepted source Recipe — by construction, since
+  the endpoints are captured from it;
+- ✅ strength `0` has no residue beyond the explicitly chosen endpoint (author
+  visual acceptance, macOS 26);
+- ✅ intermediate points remain continuous and recognizably Glass (author visual
+  acceptance, macOS 26);
+- ⬜ context/resize reconstruction cannot permanently replace the authored state
+  — the pristine-baseline recapture is implemented and restamps after layout,
+  but no controlled resize/reconstruction test has been run against it;
+- ⬜ runtime cost is measured against whole-view alpha — P1.4 is untouched;
+  the visual comparison against `alphaValue` has been accepted, the cost
+  comparison has not;
+- ✅ a consumer can expose one strength control while low-level pass inputs
+  remain implementation detail.
+
+Two criteria remain, both narrow. Separately, everything above is macOS 26
+only; extending it needs the reduced macOS 27 set described in P1.1, not
+another full matrix, because endpoints are read rather than authored.
 
 ## P2 — Recipe-axis closure
 
