@@ -10,6 +10,65 @@
 #if os(macOS)
 import AppKit
 
+/// One resolved style, captured from a live pristine tree and stamped verbatim
+/// thereafter: endpoints, context flags, the untinted color grades, and the
+/// rim gate all stop following the window and stay at the captured context.
+///
+/// This is how a glass is locked to a context its window is not actually in —
+/// a HUD panel that should always render the Main-On DarkAqua Regular material
+/// even while another window is main. Writes to the private tree are not gated
+/// by window state; only the system's own resolver is, and the frozen restamp
+/// outlives its rebuilds.
+///
+/// Capture from a glass that genuinely *is* in the context to lock — main/key
+/// window, forced `NSAppearance` — on the same display and at the same
+/// geometry as the destination:
+///
+///     let style = GlassMaterialFrozenStyle.capture(from: probeGlass)!
+///     hudGlass.materialStrength.freezeStyle(style)
+///
+/// Geometry is part of the capture: size-scaled endpoints (the
+/// `0.35 · shortSide` bleed family, the shadow family, per-context blur caps)
+/// are baked into the baseline, so a frozen style is exact only at the short
+/// side it was captured at. Freeze fixed-size surfaces, or recapture after a
+/// resize. A handful of resolved fields are additionally display-sensitive
+/// (the key-fill highlight offset/height family), so recapture applies after
+/// moving to a different display too. Both are the reason the Golden fixture
+/// values stay regression references rather than a runtime source: a capture
+/// taken on the running machine is correct where a burned-in table is not.
+public struct GlassMaterialFrozenStyle {
+    public let baseline: GlassMaterialBaseline
+    public let isClear: Bool
+    public let hasMainParticipation: Bool
+    public let isLightAppearance: Bool
+    /// The untinted Content/Rim `vibrantColorMatrix` grades, in the same
+    /// deterministic traversal order they are restamped in. The transition
+    /// never animates these, but the resolver re-grades them per
+    /// appearance/participation — leaving them unwritten would blend the
+    /// frozen material with the window's real state after every rebuild.
+    public let colorMatrices: [[Float]]
+
+    /// Captures the currently resolved style, or nil when the tree is missing
+    /// or already mutated (`inputFaceOpacity < 0.999`). Capture at
+    /// `value == 1`, before dialing strength down.
+    @MainActor
+    public static func capture(
+        from glass: NSGlassEffectView
+    ) -> GlassMaterialFrozenStyle? {
+        guard let baseline = GlassMaterialStrength.captureBaseline(from: glass),
+              baseline.isPristine else { return nil }
+        return GlassMaterialFrozenStyle(
+            baseline: baseline,
+            isClear: GlassMaterialStrength.isClear(glass),
+            hasMainParticipation: GlassMaterialStrength
+                .hasMainParticipation(glass),
+            isLightAppearance: GlassMaterialStrength.isLightAppearance(glass),
+            colorMatrices: GlassMaterialAccess.untintedMatrixLayers(under: glass)
+                .compactMap(GlassMaterialAccess.colorMatrix)
+        )
+    }
+}
+
 /// Continuously dials an `NSGlassEffectView` between its system-resolved
 /// material at `1` and a fully dematerialized surface at `0`, coordinating
 /// every contributing pass rather than fading the composited result.
@@ -25,6 +84,11 @@ import AppKit
 /// window participation, and subvariant are all followed automatically. Call
 /// `refresh()` after any layout pass or Recipe rebuild; `GlassMaterialEffectView`
 /// does that for you.
+///
+/// To *stop* following the window instead — render a captured context such as
+/// Main-On DarkAqua Regular regardless of the window's real state — install a
+/// `GlassMaterialFrozenStyle` via `freezeStyle(_:)`. `value` then interpolates
+/// against the frozen endpoints and context until `unfreezeStyle()`.
 ///
 /// ## Scope
 ///
@@ -86,6 +150,9 @@ public final class GlassMaterialStrength {
     private var appliedValue: Double = 1
     private var lastWrittenFilterIdentity: ObjectIdentifier?
 
+    /// The installed frozen style, if any. See `freezeStyle(_:)`.
+    public private(set) var frozenStyle: GlassMaterialFrozenStyle?
+
     /// Material strength, clamped to `0...1`. Defaults to `1`, which leaves the
     /// system Recipe untouched until the first change.
     public var value: Double {
@@ -104,7 +171,7 @@ public final class GlassMaterialStrength {
 
     /// False when the glass has no `glassBackground` pass yet — before first
     /// layout, or for a Variant that resolves without one.
-    public var isAvailable: Bool { baseline != nil }
+    public var isAvailable: Bool { baseline != nil || frozenStyle != nil }
 
     public init(glass: NSGlassEffectView, value: Double = 1) {
         self.glass = glass
@@ -129,25 +196,65 @@ public final class GlassMaterialStrength {
             return
         }
 
-        guard let candidate = Self.captureBaseline(
-            from: glass,
-            target: target
-        ) else {
-            baseline = nil
-            lastWrittenFilterIdentity = nil
-            return
-        }
-        let observedFace = candidate.numeric["inputFaceOpacity"]
-        let looksLikeOurCurrentWrite =
-            appliedValue < 1
-            && lastWrittenFilterIdentity == target.identity
-            && observedFace.map {
-                abs($0 - appliedValue) <= 0.000_001
-            } == true
-        if candidate.isPristine, !looksLikeOurCurrentWrite {
-            baseline = candidate
+        // A frozen style never re-adopts: whatever the resolver just wrote for
+        // the window's real context is exactly what the freeze exists to
+        // override. Adoption would also read back our own frozen values as a
+        // "pristine" live baseline and poison a later unfreeze.
+        if frozenStyle == nil {
+            guard let candidate = Self.captureBaseline(
+                from: glass,
+                target: target
+            ) else {
+                baseline = nil
+                lastWrittenFilterIdentity = nil
+                return
+            }
+            let observedFace = candidate.numeric["inputFaceOpacity"]
+            let looksLikeOurCurrentWrite =
+                appliedValue < 1
+                && lastWrittenFilterIdentity == target.identity
+                && observedFace.map {
+                    abs($0 - appliedValue) <= 0.000_001
+                } == true
+            if candidate.isPristine, !looksLikeOurCurrentWrite {
+                baseline = candidate
+            }
         }
         apply(to: target)
+    }
+
+    /// Locks the glass to the style it is resolving right now. Returns false
+    /// when the tree is absent or not pristine — freeze at `value == 1`, in
+    /// the context to lock, before dialing strength down.
+    @discardableResult
+    public func freezeStyle() -> Bool {
+        guard let glass,
+              let style = GlassMaterialFrozenStyle.capture(from: glass)
+        else { return false }
+        freezeStyle(style)
+        return true
+    }
+
+    /// Installs a style captured elsewhere — typically from a probe glass in
+    /// the context to lock — and stamps it immediately. While frozen, `value`
+    /// interpolates against the captured endpoints and context: participation
+    /// selects the captured blur shapes, the rim gate follows the captured
+    /// opacity, and the untinted color grades are restamped after every
+    /// system rebuild.
+    public func freezeStyle(_ style: GlassMaterialFrozenStyle) {
+        frozenStyle = style
+        baseline = nil
+        lastWrittenFilterIdentity = nil
+        apply()
+    }
+
+    /// Returns to live-read behavior. The frozen values persist on the tree
+    /// until AppKit next rebuilds it, at which point the freshly resolved
+    /// Recipe is adopted as the live baseline again; as everywhere else, an
+    /// immediate true restore requires recreating the glass view.
+    public func unfreezeStyle() {
+        frozenStyle = nil
+        refresh()
     }
 
     /// Stops tracking and returns the controller to a neutral state.
@@ -157,6 +264,7 @@ public final class GlassMaterialStrength {
     /// and recreate the `NSGlassEffectView` for a true restore.
     public func invalidate() {
         baseline = nil
+        frozenStyle = nil
         lastWrittenFilterIdentity = nil
     }
 
@@ -193,24 +301,35 @@ public final class GlassMaterialStrength {
     private func apply(
         to suppliedTarget: GlassMaterialAccess.GlassBackgroundTarget? = nil
     ) {
+        let frozen = frozenStyle
         guard let glass,
-              let baseline,
+              let baseline = frozen?.baseline ?? baseline,
               let target = suppliedTarget
                 ?? GlassMaterialAccess.glassBackgroundTarget(under: glass)
         else { return }
 
-        let isClear = Self.isClear(glass)
-        let hasMain = Self.hasMainParticipation(glass)
-        let isLight = glass.effectiveAppearance
-            .bestMatch(from: [.aqua, .darkAqua]) == .aqua
+        let isClear = frozen?.isClear ?? Self.isClear(glass)
+        let hasMain = frozen?.hasMainParticipation
+            ?? Self.hasMainParticipation(glass)
+        let isLight = frozen?.isLightAppearance ?? Self.isLightAppearance(glass)
 
-        let numbers = GlassMaterialCurve.numericValues(
+        var numbers = GlassMaterialCurve.numericValues(
             at: value,
             baseline: baseline,
             isClear: isClear,
             hasMainParticipation: hasMain,
             isLightAppearance: isLight
         )
+        // A frozen style also owns the captured inputs the curve never
+        // animates. The resolver re-resolves those per participation and
+        // appearance, so leaving them unwritten would blend the frozen
+        // material with the window's real state after every rebuild. They are
+        // constants: the system holds them through the whole transition too.
+        if frozen != nil {
+            for (key, endpoint) in baseline.numeric where numbers[key] == nil {
+                numbers[key] = endpoint
+            }
+        }
         let colors = GlassMaterialCurve.colorValues(at: value, baseline: baseline)
 
         CATransaction.begin()
@@ -223,24 +342,42 @@ public final class GlassMaterialStrength {
         }
         CATransaction.commit()
 
-        if hasMain {
-            let opacity = GlassMaterialCurve.rimOpacity(at: value, baseline: baseline)
+        // Live mode leaves the rim to the system unless Main is genuinely
+        // held. A frozen style owns the gate in both directions: it opens a
+        // captured Main-On rim on a window that is not main, and holds a
+        // captured Subdued rim closed on one that is.
+        if frozen != nil || hasMain {
+            let opacity = hasMain
+                ? GlassMaterialCurve.rimOpacity(at: value, baseline: baseline)
+                : 0
             for layer in GlassMaterialAccess.rimLayers(under: glass) {
                 GlassMaterialAccess.setRimOpacity(opacity, on: layer)
+            }
+        }
+
+        if let frozen, !frozen.colorMatrices.isEmpty {
+            let layers = GlassMaterialAccess.untintedMatrixLayers(under: glass)
+            // Stamped pairwise in the shared traversal order; a count mismatch
+            // means the topology is not the one captured (Variant change,
+            // mid-rebuild sample) and nothing is guessed.
+            if layers.count == frozen.colorMatrices.count {
+                for (layer, matrix) in zip(layers, frozen.colorMatrices) {
+                    GlassMaterialAccess.setColorMatrix(matrix, on: layer)
+                }
             }
         }
 
         if let tintColor,
            let sourceAlpha = tintColor.usingColorSpace(.deviceRGB)?.alphaComponent,
            let tintLayer = GlassMaterialAccess.tintMatrixLayer(under: glass),
-           var matrix = GlassMaterialAccess.tintMatrix(on: tintLayer) {
+           var matrix = GlassMaterialAccess.colorMatrix(on: tintLayer) {
             matrix[18] = Float(
                 GlassMaterialCurve.tintMatrixAlpha(
                     at: value,
                     sourceAlpha: Double(sourceAlpha)
                 )
             )
-            GlassMaterialAccess.setTintMatrix(matrix, on: tintLayer)
+            GlassMaterialAccess.setColorMatrix(matrix, on: tintLayer)
         }
 
         appliedValue = value
@@ -255,7 +392,7 @@ public final class GlassMaterialStrength {
     /// Reads the resolved Recipe index. Regular is 1 and Clear is 2; anything
     /// else is treated as Regular-like, which is the correct fallback because
     /// only Clear selects a different `inputClamp` shape.
-    private static func isClear(_ glass: NSGlassEffectView) -> Bool {
+    static func isClear(_ glass: NSGlassEffectView) -> Bool {
         let resolved = GlassMaterialAccess.valueIfResponds(
             forKey: "_variant",
             on: glass
@@ -266,9 +403,13 @@ public final class GlassMaterialStrength {
     /// A window that is genuinely key *or* genuinely main receives the active
     /// Recipe; neither gets the flat one. Spoofed getters do not count, so this
     /// reads the real AppKit state.
-    private static func hasMainParticipation(_ glass: NSGlassEffectView) -> Bool {
+    static func hasMainParticipation(_ glass: NSGlassEffectView) -> Bool {
         guard let window = glass.window else { return false }
         return window.isMainWindow || window.isKeyWindow
+    }
+
+    static func isLightAppearance(_ glass: NSGlassEffectView) -> Bool {
+        glass.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
     }
 }
 
@@ -290,6 +431,65 @@ public final class GlassMaterialEffectView: NSGlassEffectView {
         isRefreshing = true
         defer { isRefreshing = false }
         materialStrength.refresh()
+    }
+
+    // Main/key participation and appearance changes rewrite the Recipe
+    // *without* a layout pass, so the layout hook alone would leave a frozen
+    // style showing the system's freshly resolved values until the next
+    // resize. Live mode benefits too: re-adopting the new endpoints no longer
+    // waits for an unrelated layout.
+
+    override public func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        observeParticipation(of: window)
+        refreshNowAndAfterSystemRestamp()
+    }
+
+    override public func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshNowAndAfterSystemRestamp()
+    }
+
+    override public func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        refreshNowAndAfterSystemRestamp()
+    }
+
+    private func observeParticipation(of window: NSWindow?) {
+        let center = NotificationCenter.default
+        center.removeObserver(self)
+        guard let window else { return }
+        for name in [
+            NSWindow.didBecomeMainNotification,
+            NSWindow.didResignMainNotification,
+            NSWindow.didBecomeKeyNotification,
+            NSWindow.didResignKeyNotification,
+        ] {
+            center.addObserver(
+                self,
+                selector: #selector(participationDidChange),
+                name: name,
+                object: window
+            )
+        }
+    }
+
+    @objc private func participationDidChange(_ note: Notification) {
+        refreshNowAndAfterSystemRestamp()
+    }
+
+    /// Refreshes immediately, then once more on the next runloop turn.
+    ///
+    /// Whether AppKit writes an intermediate Recipe between a participation
+    /// change and this restamp is the open P2 question in the research
+    /// roadmap. The trailing refresh makes the authored state the final
+    /// writer either way, bounding any system write to a single frame until
+    /// that question is settled by capture.
+    private func refreshNowAndAfterSystemRestamp() {
+        materialStrength.refresh()
+        Task { @MainActor [weak self] in
+            self?.materialStrength.refresh()
+        }
     }
 }
 #endif

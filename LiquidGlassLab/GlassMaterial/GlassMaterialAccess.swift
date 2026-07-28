@@ -189,7 +189,7 @@ enum GlassMaterialAccess {
         return false
     }
 
-    // MARK: Tint matrix
+    // MARK: Color matrices
 
     /// Public Tint is topology, not a `glassBackground` field: a nonnil tint
     /// inserts its own branch whose `vibrantColorMatrix` shares an owner path
@@ -219,8 +219,37 @@ enum GlassMaterialAccess {
         }
     }
 
-    /// Reads the 4x5 color matrix of the Tint-owned `vibrantColorMatrix`.
-    static func tintMatrix(on layer: CALayer) -> [Float]? {
+    /// The untinted Content and Rim `vibrantColorMatrix` owners, in
+    /// deterministic depth-first order. The transition never animates these,
+    /// but the resolver re-grades them per appearance/participation, so a
+    /// frozen style has to restamp them alongside the `glassBackground` vector.
+    static func untintedMatrixLayers(under glass: NSGlassEffectView) -> [CALayer] {
+        guard let root = glass.layer else { return [] }
+        var found: [CALayer] = []
+        collectUntintedMatrixLayers(under: root, into: &found)
+        return found
+    }
+
+    private static func collectUntintedMatrixLayers(
+        under layer: CALayer,
+        into found: inout [CALayer]
+    ) {
+        if let filters = layer.filters as? [NSObject],
+           filters.contains(where: { filterName($0) == "vibrantColorMatrix" }) {
+            let ownsGradientEffect = (
+                valueIfResponds(forKey: "effect", on: layer) as? NSObject
+            ).map { String(describing: type(of: $0)) == "CASDFGradientEffect" }
+                ?? false
+            if !ownsGradientEffect { found.append(layer) }
+        }
+        for sublayer in layer.sublayers ?? [] {
+            collectUntintedMatrixLayers(under: sublayer, into: &found)
+        }
+    }
+
+    /// Reads the 4x5 color matrix of the first `vibrantColorMatrix` on the
+    /// layer. Serves the Tint branch and the untinted Content/Rim slots alike.
+    static func colorMatrix(on layer: CALayer) -> [Float]? {
         guard let filter = (layer.filters as? [NSObject])?.first(where: {
             filterName($0) == "vibrantColorMatrix"
         }), filterInputKeys(filter).contains("inputColorMatrix"),
@@ -235,7 +264,7 @@ enum GlassMaterialAccess {
         return storage
     }
 
-    static func setTintMatrix(_ matrix: [Float], on layer: CALayer) {
+    static func setColorMatrix(_ matrix: [Float], on layer: CALayer) {
         guard matrix.count == 20,
               let filter = (layer.filters as? [NSObject])?.first(where: {
                   filterName($0) == "vibrantColorMatrix"

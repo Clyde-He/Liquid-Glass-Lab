@@ -28,6 +28,42 @@ If the glass has a public tint, hand it over so the tint branch tracks too:
 strength.tintColor = glassView.tintColor
 ```
 
+## Freeze a style
+
+Live mode follows the window: lose main, and the glass re-reads Subdued
+endpoints. To lock a glass to a context its window is not actually in — a HUD
+panel that should always render the Main-On DarkAqua Regular material —
+capture the style once from a glass that genuinely *is* in that context, then
+install it:
+
+```swift
+// Probe: a glass in a key/main window with a forced dark appearance,
+// same size and display as the destination.
+let style = GlassMaterialFrozenStyle.capture(from: probeGlass)!
+
+hudGlass.materialStrength.freezeStyle(style)
+hudGlass.materialStrength.value = 0.5   // interpolates the frozen style
+```
+
+While frozen, endpoints, blur shapes, the rim gate, the untinted Content/Rim
+color grades, and every captured input the curve never animates are restamped
+after each system rebuild, so the resolver's own Subdued/appearance rewrites
+do not bleed through. `unfreezeStyle()` returns to live behavior at the next
+rebuild.
+
+Two rules carry over from how the values are measured. Geometry is part of the
+capture — size-scaled endpoints are baked into the baseline — so freeze
+fixed-size surfaces or recapture after a resize. And capture on the running
+machine rather than burning in fixture values: a handful of resolved fields
+are display-sensitive, which is why the `Golden/` archives are regression
+references, not a runtime source.
+
+One caveat is inherited from an open research question: whether AppKit writes
+an intermediate Recipe during active/inactive transitions before the restamp
+runs (roadmap P2). `GlassMaterialEffectView` refreshes on participation and
+appearance notifications and once more on the next runloop turn, bounding any
+such write to a single frame until that is settled by capture.
+
 ## Take it
 
 Copy this directory. It has no dependency on the rest of Liquid Glass Lab —
@@ -35,7 +71,7 @@ three files, AppKit only:
 
 | File | Role |
 |---|---|
-| `GlassMaterialAccess.swift` | The minimum private-API surface: layer lookup, filter read/write, rim gate, tint matrix |
+| `GlassMaterialAccess.swift` | The minimum private-API surface: layer lookup, filter read/write, rim gate, color matrices |
 | `GlassMaterialCurve.swift` | The measured curve: shapes, channel table, baseline |
 | `GlassMaterialStrength.swift` | The controller and the `NSGlassEffectView` subclass |
 
@@ -84,11 +120,13 @@ though the two are close in a one-second linear capture.
 
 ## What is verified
 
-Measured on **macOS 26.6 (25G5065a)** for public **Regular and Clear** in a
-panel. The accepted direct archive contains 104 runs / 936 samples across
+Measured on **macOS 26.6 (25G5065a)** and **macOS 27.0 (26A5388g)** for public
+**Regular and Clear** in a panel, served by one table with no version branch.
+Each accepted direct archive contains 104 runs / 936 samples across
 appearance, backdrop, participation, tint, both directions, and `shortSide`
-48/200/400. Fixtures and analysis live in `Golden/macOS-26/unified/` and the
-P1.1 section of `Documentation/GlassResearchRoadmap.md`.
+48/200/400. Fixtures and analysis live in `Golden/macOS-26/unified/`,
+`Golden/macOS-27/unified/`, and the P1.1 section of
+`Documentation/GlassResearchRoadmap.md`.
 
 The executable learnings currently pass 33/33 on macOS 26. At the 200pt
 reference size the single-endpoint curve replays the measured continuous
@@ -98,9 +136,12 @@ AppKit replacing the whole subtree.
 
 ## What is not
 
-- **macOS 27 is unvalidated.** Its `glassBackground` is a `DLCAFilter` with 22
-  additional input keys. Keys absent from the channel table are never written,
-  so if any of them animate, `value = 0` will not be clean there.
+- **macOS 27's compact visual acceptance is pending.** The direct macOS 27
+  archive (`Golden/macOS-27/unified/`) landed: of its 22 new `glassBackground`
+  inputs, 17 animate and are in the table, one is verified static, and the
+  four aberration inputs never resolve in the sampled domain. The numeric side
+  is closed from the same table as macOS 26; the targeted author review of the
+  small-size path has not happened yet.
 - **Private semantic roles and non-panel hosts** were never sampled.
 - **Visual acceptance is the author's, not instrumented**, and only on macOS 26.
 - **Runtime cost is unmeasured.** Do not drive this from a high-frequency

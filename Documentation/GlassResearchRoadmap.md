@@ -993,7 +993,10 @@ values, or Override reconstruction:
   from nil;
 - close targeted Height 24/600 cells selected by P0.6;
 - determine whether inactive-app transitions write an intermediate Recipe
-  before Override restamping;
+  before Override restamping; this axis now has a production consumer —
+  `GlassMaterialStrength`'s frozen-style mode restamps on every participation
+  change and currently bounds any such write to one frame with a trailing
+  next-runloop refresh rather than knowing whether one occurs;
 - isolate Scrim, adaptive appearance, tint/reduced tint opacity, accessibility,
   contrast, and host-type effects one axis at a time;
 - preserve real requested and actual key/main participation in every accepted
