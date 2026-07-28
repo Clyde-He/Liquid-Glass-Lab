@@ -99,6 +99,12 @@ The repeat is the direct capture's stability evidence for the static tree. It
 lands as additional rows on cells that already exist; the archive treats a
 repeated cell as evidence and never deduplicates.
 
+Variant 4 is the measured adaptive exception: its
+`inputFaceColorMatrixBlack`, `inputFaceColorMatrixFillColor`, and
+`inputShadowColorMatrixFillColor` values may follow display adaptation between
+the two sweeps. Repeat comparison excludes only those three fields for that
+variant and still requires every other layer, pass, and property to agree.
+
 **Total: 357 rows, ≈ 7 MB.**
 
 ## Section 3 — `dynamic`
@@ -120,6 +126,14 @@ repeat slice     re-capture the 200pt / Light appearance+backdrop /
 ```
 
 Nine samples per run spanning `g = 0` to `g = 1`.
+
+Every run gets a fresh transition-view identity. Insertion starts from a
+committed hidden subtree. Removal first performs a real Materialize In on a
+fresh hidden subtree, waits for the long-lived Recipe to stabilize, and only
+then captures Materialize Out. This prevents a directly constructed Presented
+view or a coalesced false→true update from standing in for the actual removal
+lifecycle. A completed removal has no `glassBackground`; that missing terminal
+tree is the observation of `g = 0`.
 
 Backdrop is a slice rather than a full axis because it is *proven* not to reach
 model state — but the axis has to survive so the proof can be re-derived on the

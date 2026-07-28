@@ -5176,18 +5176,38 @@ struct GlassLabView: View {
         materializeCaptureStatus =
             "Settling \(direction.rawValue.lowercased()) start endpoint…"
         let initialPresented = direction.initialPresentedState
-        materializePresented = initialPresented
-        state.testWindow.configureSemanticTransitionProbe(
-            enabled: true,
-            presented: initialPresented
-        )
-        try await Task.sleep(for: .milliseconds(240))
-        try Task.checkCancellation()
-        try await requireMaterializeContext()
-
-        guard let preflight = captureCurrentMaterializeSnapshot() else {
-            throw TintStudyError.missingSemanticSnapshot
+        if direction == .removal {
+            // Prepare removal through the real lifecycle: a fresh hidden
+            // subtree materializes in, then reaches its long-lived Recipe
+            // before it is removed. At shortSide 48 the animation endpoint
+            // briefly uses a different face grade before settling back to the
+            // static Recipe; the capture must preserve that distinction.
+            materializePresented = false
+            state.testWindow.resetSemanticTransitionProbe(presented: false)
+            // Let the absent subtree commit before publishing the presented
+            // state. Without this boundary SwiftUI coalesces false → true and
+            // constructs an already-presented static Recipe instead of
+            // running the warm-up materialization.
+            _ = try await captureSettledMaterializePreflight()
+            materializePresented = true
+            let warmupDuration = animationMode == .linear
+                ? linearDuration
+                : 0.8
+            state.testWindow.setSemanticTransitionPresented(
+                true,
+                animationMode: .linear,
+                linearDuration: warmupDuration
+            )
+            try await Task.sleep(
+                for: .seconds(warmupDuration + 0.12)
+            )
+        } else {
+            materializePresented = initialPresented
+            state.testWindow.resetSemanticTransitionProbe(
+                presented: initialPresented
+            )
         }
+        let preflight = try await captureSettledMaterializePreflight()
         var samples = [
             GlassLabMaterializeSample(
                 phase: "preflight",
@@ -5308,6 +5328,39 @@ struct GlassLabView: View {
             context: context,
             samples: samples
         )
+    }
+
+    /// Context truth and material endpoint stability are separate conditions.
+    /// The window can already report the requested size/appearance/Main state
+    /// while SwiftUI is still replacing or retiring the private Recipe
+    /// underneath it. Require the model tree to agree across observations
+    /// after 360 ms rather than naming one fixed delay "settled".
+    @MainActor
+    private func captureSettledMaterializePreflight() async throws
+        -> GlassLabSemanticTransitionSnapshot
+    {
+        var previousModel: GlassLabSemanticSnapshot?
+        var latest: GlassLabSemanticTransitionSnapshot?
+        var elapsedMilliseconds = 0
+
+        for delayMilliseconds in [120, 120, 120, 120, 240] {
+            try await Task.sleep(for: .milliseconds(delayMilliseconds))
+            try Task.checkCancellation()
+            try await requireMaterializeContext()
+            guard let current = captureCurrentMaterializeSnapshot() else {
+                continue
+            }
+            elapsedMilliseconds += delayMilliseconds
+            if elapsedMilliseconds >= 360, current.model == previousModel {
+                return current
+            }
+            previousModel = current.model
+            latest = current
+        }
+        guard let latest else {
+            throw TintStudyError.missingSemanticSnapshot
+        }
+        return latest
     }
 
     @MainActor

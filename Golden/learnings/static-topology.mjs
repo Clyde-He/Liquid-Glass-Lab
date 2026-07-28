@@ -19,6 +19,40 @@ const family = (pass) =>
 const inventory = (row) =>
   Object.values(row.passes ?? {}).map(family).sort().join(" | ");
 
+const ADAPTIVE_VARIANT_FOUR_FIELDS = new Set([
+  "inputFaceColorMatrixBlack",
+  "inputFaceColorMatrixFillColor",
+  "inputShadowColorMatrixFillColor",
+]);
+
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value).sort().map((key) => [key, canonical(value[key])])
+    );
+  }
+  return value;
+}
+
+/**
+ * Variant 4 continuously adapts three color fields even under a controlled
+ * backdrop. Remove only those measured fields; every other layer and pass
+ * value remains part of the repeatability contract.
+ */
+function repeatValueSignature(row) {
+  const passes = structuredClone(row.passes ?? {});
+  if (row.cell.variant === 4) {
+    for (const pass of Object.values(passes)) {
+      if (pass.name !== "glassBackground") continue;
+      for (const key of ADAPTIVE_VARIANT_FOUR_FIELDS) {
+        delete pass.properties?.[key];
+      }
+    }
+  }
+  return JSON.stringify(canonical({ layers: row.layers ?? {}, passes }));
+}
+
 /** Repeat rows are evidence about the core product, not extra product cells. */
 const coreRows = (document) =>
   (document.rows ?? []).filter((row) => row.slice !== "repeat");
@@ -76,7 +110,8 @@ export default [
     id: "static-tree-repeat-agrees-with-core",
     claim:
       "The repeat sweep re-captures one nil-subvariant Main-On row per Variant "
-      + "and agrees with the core sweep on topology and resolved values",
+      + "and agrees with the core sweep on topology and resolved values, "
+      + "excluding Variant 4's three measured adaptive color fields",
     source: "Golden/CAPTURE-SPEC.md — static-tree repeat",
     sections: [SECTION],
     verify({ sections, expect }) {
@@ -101,7 +136,7 @@ export default [
         if (original.topologySignature !== repeat.topologySignature) {
           differing.push(`${repeat.cell.variant}:topology`);
         }
-        if (original.valueSignature !== repeat.valueSignature) {
+        if (repeatValueSignature(original) !== repeatValueSignature(repeat)) {
           differing.push(`${repeat.cell.variant}:value`);
         }
       }

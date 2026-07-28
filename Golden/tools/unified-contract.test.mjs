@@ -5,7 +5,7 @@ import dynamicLearnings from "../learnings/dynamic-transition.mjs";
 import staticRecipeLearnings from "../learnings/static-recipe.mjs";
 import staticTopologyLearnings from "../learnings/static-topology.mjs";
 import {
-  makeExpect, normalizeUnifiedDocument, tintComponents,
+  endpointSample, makeExpect, normalizeUnifiedDocument, tintComponents,
 } from "./lib/golden.mjs";
 import { cellKey, makeCell } from "./lib/cell.mjs";
 
@@ -41,6 +41,12 @@ test("direct and transcoded Tint component shapes normalize identically", () => 
   const components = [0.1, 0.2, 0.3, 0.5];
   assert.deepEqual(tintComponents({ tintComponents: components }), components);
   assert.deepEqual(tintComponents({ tint: { components } }), components);
+});
+
+test("endpoint selection prefers the final settled sample after early saturation", () => {
+  const early = { phase: "sample", progress: 1, marker: "still settling" };
+  const settled = { phase: "settled", progress: 1, marker: "resolved" };
+  assert.equal(endpointSample({ samples: [early, settled] }), settled);
 });
 
 test("direct static tree keeps the 336-cell product plus 21 repeat rows", () => {

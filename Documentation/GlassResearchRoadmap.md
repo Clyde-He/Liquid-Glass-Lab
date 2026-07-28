@@ -492,10 +492,11 @@ lifecycle and changing SDF geometry.
 
 #### Full environment matrix and baseline-driven curve — 2026-07-27
 
-The 64-run fixed-geometry matrix (`Regular/Clear × Main Off/On × Aqua/DarkAqua
-× Light/Dark backdrop × nil/Coral-50 Tint × insertion/removal`, 576 samples on
-build `25G5065a`) captured every cell with no missing, duplicate, or
-context-rejected rows. It resolves the remaining environment questions:
+The accepted direct archive supersedes the original 64-run fixed-geometry
+matrix. Its dynamic section contains 104 runs / 936 samples on build
+`25G5065a`: the full Regular/Clear × Main × appearance × Tint × direction
+product at `shortSide` 48/200/400, plus controlled backdrop and repeat slices.
+Every run is context-accepted. It resolves the remaining environment questions:
 
 1. Backdrop luminance changes no model-side value at all: 32 compared pairs,
    0 differing channels, maximum difference exactly 0. Backdrop is therefore
@@ -515,17 +516,18 @@ context-rejected rows. It resolves the remaining environment questions:
    shape difference.
 4. Topology is identical across all 16 comparison groups.
 
-Endpoint parity with AppKit is exact: comparing the Tint Study's static
-NSGlass rows against Materialize at `g = 1` matched 56 of 56 fields across
-all four Regular/Clear × Main contexts, including `inputBleedAmount` 70,
-`inputBlurDistance0` −100, and `inputBleedBlurRadius` 140.
+At the 200pt reference geometry, endpoint parity with the static AppKit Recipe
+is exact across all four Regular/Clear × Main contexts, including
+`inputBleedAmount` 70, `inputBlurDistance0` −100, and
+`inputBleedBlurRadius` 140.
 
-That parity is what allows the probe to stop hard-coding endpoints. Each
-channel now resolves as `start + (endpoint − start) × shape(g)`, where the
-endpoint is captured from the live Recipe and `start` is the measured 0 or 1.
-Because the system already resolves endpoints for the current `shortSide`,
-appearance, Variant, and participation, those axes need no authored table.
-Fitting the 576 samples leaves only five dimensionless shapes:
+That reference-size parity is what allows the probe to stop hard-coding most
+endpoints. Each channel resolves as
+`start + (endpoint − start) × shape(g)`, where the endpoint is captured from
+the live Recipe and `start` is the measured 0 or 1. Appearance, Variant, and
+participation therefore need no authored endpoint table at the reference
+geometry; the compact adaptive exception is handled separately below. Fitting
+the original 576 samples leaves only five dimensionless shapes:
 
 ```text
 linear         g
@@ -535,13 +537,12 @@ height         g + 0.08g(1 - g)      the shadow-height family
 clamp          (0.34g + 0.036g²) / 0.376   Clear's inputClamp
 ```
 
-plus three context branches: the blur-opacity shape by participation, the
-`inputClamp` shape by Variant, and the `inputBleedDarkenBlend` step at
-`g = 0.5` for Clear in DarkAqua. Replaying the baseline form against all
-samples puts 41 of 42 channels within 0.1% (worst `inputClamp` at 0.104%)
-with zero `inputBleedDarkenBlend` mismatches — roughly a tenfold improvement
-over the hard-coded vector, which also carried a real defect: `inputMaxHeadroom`
-starts at 1, not 0, and the previous `9999g` form missed it by up to 1.66%.
+plus context/discrete behavior: participation selects the blur-opacity shape,
+Variant selects the `inputClamp` shape, Clear DarkAqua steps
+`inputBleedDarkenBlend` at `g = 0.5`, and
+`inputSDRHoldingToneEnabled` plus the Rim owner are active-material gates.
+The direct archive now verifies all single-endpoint continuous channels within
+the accepted bound and names the compact dual-endpoint exception below.
 
 #### Geometry spot check — shapes are not size-invariant
 
@@ -558,18 +559,22 @@ per size returns a `c` that moves systematically:
 
 The cause is directly observable rather than inferred. Materialize inflates the
 `CASDFElementLayer` short side by `min(0.2 · shortSide, 16)` points and retracts
-it linearly with `g`. Measured against that model the layer matches within
-0.05 pt at every sampled progress across all three sizes. As a fraction of the
-resting side the inflation is `min(0.2, 16 / shortSide)`, which is exactly the
-fitted `c`. The previously authored `height` constant `0.08` was never a shape
-constant — it is `16/200`, this effect projected onto the baseline geometry.
+it with the outer transaction, not face-opacity `g`. The direct capture keeps
+those two clocks separate and matches the View Envelope model within 0.5pt
+across all three sizes. As a fraction of the resting side the inflation is
+`min(0.2, 16 / shortSide)`, which is exactly the fitted `c` when the outer
+transaction and material clocks align. The previously authored `height`
+constant `0.08` was never a universal shape constant — it is `16/200`, this
+effect projected onto the baseline geometry.
 
-Endpoints still need no authored table: they are read, and the sweep confirms
-the system resolves them correctly per size (`inputBleedAmount` 16.8/70/140 =
-`0.35 · shortSide`; `inputShadowHeight` 19.2/80/160 = `0.4 ·`). The sweep also
-surfaced endpoint behavior that the previous hard-coded form got wrong outright:
-`inputBlurRadius` is not a per-Variant constant but caps out, resolving 2/4/4
-for Regular Main Off and 5/10/10 for Clear Main Off.
+Most endpoints still need no authored table: they are read, and the sweep
+confirms the system resolves the size-scaled families correctly
+(`inputBleedAmount` 16.8/70/140 = `0.35 · shortSide`;
+`inputShadowHeight` 19.2/80/160 = `0.4 ·`). The compact adaptive face grade is
+the exception described below. The sweep also surfaced endpoint behavior that
+the previous hard-coded form got wrong outright: `inputBlurRadius` is not a
+per-Variant constant but caps out, resolving 2/4/4 for Regular Main Off and
+5/10/10 for Clear Main Off.
 
 Making `height` take the inflation ratio drops the worst residual at
 `shortSide = 400` from 2.00% to 1.00% and reduces channels above 0.5% from 8 to
@@ -585,10 +590,14 @@ leave their caps and become quadratic. Resolving this exactly would require
 authoring a ratio and cap per channel — the table baseline capture was adopted
 to avoid — so it is deliberately left as a bounded error.
 
-All shapes remain strictly monotonic with exact 0 and 1 endpoints at every
-size (minimum slope 0.2), so the scalar stays well-behaved as a product control
-regardless of surface size. The known error is a mid-transition rate
-difference, never an endpoint or ordering error.
+The direct cross-section comparison found one separate compact-size exception.
+At `shortSide = 48`, the Materialize animation endpoint uses a different
+adaptive face grade from the long-lived static Recipe. During removal,
+`inputFaceColorMatrixBlack` and `inputFaceColorMatrixWhite` traverse both
+grades, so a single read baseline cannot reproduce those two channels. At
+200/400 the endpoints agree. Every other channel remains within the documented
+bound, and the scalar remains monotonic; exact compact removal requires a
+future dual-endpoint face-grade model.
 
 Test these distinct hypotheses:
 
@@ -634,20 +643,20 @@ The output should distinguish an endpoint preset, a timing function, and a
 multi-channel material curve. Only the last category is a direct candidate for
 reuse; endpoint and timing evidence can still seed an AppKit curve.
 
-The sampled domain is Regular and Clear only, at a single fixed geometry, with
-both participation states, both appearances, both controlled backdrops, and
-insertion and removal captured separately. Explicit-linear direction symmetry
-is accepted for these two roles: continuous Main-On background channels reverse
-within approximately 1% sampling/interpolation residual, excluding Boolean
-edges and the endpoint-only Rim spread cleanup.
+The sampled domain is Regular and Clear only, at `shortSide` 48/200/400, with
+both participation states, both appearances, controlled backdrop slices, and
+insertion/removal captured separately. Explicit-linear direction symmetry is
+accepted for the single-endpoint channels, excluding the discrete gates,
+endpoint-only Rim spread cleanup, and the compact dual-endpoint face grade.
 
-The numeric side of this lane is now closed for that domain, and the geometry
-spot check above extends it to `shortSide` 48–400 with a bounded, documented
-residual. The next useful work is visual isolation across representative
-backdrops — no acceptance so far rests on anything but model readback, so the
-exit criteria covering perceived monotonicity and zero-endpoint residue are
-still entirely unevidenced. Interrupted reversal, non-Panel hosts, and private
-semantic roles remain deferred.
+The single-endpoint numeric side is closed at the 200pt reference geometry and
+for every non-adaptive channel in the 48–400 sweep. Exact 48pt removal still
+needs the dual-endpoint face-grade model above. The next useful work is visual
+isolation across representative backdrops — no acceptance so far rests on
+anything but model readback, so the exit criteria covering perceived
+monotonicity and zero-endpoint residue are still entirely unevidenced.
+Interrupted reversal, non-Panel hosts, and private semantic roles remain
+deferred.
 
 #### NSGlass transplant boundary — 2026-07-27
 
@@ -768,11 +777,12 @@ P1 is complete when:
 
 - ✅ the system Materialize/Dissolve behavior is classified as endpoint preset,
   timing curve, multi-channel curve, or a combination — it is a multi-channel
-  curve over read endpoints, with two discrete edges and a size-dependent
-  geometry term;
+  curve over read endpoints, with three discrete behaviors, a size-dependent
+  geometry term, and one documented compact dual-endpoint face-grade exception;
 - ✅ role/Variant and direction dependence are known for the sampled domain;
 - ✅ strength `1` reproduces the accepted source Recipe — by construction, since
-  the endpoints are captured from it;
+  the endpoints are captured from it. Qualified below 200pt: see "Two endpoints
+  below 200pt";
 - ✅ strength `0` has no residue beyond the explicitly chosen endpoint (author
   visual acceptance, macOS 26);
 - ✅ intermediate points remain continuous and recognizably Glass (author visual
@@ -788,6 +798,41 @@ P1 is complete when:
 One criterion remains. Separately, everything above is macOS 26 only; extending
 it needs the reduced macOS 27 set described in P1.1, not another full matrix,
 because endpoints are read rather than authored.
+
+#### Two endpoints below 200pt — 2026-07-28
+
+The first direct Golden capture swept short sides the earlier archive never did,
+and 48pt turned out to have **two** "fully materialized" states rather than one:
+
+```text
+shortSide 48, Regular, Light      inputFaceColorMatrixBlack
+  long-lived glass (static Recipe)              0.4875
+  glass that completed a Materialize In         0.8000
+shortSide 200 and 400                    both endpoints agree
+```
+
+Three channels diverge — `inputFaceColorMatrixBlack`,
+`inputFaceColorMatrixWhite`, and `inputClamp` — and only below 200pt. Since a
+dissolve traverses both grades, no single read endpoint can replay it, and the
+worst channel error reaches 17% at 48pt against the documented `min(5%, 4/S)`.
+
+**Accepted without further work.** The affected channels are the face color
+grade, so the visible consequence is a mid-fade tone difference on a very small
+glass rather than a pop, a wrong material, or a geometry error. Both endpoints
+stay exact, and every other channel stays inside the ordinary bound. The
+measured bound in `GlassMaterialStrength` has been corrected to say so.
+
+`Golden/learnings/cross-section.mjs` owns this: it hard-asserts that the two
+endpoints agree at the reference geometry — a regression there would be real —
+and reports which sizes and channels diverge on every capture, so a future
+release moving the threshold shows up without anyone re-deriving it.
+
+Two things were deliberately left undone. The capture harness still starts each
+dissolve from a directly-created presented view rather than one that has
+genuinely materialized in, so the archive records the long-lived case only; that
+is also the case a strength control actually meets, since it reads its baseline
+from whatever tree it is handed. And the static sections sweep Light only, so
+endpoint parity is unverified under DarkAqua.
 
 #### Resize reconstruction — 2026-07-27
 

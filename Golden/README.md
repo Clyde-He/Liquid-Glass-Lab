@@ -39,7 +39,7 @@ sections there address rows by one shared **cell coordinate**, defined in
 [`tools/lib/cell.mjs`](tools/lib/cell.mjs):
 
 ```text
-variant · subvariant · main · subdued · appearance · backdrop · tint
+variant · subvariant · main · key · subdued · appearance · backdrop · tint
         · width · height · cornerRadius · host · direction
 ```
 
@@ -51,32 +51,32 @@ variant · subvariant · main · subdued · appearance · backdrop · tint
 
 One coordinate for all three buys three things. Cross-version comparison
 becomes a key match rather than a pairing routine written once per fixture.
-Static and dynamic rows become directly comparable, so a settled `g = 1` sample
-and a static Recipe row are the same address. And a new axis is a new field
+Static and dynamic rows become directly comparable at one address. The
+cross-section learnings then assert whether a Materialize `g = 1` endpoint and
+the static Recipe actually agree; at 48pt the adaptive face grade proves that
+address equality does not guarantee value equality. A new axis is a new field
 rather than a new fixture format.
 
 A cell field is **`null` when the capture did not control that axis** — not
-false, not a default. The archived sweeps leave real holes: the static sweeps
-never recorded appearance, and the SwiftUI Materialize sweep has no Subdued
-concept. Recording those as null is what makes a learning that needs them skip
-loudly instead of passing by luck.
+false, not a default. The archived sweeps leave real holes: legacy derived
+static sweeps may not record appearance, and the SwiftUI Materialize sweep has
+no Subdued concept. Recording those as null is what makes a learning that needs
+them skip loudly instead of passing by luck.
 
-The sections currently committed under `macOS-26/` and `macOS-27/` are
-**derived**. They are transcoded from the per-study fixtures by
+The sections currently committed under `macOS-26/` are a direct
+**canonical** capture from the Lab exporter. The `macOS-27/` sections remain
+**derived**, transcoded from the per-study fixtures by
 
 ```sh
-node Golden/tools/unify.mjs            # both OS directories
-node Golden/tools/unify.mjs macOS-26 --dry-run
+node Golden/tools/unify.mjs macOS-27
+node Golden/tools/unify.mjs macOS-27 --dry-run
 ```
 
-Regenerate them whenever a source fixture changes; `verify.mjs` fails on a stale
-checksum. They are committed rather than generated on demand so a fresh clone
-can verify without a build step. They are also five times smaller than their
-sources — 12 MB against 63 MB on macOS 26 — because they drop the presentation
-tree, the structured layer dictionaries, and the animation branch, none of which
-any accepted learning reads. The Lab now has a direct exporter for the same
-contract. After one of its captures is accepted, the per-study fixtures and
-this bridge can be retired.
+Regenerate the macOS 27 bridge whenever a source fixture changes;
+`verify.mjs` fails on a stale checksum. Unified sections are committed so a
+fresh clone can verify without a build step. The direct exporter writes the
+same compact contract without the presentation tree, structured layer
+dictionaries, or animation branch, none of which any accepted learning reads.
 
 Every OS directory contains a `manifest.json` describing the default OS build
 and capture date, capture conditions, fixture schemas, entry counts, and
@@ -113,31 +113,25 @@ The current macOS 27 directory contains:
   sample formula probe;
 - `window-context-matrix.json`: the controlled 19-configuration host audit.
 
-The current macOS 26 baseline contains:
+The current macOS 26 baseline is the direct canonical four-file archive:
 
-- `recipe-matrix.json`: the accepted 1,008-row representative-height Recipe
-  product;
-- `recursive-pass-audit.json`: the accepted 336-row fixed-geometry recursive
-  Layer/Pass/property inventory;
-- `materialize-environment-matrix.json`: the 64-run / 576-sample SwiftUI
-  Materialize transition sweep across Material, participation, appearance,
-  backdrop, Tint, and direction. Unlike the two fixtures above, which sample
-  static state, this one samples the transition over time;
-- `materialize-geometry-sweep.json`: the 12-run / 108-sample `shortSide`
-  48/200/400 sweep that measured the transition's geometry inflation.
+- `unified/static-scalar.json`: 408 rows, including the 336-cell core plus
+  size, transposed-size, corner-radius, and real-key slices;
+- `unified/static-tree.json`: 357 rows, including 21 same-session repeats;
+- `unified/dynamic.json`: 104 runs / 936 samples across Material,
+  participation, appearance, backdrop, Tint, direction, and `shortSide`
+  48/200/400;
+- `unified/meta.json`: canonical provenance, hashes, slice counts, and the
+  exact macOS build.
 
-The two Materialize fixtures are the evidence behind P1's baseline-driven
-curve and merge into the single `dynamic` section. They are not a superset of
-the static fixtures and cannot replace them: they cover only Variants 1 and 2
-with a nil subvariant, in exchange for appearance, backdrop, Tint, direction,
-and progress axes the static sweeps do not have.
+The dynamic section is the evidence behind P1's baseline-driven curve. It is
+not a superset of the static sections: it covers only Variants 1 and 2 with a
+nil subvariant, in exchange for appearance, backdrop, Tint, direction, size,
+and progress axes the static products do not have.
 
-Their coverage overlaps on four cells, captured in separate sessions. The
-unifier keeps both copies rather than deduplicating: they are the only
-cross-session repeatability evidence the dynamic archive has, and a learning
-asserts that their settled endpoints agree on every channel. The direct
-exporter preserves the same check with an explicit four-run repeat slice at the
-end of its capture.
+The direct dynamic archive repeats four reference cells in the same capture
+session. It keeps both copies rather than deduplicating, and a learning asserts
+that their settled endpoints agree on every channel.
 
 ## Verifying the archive
 

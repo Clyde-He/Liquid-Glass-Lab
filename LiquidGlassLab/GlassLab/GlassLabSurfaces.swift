@@ -343,6 +343,11 @@ final class GlassLabSemanticHost: NSView {
         semanticView.layoutSubtreeIfNeeded()
     }
 
+    func resetTransitionProbe(presented: Bool) {
+        model.resetTransitionProbe(presented: presented)
+        semanticView.layoutSubtreeIfNeeded()
+    }
+
     func setTransitionPresented(
         _ presented: Bool,
         animationMode: GlassLabMaterializeAnimationMode,
@@ -612,6 +617,10 @@ final class GlassLabTestWindowController {
             enabled: enabled,
             presented: presented
         )
+    }
+
+    func resetSemanticTransitionProbe(presented: Bool) {
+        semanticHost?.resetTransitionProbe(presented: presented)
     }
 
     func setSemanticTransitionPresented(

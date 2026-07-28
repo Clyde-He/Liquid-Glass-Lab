@@ -242,13 +242,11 @@ extension GlassLabView {
         let operatingSystem = ProcessInfo.processInfo.operatingSystemVersionString
 
         // Scoped to the static sections, and deliberately not held across the
-        // dynamic one. The flag stops the host from stamping the Recipe on
-        // every state change — which the static sweeps need, because they
-        // stamp it themselves per context — but it also suppresses the
-        // post-layout restamp the Materialize probe relies on. Holding it
-        // through the dynamic section would capture the transition under
-        // conditions no accepted fixture was captured under, and the whole
-        // value of the dynamic section is being comparable to those.
+        // dynamic one. The flag stops the Recipe host and live readout from
+        // reacting while the static sweeps stamp each context themselves.
+        // The dynamic section uses the independent semantic host and should
+        // run through the same normal observation path as the accepted
+        // Materialize studies it is meant to replace.
         state.isCapturingRecipeMatrix = true
         let scalar = try await captureStaticScalarSection(
             appearance: appearance,

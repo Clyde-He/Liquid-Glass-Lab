@@ -428,6 +428,22 @@ final class GlassLabSemanticModel: ObservableObject {
         }
     }
 
+    /// Recreates the whole transition subtree at a known endpoint.
+    ///
+    /// A reused GlassEffectContainer can retain the previous Usage or geometry
+    /// Recipe even after its public state and window context already match.
+    /// Capture runs need a new identity so their preflight endpoint is resolved
+    /// from the requested context rather than inherited from the preceding run.
+    func resetTransitionProbe(presented: Bool) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            isTransitionProbeEnabled = true
+            isTransitionPresented = presented
+            previewRevision &+= 1
+        }
+    }
+
     func setTransitionPresented(
         _ presented: Bool,
         animationMode: GlassLabMaterializeAnimationMode,

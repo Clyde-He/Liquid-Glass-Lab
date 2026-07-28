@@ -1,64 +1,21 @@
 {
-  "schemaVersion": 1,
-  "operatingSystem": null,
-  "generatedFrom": {
-    "static-scalar": [
-      "recipe-matrix"
-    ],
-    "static-tree": [
-      "recursive-pass-audit"
-    ],
-    "dynamic": [
-      "materialize-environment-matrix",
-      "materialize-geometry-sweep"
-    ]
-  },
-  "role": "derived",
-  "sections": {
-    "static-scalar": {
-      "file": "static-scalar.json",
-      "rows": 1008,
-      "repeatedCells": 0,
-      "bytes": 2335933,
-      "sha256": "0235987a108f434dfa94521410455d9f83441f31b3ce71464d21103d45eab22e",
-      "sourceFixtures": [
-        "recipe-matrix"
-      ],
-      "swept": [
-        "variant",
-        "subvariant",
-        "main",
-        "subdued",
-        "height"
-      ]
-    },
-    "static-tree": {
-      "file": "static-tree.json",
-      "rows": 336,
-      "repeatedCells": 0,
-      "bytes": 6604191,
-      "sha256": "755cdf9bb9003ed257a9cda26667eb1f622c4758a345d4b76c5986459cd40e10",
-      "sourceFixtures": [
-        "recursive-pass-audit"
-      ],
-      "swept": [
-        "variant",
-        "subvariant",
-        "main",
-        "subdued"
-      ]
-    },
-    "dynamic": {
-      "file": "dynamic.json",
-      "rows": 76,
-      "repeatedCells": 4,
-      "bytes": 3920258,
-      "sha256": "69357907dc50ad8a5571b7bc9759a558001b2a30d73efd89382ed4ca1151f76c",
-      "sourceFixtures": [
-        "materialize-environment-matrix",
-        "materialize-geometry-sweep"
-      ],
-      "swept": [
+  "capturedAt" : "2026-07-28T07:26:27Z",
+  "operatingSystem" : "Version 26.6 (Build 25G5065a)",
+  "role" : "canonical",
+  "schemaVersion" : 1,
+  "sections" : {
+    "dynamic" : {
+      "bytes" : 5404735,
+      "file" : "dynamic.json",
+      "repeatedCells" : 4,
+      "rows" : 104,
+      "sha256" : "734aa14f124291f412110545064ade4c2146702b0bd60cc93514cc9f11a255d9",
+      "slices" : {
+        "backdrop" : 4,
+        "core" : 96,
+        "repeat" : 4
+      },
+      "swept" : [
         "variant",
         "main",
         "appearance",
@@ -66,6 +23,47 @@
         "tint",
         "height",
         "direction"
+      ]
+    },
+    "static-scalar" : {
+      "bytes" : 974401,
+      "file" : "static-scalar.json",
+      "repeatedCells" : 0,
+      "rows" : 408,
+      "sha256" : "89f426770a32286dae2249a57338ab66d41df48d7bae9f821ba6ade7500be7c4",
+      "slices" : {
+        "core" : 336,
+        "cornerRadius" : 12,
+        "key" : 4,
+        "size" : 48,
+        "transposed" : 8
+      },
+      "swept" : [
+        "variant",
+        "subvariant",
+        "main",
+        "key",
+        "subdued",
+        "width",
+        "height",
+        "cornerRadius"
+      ]
+    },
+    "static-tree" : {
+      "bytes" : 7151125,
+      "file" : "static-tree.json",
+      "repeatedCells" : 21,
+      "rows" : 357,
+      "sha256" : "9037d30dc46dea870fd6c223faba7f45015e2b03e6682ee5228a341ec3b1024b",
+      "slices" : {
+        "core" : 336,
+        "repeat" : 21
+      },
+      "swept" : [
+        "variant",
+        "subvariant",
+        "main",
+        "subdued"
       ]
     }
   }

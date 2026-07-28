@@ -51,6 +51,10 @@ value(g) = start + (endpoint - start) × shape(g)
 That is why size, appearance, Regular/Clear, window participation, and
 subvariant all follow automatically: the system already resolved the right
 endpoint for the current context, and `g = 1` reproduces it by construction.
+This statement is exact at the 200pt reference geometry. At 48pt, SwiftUI
+briefly uses a different adaptive face grade at the Materialize animation
+endpoint before settling back to the static Recipe; that two-endpoint exception
+is called out below.
 
 `refresh()` distinguishes a replacement filter from the controller's own
 near-1 write using the filter identity and last authored face opacity. If the
@@ -74,20 +78,23 @@ clamp          (0.34g + 0.036g²) / 0.376    Clear's inputClamp
 ```
 
 `c` is `min(0.2, 16 / shortSide)`. Materialize inflates the SDF element's short
-side by `min(0.2 · shortSide, 16)` points and retracts it linearly with `g`, so
-geometry-tracking channels inherit that as a quadratic term.
+side by `min(0.2 · shortSide, 16)` points and retracts it with the outer
+transaction. That View Envelope clock is distinct from face-opacity `g`, even
+though the two are close in a one-second linear capture.
 
 ## What is verified
 
 Measured on **macOS 26.6 (25G5065a)** for public **Regular and Clear** in a
-panel, across appearance, backdrop, participation, tint, and both directions —
-64 runs / 576 samples, plus a 12-run geometry sweep at `shortSide` 48/200/400.
-Fixtures and analysis live in `Golden/macOS-26/` and the P1.1 section of
-`Documentation/GlassResearchRoadmap.md`.
+panel. The accepted direct archive contains 104 runs / 936 samples across
+appearance, backdrop, participation, tint, both directions, and `shortSide`
+48/200/400. Fixtures and analysis live in `Golden/macOS-26/unified/` and the
+P1.1 section of `Documentation/GlassResearchRoadmap.md`.
 
-Replay accuracy is 41 of 42 channels within 0.1% at a ~200pt short side. A
-resize/rebuild test confirms the authored strength survives AppKit replacing the
-whole subtree.
+The executable learnings currently pass 33/33 on macOS 26. At the 200pt
+reference size the single-endpoint curve replays the measured continuous
+channels; across 48/200/400 every remaining channel stays inside the documented
+geometry bound. A resize/rebuild test confirms the authored strength survives
+AppKit replacing the whole subtree.
 
 ## What is not
 
@@ -101,16 +108,22 @@ whole subtree.
 
 ## Known limits
 
-Two behaviors are discrete by measurement and cannot be smoothed: the rim gate
-opens at any `value > 0`, and Clear in DarkAqua steps one bleed-blend flag at
-`0.5`.
+Three behaviors are discrete by measurement and cannot be smoothed: the rim
+gate opens at any `value > 0`; `inputSDRHoldingToneEnabled` adopts its Recipe
+value at any `value > 0`; and Clear in DarkAqua steps
+`inputBleedDarkenBlend` at `0.5`.
 
 Mid-transition accuracy degrades away from a ~200pt short side, bounded by
 `min(5%, 4 / shortSide)` — 5% at 48pt, 1% at 400pt, shrinking above that. The
 cause is that a channel pinned to a cap stops tracking the inflating geometry
-and reads as linear, and which channels are capped depends on size. **Endpoints
-stay exact and the curve stays strictly monotonic at every size**, so the error
-is a mid-transition rate difference, never an endpoint or ordering error.
+and reads as linear, and which channels are capped depends on size.
+
+There is one separate exception: at 48pt, removal traverses both the long-lived
+static Recipe and a different Materialized face grade. A single captured
+baseline therefore cannot exactly replay `inputFaceColorMatrixBlack` and
+`inputFaceColorMatrixWhite` for that path. The curve remains monotonic and
+exact at its chosen static endpoints, but matching that compact transition
+requires a future dual-endpoint adaptive face-grade model.
 
 Setting `value = 1` does not uninstall the override. Restoring the true system
 material requires a fresh `NSGlassEffectView`.

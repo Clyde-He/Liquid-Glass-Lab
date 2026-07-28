@@ -30,13 +30,26 @@ import AppKit
 ///
 /// Measured on macOS 26.6 for the public Regular and Clear materials in a
 /// panel. Not yet validated on macOS 27, on private semantic roles, or on
-/// non-panel hosts. Two behaviors are discrete by design and cannot be smoothed:
-/// the rim gate opens at any `value > 0`, and Clear in DarkAqua steps one bleed
-/// blend flag at `0.5`.
+/// non-panel hosts. Three behaviors are discrete by design and cannot be
+/// smoothed: the rim and SDR holding-tone gates open at any `value > 0`, and
+/// Clear in DarkAqua steps one bleed blend flag at `0.5`.
 ///
 /// Mid-transition accuracy degrades away from a ~200pt short side, bounded by
-/// `min(5%, 4 / shortSide)`. Endpoints stay exact and the curve stays strictly
-/// monotonic at every size.
+/// `min(5%, 4 / shortSide)` for every channel at or above 200pt. Endpoints stay
+/// exact and the curve stays strictly monotonic at every size.
+///
+/// Below 200pt that bound holds for everything except two face color-grade
+/// channels while fading *out*: `inputFaceColorMatrixBlack` and
+/// `inputFaceColorMatrixWhite` reach about 17% at a 48pt short side. The cause
+/// is measured rather than guessed — at small sizes a long-lived glass and one
+/// that has just completed a Materialize In resolve *different* face grades
+/// (0.49 versus 0.80 at 48pt), so "full strength" is not a single value there
+/// and no single read endpoint can replay the whole fade. Both endpoints
+/// themselves stay exact, geometry, blur, refraction, and shadow stay inside
+/// the ordinary bound, and the visible effect is a mid-fade tone difference
+/// rather than a pop or a wrong material. Accepted as-is: see
+/// `Golden/learnings/cross-section.mjs`, which reports the diverging sizes and
+/// channels on every capture.
 @MainActor
 public final class GlassMaterialStrength {
     private weak var glass: NSGlassEffectView?

@@ -229,10 +229,12 @@ enum GlassLabTuning {
     /// Endpoints come from `baseline`, not from constants, so size, appearance,
     /// Variant, participation, and OS build are all absorbed by the capture.
     /// What stays authored here is only the dimensionless shape per channel
-    /// plus the two measured discrete edges:
+    /// plus the three measured discrete behaviors:
     ///
     /// - `inputBleedDarkenBlend` steps at `g = 0.5` for Clear in DarkAqua and
     ///   holds its captured value everywhere else;
+    /// - `inputSDRHoldingToneEnabled` is 0 only at `g = 0`, then adopts its
+    ///   captured Recipe value;
     /// - the Rim owner gate is discrete: 0 at `g = 0`, its captured opacity
     ///   above;
     /// - when public Tint is present, only its distinct matrix coefficient 18
@@ -3054,7 +3056,11 @@ enum GlassLabTuning {
     ) async throws -> PassAuditSnapshot {
         var previous: PassAuditSnapshot?
         var elapsedMilliseconds = 0
-        for delayMilliseconds in [30, 30, 30, 30, 60] {
+        // A private Recipe replacement can remain unchanged for the first two
+        // run-loop observations and arrive only afterward. Variant 4 exposed
+        // that false plateau in the direct repeat slice. Require a longer
+        // stable window before accepting the recursive value payload.
+        for delayMilliseconds in [60, 60, 60, 60, 120] {
             try await Task.sleep(for: .milliseconds(delayMilliseconds))
             guard NSApp.isActive else {
                 throw MatrixCaptureError.applicationInactive
@@ -3066,7 +3072,7 @@ enum GlassLabTuning {
             guard let current = capturePassAuditSnapshot(from: glass) else {
                 continue
             }
-            if elapsedMilliseconds >= 60, current == previous {
+            if elapsedMilliseconds >= 240, current == previous {
                 return current
             }
             previous = current

@@ -5,11 +5,10 @@
 //  The measured Materialize curve, expressed as read endpoints times
 //  dimensionless shapes.
 //
-//  Evidence behind every constant in this file lives in
-//  Golden/macOS-26/materialize-environment-matrix.json (64 runs, 576 samples)
-//  and materialize-geometry-sweep.json (12 runs, 108 samples), with the
-//  analysis written up under "P1.1" in Documentation/GlassResearchRoadmap.md.
-//  Measured on macOS 26.6 (25G5065a); macOS 27 is not yet validated.
+//  Evidence behind every constant in this file lives in the direct canonical
+//  Golden/macOS-26/unified archive (104 runs, 936 samples), with the analysis
+//  written up under "P1.1" in Documentation/GlassResearchRoadmap.md. Measured
+//  on macOS 26.6 (25G5065a); macOS 27 is not yet validated.
 //
 
 #if os(macOS)
@@ -19,8 +18,11 @@ import AppKit
 /// `shape(1) = 1`, so a channel resolves as
 /// `start + (endpoint - start) * shape(g)`.
 ///
-/// These are invariant across appearance, backdrop, Tint, and direction. They
-/// are *not* invariant across size — see `GlassMaterialBaseline`.
+/// These are invariant across appearance, backdrop, Tint, and direction at the
+/// 200pt reference geometry. They are *not* invariant across size — see
+/// `GlassMaterialBaseline`; the 48pt removal face grade is also a measured
+/// dual-endpoint exception. Discrete gates are handled separately from this
+/// continuous shape vocabulary.
 public enum GlassMaterialShape: Sendable {
     /// `g`. The majority of channels.
     case linear
@@ -73,9 +75,9 @@ public struct GlassMaterialBaseline: Equatable, Sendable {
     }
 
     /// Materialize inflates the SDF element's short side by
-    /// `min(0.2 · shortSide, 16)` points and retracts it linearly with `g`.
-    /// Measured on `CASDFElementLayer` at shortSide 48, 200, and 400, matching
-    /// within 0.05 pt at every sampled progress.
+    /// `min(0.2 · shortSide, 16)` points and retracts it with the outer
+    /// transaction. The View Envelope clock is distinct from face-opacity `g`.
+    /// Measured on `CASDFElementLayer` at shortSide 48, 200, and 400.
     ///
     /// As a fraction of the resting side that is `min(0.2, 16 / shortSide)`,
     /// the quadratic coefficient every geometry-tracking channel inherits.
@@ -173,6 +175,12 @@ public enum GlassMaterialCurve {
                 (isClear && !isLightAppearance)
                     ? (g < 0.5 ? 0 : darkenBlend)
                     : darkenBlend
+        }
+        // The holding-tone flag is a gate, not a fractional strength. It is
+        // zero only at the fully dematerialized endpoint, then immediately
+        // adopts the system-resolved Recipe value.
+        if let holdingTone = baseline.numeric["inputSDRHoldingToneEnabled"] {
+            values["inputSDRHoldingToneEnabled"] = g > 0 ? holdingTone : 0
         }
         return values
     }

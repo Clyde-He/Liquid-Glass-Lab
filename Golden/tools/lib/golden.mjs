@@ -47,12 +47,22 @@ export async function readManifest(osDirectory) {
  */
 export async function loadUnified(osDirectory) {
   const directory = path.join(goldenDirectory, osDirectory, "unified");
+  let archiveRole = null;
+  try {
+    archiveRole = JSON.parse(
+      await readFile(path.join(directory, "meta.json"), "utf8")
+    ).role ?? null;
+  } catch {
+    // Section loading below remains authoritative for older archives whose
+    // meta predates the role field.
+  }
   const sections = {};
   for (const name of SECTIONS) {
     try {
-      sections[name] = normalizeUnifiedDocument(JSON.parse(
+      const document = normalizeUnifiedDocument(JSON.parse(
         await readFile(path.join(directory, `${name}.json`), "utf8")
       ));
+      sections[name] = { ...document, archiveRole };
     } catch {
       sections[name] = null;
     }
@@ -187,7 +197,10 @@ export function endpointSample(run) {
   for (const sample of run.samples ?? []) {
     const g = progressOf(sample);
     if (g === null) continue;
-    if (!best || g > best.g) best = { g, sample };
+    // Several channels and the View Envelope can still be settling after face
+    // opacity first reaches 1. Prefer the latest equally complete sample so an
+    // early saturated frame cannot masquerade as the resolved endpoint.
+    if (!best || g >= best.g) best = { g, sample };
   }
   return best && best.g > 0.999 ? best.sample : null;
 }
@@ -249,11 +262,23 @@ export function channelTable({ clear, main }) {
   return table;
 }
 
-/** Every channel the table knows about, independent of context. */
-export const ALL_CHANNELS = [
+/** Every continuous channel the table knows about, independent of context. */
+export const CONTINUOUS_CHANNELS = [
   ...LINEAR_FROM_ZERO, ...LINEAR_FROM_ONE, ...HEIGHT_FAMILY,
   "inputBlurOpacity1", "inputBlurOpacity2", "inputBlurOpacity3",
   "inputBlurOpacity4", "inputClamp",
+];
+
+/** Numeric inputs that switch at a measured edge rather than interpolate. */
+export const DISCRETE_CHANNELS = [
+  "inputBleedDarkenBlend",
+  "inputSDRHoldingToneEnabled",
+];
+
+/** Every numeric background channel the Materialize abstraction controls. */
+export const ALL_CHANNELS = [
+  ...CONTINUOUS_CHANNELS,
+  ...DISCRETE_CHANNELS,
 ];
 
 export function resolveChannel(channel, g, endpoint, inflation) {
