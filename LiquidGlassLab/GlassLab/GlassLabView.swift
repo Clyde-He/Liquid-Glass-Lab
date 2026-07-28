@@ -4814,6 +4814,105 @@ struct GlassLabView: View {
         }
     }
 
+    /// Drives the last open P1 exit criterion: a resize forces AppKit to
+    /// re-resolve the Recipe and hand back a fresh tree, and the authored
+    /// strength must survive that without being reverted to the system value
+    /// and without being stuck on the previous size's endpoints.
+    ///
+    /// The strength is written once at the starting size and never re-applied.
+    /// Everything observed afterwards comes from the layout restamp alone.
+    @MainActor
+    private func performResizeRestampCheck() async throws -> [String: Any] {
+        let strength = 0.5
+        let sizes: [Double] = [200, 400, 96, 200]
+        let variant = 1
+        // inputFaceOpacity's endpoint is always 1, so it reads back as the
+        // strength itself and is a size-independent sentinel: a reverted tree
+        // reports 1.
+        // inputShadowHeight's endpoint is 0.4 * shortSide, so it proves the
+        // baseline was recaptured for the new geometry instead of being reused.
+        let shapeAt = { (g: Double, shortSide: Double) -> Double in
+            g + min(0.2, 16 / shortSide) * g * (1 - g)
+        }
+
+        state.rendererMode = .recipe
+        state.variant = variant
+        state.subvariant = ""
+        state.isSubdued = false
+        state.hasScrim = false
+        state.tintColor = nil
+        state.windowHostType = .panel
+        state.testAppearance = .light
+        state.testBackdrop = .light
+        state.isTestWindowMain = false
+        state.windowPadding = 40
+        state.cornerRadius = 16
+        state.glassWidth = 480
+        state.glassHeight = sizes[0]
+        state.isTestWindowVisible = true
+        state.testWindow.sync(with: state)
+        try await Task.sleep(for: .milliseconds(600))
+
+        var steps: [[String: Any]] = []
+        state.testWindow.applyAppKitMaterializeBackgroundProbe(
+            progress: strength,
+            variant: variant,
+            requestedMain: false,
+            tintColor: nil,
+            includesViewEnvelope: false
+        )
+        try await Task.sleep(for: .milliseconds(240))
+
+        for (index, size) in sizes.enumerated() {
+            if index > 0 {
+                state.glassHeight = size
+                state.testWindow.sync(with: state)
+                // Let AppKit re-resolve and the layout restamp run.
+                try await Task.sleep(for: .milliseconds(600))
+            }
+            guard let glass = state.testWindow.liveGlass else {
+                throw TintStudyError.contextRejected("No live glass")
+            }
+            let inputs = GlassLabTuning.captureShaderInputs(from: glass)
+            let shortSide = min(glass.bounds.width, glass.bounds.height)
+            let faceOpacity = inputs["inputFaceOpacity"] ?? -1
+            let shadowHeight = inputs["inputShadowHeight"] ?? -1
+            let expectedShadowHeight =
+                0.4 * shortSide * shapeAt(strength, shortSide)
+            let faceOK = abs(faceOpacity - strength) < 0.01
+            let shadowOK = abs(shadowHeight - expectedShadowHeight)
+                <= max(0.05, expectedShadowHeight * 0.02)
+            steps.append([
+                "step": index,
+                "requestedShortSide": size,
+                "actualShortSide": shortSide,
+                "resized": index > 0,
+                "inputFaceOpacity": faceOpacity,
+                "expectedFaceOpacity": strength,
+                "faceOpacityHeld": faceOK,
+                "inputShadowHeight": shadowHeight,
+                "expectedShadowHeight": expectedShadowHeight,
+                "shadowHeightFollowedSize": shadowOK,
+                "passed": faceOK && shadowOK,
+            ])
+        }
+
+        state.testWindow.clearAppKitMaterializeBackgroundProbe(rebuild: true)
+        let failures = steps.filter { ($0["passed"] as? Bool) != true }
+        return [
+            "formatVersion": 1,
+            "capturedAt": ISO8601DateFormatter().string(from: Date()),
+            "operatingSystem":
+                ProcessInfo.processInfo.operatingSystemVersionString,
+            "strength": strength,
+            "variant": variant,
+            "sizeSequence": sizes,
+            "steps": steps,
+            "passed": failures.isEmpty,
+            "failureCount": failures.count,
+        ]
+    }
+
     /// Unattended entry point for the geometry spot check, so the sweep can run
     /// from a script instead of a save panel:
     ///
@@ -4826,7 +4925,9 @@ struct GlassLabView: View {
     @MainActor
     private func runHeadlessCaptureIfRequested() async {
         let arguments = ProcessInfo.processInfo.arguments
-        guard let flagIndex = arguments.firstIndex(of: "--capture-size-study"),
+        let sizeFlag = arguments.firstIndex(of: "--capture-size-study")
+        let resizeFlag = arguments.firstIndex(of: "--verify-resize-restamp")
+        guard let flagIndex = sizeFlag ?? resizeFlag,
               arguments.index(after: flagIndex) < arguments.endIndex else {
             return
         }
@@ -4840,10 +4941,26 @@ struct GlassLabView: View {
 
         var exitCode: Int32 = 0
         do {
-            let document = try await performMaterializeSizeStudy()
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let payload = try encoder.encode(document)
+            let payload: Data
+            let report: String
+            if resizeFlag != nil {
+                let result = try await performResizeRestampCheck()
+                payload = try JSONSerialization.data(
+                    withJSONObject: result,
+                    options: [.prettyPrinted, .sortedKeys]
+                )
+                let passed = (result["passed"] as? Bool) == true
+                report = "== Resize restamp check ==\n"
+                    + "Steps: \((result["steps"] as? [Any])?.count ?? 0)\n"
+                    + "Result: \(passed ? "PASSED" : "FAILED")"
+                if !passed { exitCode = 2 }
+            } else {
+                let document = try await performMaterializeSizeStudy()
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                payload = try encoder.encode(document)
+                report = document.report
+            }
             // The app is sandboxed, so an arbitrary destination usually needs a
             // save panel. Fall back to the container's temporary directory and
             // report where the capture actually landed.
@@ -4856,13 +4973,13 @@ struct GlassLabView: View {
                 try payload.write(to: written, options: .atomic)
             }
             FileHandle.standardError.write(Data(
-                (document.report + "\nWrote \(written.path)\n").utf8
+                (report + "\nWrote \(written.path)\n").utf8
             ))
         } catch {
             let message = (error as? LocalizedError)?.errorDescription
                 ?? error.localizedDescription
             FileHandle.standardError.write(Data(
-                "Size study failed: \(message)\n".utf8
+                "Headless capture failed: \(message)\n".utf8
             ))
             exitCode = 1
         }

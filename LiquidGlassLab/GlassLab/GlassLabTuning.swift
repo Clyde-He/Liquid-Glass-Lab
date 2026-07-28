@@ -166,166 +166,21 @@ enum GlassLabTuning {
 
     // MARK: - Materialize normalized curve
 
-    /// Normalized progress shapes measured from the accepted 64-cell
-    /// Materialize matrix (Regular/Clear × Main × Aqua/DarkAqua × Light/Dark
-    /// backdrop × Tint × direction, 576 samples) and the 12-run geometry sweep
-    /// at `shortSide` 48/200/400. Every shape satisfies `shape(0) = 0` and
-    /// `shape(1) = 1`, so a channel resolves as
-    /// `start + (endpoint - start) * shape(g)`.
-    ///
-    /// Shapes are invariant across appearance, backdrop, Tint, and direction.
-    /// They are *not* invariant across size: Materialize inflates the SDF
-    /// element geometry and retracts it with `g`, so channels tracking that
-    /// geometry carry a size-dependent quadratic term. See
-    /// `MaterializeBaseline.geometryInflation`.
-    enum MaterializeShape {
-        /// `g`. The majority of channels.
-        case linear
-        /// `0.2g + 0.8g²`. Blur opacity 1/2 without Main participation.
-        case quadraticFlat
-        /// `0.4g + 0.6g²`. Blur opacity 1/2 under Main, and 3/4 always.
-        case quadratic
-        /// `g + c·g(1 - g)`, where `c` is the geometry inflation ratio. The
-        /// shadow-height family tracks the inflating SDF element, so `c` is
-        /// `16/200 = 0.08` at the baseline geometry but `0.2` at
-        /// `shortSide = 48`.
-        case height
-        /// `(0.34g + 0.036g²) / 0.376`. Clear's `inputClamp`.
-        case clamp
-
-        func value(at progress: Double, geometryInflation: Double) -> Double {
-            let g = progress
-            switch self {
-            case .linear: return g
-            case .quadraticFlat: return 0.2 * g + 0.8 * g * g
-            case .quadratic: return 0.4 * g + 0.6 * g * g
-            case .height: return g + geometryInflation * g * (1 - g)
-            case .clamp: return (0.34 * g + 0.036 * g * g) / 0.376
-            }
-        }
-    }
-
-    struct MaterializeChannel {
-        /// The resolved value at `g = 0`, measured as exactly 0 or 1 for every
-        /// sampled channel.
-        let start: Double
-        let shape: MaterializeShape
-    }
-
-    /// The system-resolved endpoints of one live Recipe. Reading these instead
-    /// of hard-coding them is what lets the curve follow size, appearance,
-    /// Variant, participation, and OS build without a per-axis table: `g = 1`
-    /// reproduces the captured Recipe by construction.
-    struct MaterializeBaseline: Equatable {
-        let numeric: [String: Double]
-        let colors: [String: NSColor]
-        let rimOpacity: Double?
-        /// `min(width, height)` of the glass this baseline was captured from.
-        let shortSide: Double
-
-        /// A baseline is only meaningful on an unmutated tree. The transplant
-        /// always drives `inputFaceOpacity` below 1 for `g < 1`, so a settled
-        /// value of 1 is a reliable pristine sentinel.
-        var isPristine: Bool {
-            (numeric["inputFaceOpacity"] ?? 0) >= 0.999
-        }
-
-        /// Materialize inflates the SDF element's short side by
-        /// `min(0.2 · shortSide, 16)` points and retracts it linearly with `g`.
-        /// Measured directly on `CASDFElementLayer` at `shortSide` 48, 200, and
-        /// 400, matching within 0.05 pt at every sampled progress.
-        ///
-        /// As a fraction of the resting short side this is
-        /// `min(0.2, 16 / shortSide)`, which is the quadratic coefficient any
-        /// geometry-tracking channel inherits.
-        var geometryInflation: Double {
-            shortSide > 0 ? min(0.2, 16 / shortSide) : 0
-        }
-    }
-
-    /// Channels whose `(start, shape)` never depends on context.
-    private static let materializeSharedChannels: [String: MaterializeChannel] = {
-        var table: [String: MaterializeChannel] = [:]
-        for key in [
-            "inputBleedColorMatrixBlack", "inputBleedDistance0",
-            "inputBleedOpacity", "inputBlurDistance1", "inputBlurOpacity0",
-            "inputBlurRadius", "inputFaceColorMatrixBlack", "inputFaceOpacity",
-            "inputInnerRefractionAmount", "inputInnerRefractionHeight",
-            "inputRefractionDistance0", "inputRefractionDistance1",
-            "inputRefractionOpacity", "inputSDRGradientDistance0",
-            "inputSDRGradientDistance1", "inputSDRShadowOpacity",
-            "inputShadowAmount", "inputShadowBlurRadius", "inputShadowOpacity",
-            "inputShadowRadius", "inputShadowVibrancyContribution",
-        ] {
-            table[key] = MaterializeChannel(start: 0, shape: .linear)
-        }
-        for key in [
-            "inputBleedColorMatrixSaturation", "inputBleedColorMatrixWhite",
-            "inputFaceColorMatrixSaturation", "inputFaceColorMatrixWhite",
-            "inputMaxHeadroom", "inputSDRHoldingToneWhite",
-            "inputShadowColorMatrixSaturation", "inputShadowColorMatrixWhite",
-        ] {
-            table[key] = MaterializeChannel(start: 1, shape: .linear)
-        }
-        for key in [
-            "inputBleedAmount", "inputBleedBlurRadius", "inputBleedHeight",
-            "inputBlurDistance0", "inputBlurDistance4",
-            "inputOuterRefractionAmount", "inputOuterRefractionHeight",
-            "inputShadowHeight",
-        ] {
-            table[key] = MaterializeChannel(start: 0, shape: .height)
-        }
-        table["inputBlurOpacity3"] = MaterializeChannel(start: 0, shape: .quadratic)
-        table["inputBlurOpacity4"] = MaterializeChannel(start: 0, shape: .quadratic)
-        return table
-    }()
-
-    /// The two channels whose shape, not merely endpoint, depends on context.
-    private static func materializeChannels(
-        variant: Int,
-        requestedMain: Bool
-    ) -> [String: MaterializeChannel] {
-        var table = materializeSharedChannels
-        let blurShape: MaterializeShape =
-            requestedMain ? .quadratic : .quadraticFlat
-        table["inputBlurOpacity1"] = MaterializeChannel(start: 0, shape: blurShape)
-        table["inputBlurOpacity2"] = MaterializeChannel(start: 0, shape: blurShape)
-        table["inputClamp"] = MaterializeChannel(
-            start: 1,
-            shape: variant == 2 ? .clamp : .linear
-        )
-        return table
-    }
-
-    /// Fill colors interpolate alpha on the `linear` shape and keep the
-    /// system-resolved RGB, so the Aqua-white / DarkAqua-black split resolves
-    /// itself instead of needing an appearance branch.
-    private static let materializeColorKeys = [
-        "inputFaceColorMatrixFillColor",
-        "inputShadowColorMatrixFillColor",
-    ]
+    /// The curve itself lives in the self-contained `GlassMaterial` directory
+    /// so it can be lifted into another project without the lab. These aliases
+    /// keep the lab's existing call sites readable.
+    typealias MaterializeBaseline = GlassMaterialBaseline
 
     /// Captures the endpoints the system already resolved for the current
     /// size, appearance, Variant, and participation. Must run on a pristine
-    /// tree; see `MaterializeBaseline.isPristine`.
+    /// tree; see `GlassMaterialBaseline.isPristine`.
     @MainActor
     static func captureMaterializeBaseline(
         from glass: NSGlassEffectView
     ) -> MaterializeBaseline? {
-        guard let backdrop = backdropLayer(under: glass),
-              glassBackgroundFilter(on: backdrop) != nil else { return nil }
-        let numeric = captureShaderInputs(from: glass)
-        guard !numeric.isEmpty else { return nil }
-        let rimOpacity = highlightLayers(under: glass)
-            .compactMap { highlightValue(forKey: "layerOpacity", on: $0) }
-            .max()
-        return MaterializeBaseline(
-            numeric: numeric,
-            colors: captureShaderColors(from: glass),
-            rimOpacity: rimOpacity,
-            shortSide: min(glass.bounds.width, glass.bounds.height)
-        )
+        GlassMaterialStrength.captureBaseline(from: glass)
     }
+
 
     // MARK: - Materialize background transplant probe
 
@@ -409,37 +264,20 @@ enum GlassLabTuning {
             glass.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])
                 == .aqua
 
-        var numericValues: [String: Double] = [:]
-        for (key, channel) in materializeChannels(
-            variant: variant,
-            requestedMain: requestedMain
-        ) {
-            guard let endpoint = baseline.numeric[key] else { continue }
-            numericValues[key] = channel.start
-                + (endpoint - channel.start) * channel.shape.value(
-                    at: progress,
-                    geometryInflation: baseline.geometryInflation
-                )
-        }
-
-        // The one measured discrete edge. Clear in DarkAqua flips at the
-        // midpoint; every other context holds the captured value, which is
-        // already 0 or 1.
-        if let bleedDarkenBlend = baseline.numeric["inputBleedDarkenBlend"] {
-            numericValues["inputBleedDarkenBlend"] =
-                (variant == 2 && !isLightAppearance)
-                    ? (progress < 0.5 ? 0 : bleedDarkenBlend)
-                    : bleedDarkenBlend
-        }
-
-        var colorValues: [String: NSColor] = [:]
-        for key in materializeColorKeys {
-            guard let endpoint = baseline.colors[key] else { continue }
-            let base = endpoint.usingColorSpace(.deviceRGB) ?? endpoint
-            colorValues[key] = base.withAlphaComponent(
-                base.alphaComponent * CGFloat(progress)
-            )
-        }
+        // The curve is owned by GlassMaterialCurve. What stays here is the
+        // lab's readback verification, which the shipping controller does not
+        // need to pay for.
+        let numericValues = GlassMaterialCurve.numericValues(
+            at: progress,
+            baseline: baseline,
+            isClear: variant == 2,
+            hasMainParticipation: requestedMain,
+            isLightAppearance: isLightAppearance
+        )
+        let colorValues = GlassMaterialCurve.colorValues(
+            at: progress,
+            baseline: baseline
+        )
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -471,7 +309,10 @@ enum GlassLabTuning {
         // Measured as a discrete gate rather than a continuous channel: it
         // opens to its captured opacity on the first active frame and stays
         // there.
-        let expectedRimOpacity = progress > 0 ? (baseline.rimOpacity ?? 1) : 0
+        let expectedRimOpacity = GlassMaterialCurve.rimOpacity(
+            at: progress,
+            baseline: baseline
+        )
         if requestedMain {
             for layer in rimLayers {
                 applyHighlightValues(
@@ -485,7 +326,7 @@ enum GlassLabTuning {
             $0.usingColorSpace(.deviceRGB)
         }.map { Double($0.alphaComponent) }
         let expectedTintMatrixAlpha = requestedTintAlpha.map {
-            $0 * progress * progress
+            GlassMaterialCurve.tintMatrixAlpha(at: progress, sourceAlpha: $0)
         }
         let tintWrite = expectedTintMatrixAlpha.map {
             applyMaterializeTintMatrixAlpha(
