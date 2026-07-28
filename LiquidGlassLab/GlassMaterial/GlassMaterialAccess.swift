@@ -120,6 +120,41 @@ enum GlassMaterialAccess {
         return values
     }
 
+    struct TypedInputs {
+        var numeric: [String: Double] = [:]
+        var colors: [String: NSColor] = [:]
+        var points: [String: CGPoint] = [:]
+        var nilKeys: Set<String> = []
+    }
+
+    /// Every declared input, classified by resolved type. Strings stay
+    /// read-only diagnostics; a key that resolves nil is recorded as such,
+    /// because replaying a captured nil over a nonnil value needs an explicit
+    /// clear rather than "key absent, do not write".
+    static func readTypedInputs(
+        from target: GlassBackgroundTarget
+    ) -> TypedInputs {
+        var inputs = TypedInputs()
+        for key in target.inputKeys {
+            guard let raw = target.filter.value(forKey: key) else {
+                inputs.nilKeys.insert(key)
+                continue
+            }
+            if let number = raw as? NSNumber {
+                inputs.numeric[key] = number.doubleValue
+            } else if CFGetTypeID(raw as CFTypeRef) == CGColor.typeID {
+                // swiftlint:disable:next force_cast
+                if let color = NSColor(cgColor: raw as! CGColor) {
+                    inputs.colors[key] = color
+                }
+            } else if let value = raw as? NSValue,
+                      String(cString: value.objCType).hasPrefix("{CGPoint") {
+                inputs.points[key] = value.pointValue
+            }
+        }
+        return inputs
+    }
+
     static func readColors(
         from target: GlassBackgroundTarget,
         keys: [String]
@@ -151,10 +186,166 @@ enum GlassMaterialAccess {
         )
     }
 
-    // MARK: Rim gate
+    // MARK: Render bounds
+
+    /// `CABackdropLayer.marginWidth`, the room the backdrop reserves for
+    /// passes that draw outside the outline. Both participation- and
+    /// size-dependent: a flat context resolves 0.5 where Main-On resolves
+    /// `0.35 · shortSide` (floored at 16).
+    static func marginWidth(under glass: NSGlassEffectView) -> Double? {
+        guard let layer = backdropLayer(under: glass) else { return nil }
+        return (valueIfResponds(forKey: "marginWidth", on: layer) as? NSNumber)?
+            .doubleValue
+    }
+
+    static func setMarginWidth(_ width: Double, under glass: NSGlassEffectView) {
+        guard let layer = backdropLayer(under: glass),
+              layer.responds(to: NSSelectorFromString("setMarginWidth:"))
+        else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.setValue(width, forKey: "marginWidth")
+        CATransaction.commit()
+    }
+
+    /// The `CASDFOutputEffect` render bounds. Without them the transplanted
+    /// outer passes hard-clip at the outline.
+    static func outputBounds(
+        under glass: NSGlassEffectView
+    ) -> (minimum: Double, maximum: Double)? {
+        guard let (_, effect) = outputEffect(under: glass),
+              let minimum = (valueIfResponds(forKey: "minimum", on: effect)
+                as? NSNumber)?.doubleValue,
+              let maximum = (valueIfResponds(forKey: "maximum", on: effect)
+                as? NSNumber)?.doubleValue
+        else { return nil }
+        return (minimum, maximum)
+    }
+
+    static func setOutputBounds(
+        minimum: Double,
+        maximum: Double,
+        under glass: NSGlassEffectView
+    ) {
+        guard let (layer, effect) = outputEffect(under: glass) else { return }
+        mutateEffectCopy(effect, on: layer) { copy in
+            copy.setValue(minimum, forKey: "minimum")
+            copy.setValue(maximum, forKey: "maximum")
+        }
+    }
+
+    private static func outputEffect(
+        under glass: NSGlassEffectView
+    ) -> (layer: CALayer, effect: NSObject)? {
+        guard let root = glass.layer else { return nil }
+        var found: (CALayer, NSObject)?
+        findEffect(className: "CASDFOutputEffect", under: root, into: &found)
+        return found
+    }
+
+    private static func findEffect(
+        className: String,
+        under layer: CALayer,
+        into found: inout (CALayer, NSObject)?
+    ) {
+        guard found == nil else { return }
+        if let effect = valueIfResponds(forKey: "effect", on: layer) as? NSObject,
+           String(describing: type(of: effect)) == className {
+            found = (layer, effect)
+            return
+        }
+        for sublayer in layer.sublayers ?? [] {
+            findEffect(className: className, under: sublayer, into: &found)
+        }
+    }
+
+    /// SDF effect objects attached to a layer are immutable in place: the
+    /// accepted mutation contract is copy, mutate the copy, reassign
+    /// `layer.effect`.
+    private static func mutateEffectCopy(
+        _ effect: NSObject,
+        on layer: CALayer,
+        _ mutate: (NSObject) -> Void
+    ) {
+        guard let copying = effect as? NSCopying,
+              let copy = copying.copy(with: nil) as? NSObject else { return }
+        mutate(copy)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.setValue(copy, forKey: "effect")
+        CATransaction.commit()
+    }
+
+    // MARK: Rim gate and payload
 
     static func rimOpacity(of layer: CALayer) -> Double {
         Double(layer.opacity)
+    }
+
+    /// The declared value keys of `CASDFKeyFillHighlightEffect`, from the
+    /// accepted recursive audits. Reads are `responds`-guarded, so a key this
+    /// build does not declare is skipped rather than trapped on.
+    private static let rimValueKeys = [
+        "curvature", "diffuseAmountScale", "diffuseHeightScale",
+        "diffuseSpreadScale", "fillAmount", "fillAngle", "fillColorAlpha",
+        "fillHeight", "fillHeightOffset", "fillHeightScale", "fillSpread",
+        "fillSpreadOffset", "fillSpreadScale", "global", "keyAmount",
+        "keyAngle", "keyColorAlpha", "keyHeight", "keyHeightOffset",
+        "keyHeightScale", "keySpread", "keySpreadOffset", "keySpreadScale",
+    ]
+    private static let rimColorKeys = ["fillColor", "keyColor"]
+
+    /// The rim effect's complete value/color payload. A flat context resolves
+    /// zero-alpha rim colors, so opening the gate without restamping the
+    /// payload leaves the highlight invisible.
+    static func rimPayload(
+        on layer: CALayer
+    ) -> (values: [String: Double], colors: [String: NSColor])? {
+        guard let effect = valueIfResponds(forKey: "effect", on: layer)
+            as? NSObject else { return nil }
+        var values: [String: Double] = [:]
+        for key in rimValueKeys {
+            if let number = valueIfResponds(forKey: key, on: effect)
+                as? NSNumber {
+                values[key] = number.doubleValue
+            }
+        }
+        guard !values.isEmpty else { return nil }
+        var colors: [String: NSColor] = [:]
+        for key in rimColorKeys {
+            guard let raw = valueIfResponds(forKey: key, on: effect),
+                  CFGetTypeID(raw as CFTypeRef) == CGColor.typeID else {
+                continue
+            }
+            // swiftlint:disable:next force_cast
+            if let color = NSColor(cgColor: raw as! CGColor) {
+                colors[key] = color
+            }
+        }
+        return (values, colors)
+    }
+
+    static func setRimPayload(
+        values: [String: Double],
+        colors: [String: NSColor],
+        on layer: CALayer
+    ) {
+        guard let effect = valueIfResponds(forKey: "effect", on: layer)
+            as? NSObject else { return }
+        mutateEffectCopy(effect, on: layer) { copy in
+            for (key, value) in values where hasSetter(for: key, on: copy) {
+                copy.setValue(value, forKey: key)
+            }
+            for (key, color) in colors where hasSetter(for: key, on: copy) {
+                copy.setValue(color.cgColor, forKey: key)
+            }
+        }
+    }
+
+    private static func hasSetter(for key: String, on object: NSObject) -> Bool {
+        guard let first = key.first else { return false }
+        let selector = "set\(first.uppercased())\(key.dropFirst()):"
+        return object.responds(to: NSSelectorFromString(selector))
     }
 
     /// The rim gate is system-animated. A leftover property animation pins the
@@ -245,6 +436,38 @@ enum GlassMaterialAccess {
         for sublayer in layer.sublayers ?? [] {
             collectUntintedMatrixLayers(under: sublayer, into: &found)
         }
+    }
+
+    /// The scalar/Boolean inputs a `vibrantColorMatrix` filter declares beside
+    /// `inputColorMatrix` — the per-slot optional Booleans from the accepted
+    /// matrix mutation contract.
+    static func matrixScalarInputs(on layer: CALayer) -> [String: Double] {
+        guard let filter = (layer.filters as? [NSObject])?.first(where: {
+            filterName($0) == "vibrantColorMatrix"
+        }) else { return [:] }
+        var values: [String: Double] = [:]
+        for key in filterInputKeys(filter) where key != "inputColorMatrix" {
+            if let number = filter.value(forKey: key) as? NSNumber {
+                values[key] = number.doubleValue
+            }
+        }
+        return values
+    }
+
+    static func setMatrixScalarInputs(
+        _ values: [String: Double],
+        on layer: CALayer
+    ) {
+        guard let filter = (layer.filters as? [NSObject])?.first(where: {
+            filterName($0) == "vibrantColorMatrix"
+        }), let name = filterName(filter) else { return }
+        let keys = Set(filterInputKeys(filter))
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (key, value) in values where keys.contains(key) {
+            layer.setValue(value, forKeyPath: "filters.\(name).\(key)")
+        }
+        CATransaction.commit()
     }
 
     /// Reads the 4x5 color matrix of the first `vibrantColorMatrix` on the

@@ -28,51 +28,75 @@ If the glass has a public tint, hand it over so the tint branch tracks too:
 strength.tintColor = glassView.tintColor
 ```
 
-## Freeze a style
+## Freeze a style atlas
 
 Live mode follows the window: lose main, and the glass re-reads Subdued
-endpoints. To lock a glass to a context its window is not actually in — a HUD
-panel that should always render the Main-On DarkAqua Regular material —
-capture the style once from a glass that genuinely *is* in that context, then
-install it:
+endpoints. To lock a glass to a participation its window never has — a HUD
+panel that should always render the Main-On material — capture a
+`GlassMaterialStyleAtlas` from a probe glass and freeze it:
 
 ```swift
-// Probe: a glass in a key/main window with a forced dark appearance,
-// same size and display as the destination.
-let style = GlassMaterialFrozenStyle.capture(from: probeGlass)!
+// One key-window opportunity yields the whole atlas: participation is the
+// only axis that needs real window state; appearance and variant are forced
+// on the probe, and each cell is sampled at several short sides.
+var atlas = GlassMaterialStyleAtlas()
+for cell in cellsToCapture {          // appearance × variant × participation
+    configure(probeGlass, for: cell)  // NSAppearance override, variant, size
+    for size in probeSizes {          // bracket the HUD's size range
+        resize(probeGlass, to: size)  // …and let it lay out and settle
+        atlas.add(GlassMaterialStyleSample.capture(from: probeGlass)!, for: cell)
+    }
+}
 
-hudGlass.materialStrength.freezeStyle(style)
+hudGlass.materialStrength.freeze(atlas: atlas)
 hudGlass.materialStrength.value = 0.5   // interpolates the frozen style
 ```
 
-While frozen, endpoints, blur shapes, the rim gate, the untinted Content/Rim
-color grades, and every captured input the curve never animates are restamped
-after each system rebuild, so the resolver's own Subdued/appearance rewrites
-do not bleed through. `unfreezeStyle()` returns to live behavior at the next
-rebuild.
+Only participation is frozen. Appearance and variant stay live — Light/Dark/
+Auto and Regular/Clear switch by selecting atlas cells with no recapture — and
+size follows by piecewise-linear interpolation between each cell's samples, so
+a content-sized surface needs no recapture on resize either. Several channels,
+including the render bounds that prevent the clipped-ring artifact, depend on
+both participation and size; sampling is what serves them without an authored
+per-channel ratio/cap table. Choose probe sizes that bracket the surface's
+range plus the resolver's gates (the ≤64pt floor and the 64–160pt blur ramp).
 
-Two rules carry over from how the values are measured. Geometry is part of the
-capture — size-scaled endpoints are baked into the baseline — so freeze
-fixed-size surfaces or recapture after a resize. And capture on the running
-machine rather than burning in fixture values: a handful of resolved fields
+Each sample carries the complete verified transplant set: every typed shader
+input including captured nils, the render-bounds group, both untinted color
+grades with their scalar inputs, and the full rim payload — a flat context
+resolves zero-alpha rim colors, so the gate alone would open onto an invisible
+highlight. The atlas is `Codable`: capture once, persist, and recapture only
+when the display configuration or OS build changes. Capture on the running
+machine rather than burning in fixture values — a handful of resolved fields
 are display-sensitive, which is why the `Golden/` archives are regression
 references, not a runtime source.
 
-One caveat is inherited from an open research question: whether AppKit writes
-an intermediate Recipe during active/inactive transitions before the restamp
-runs (roadmap P2). `GlassMaterialEffectView` refreshes on participation and
-appearance notifications and once more on the next runloop turn, bounding any
-such write to a single frame until that is settled by capture.
+Tint under a frozen Main-On lock needs one extra capture: a non-main window
+resolves the hue-suppressed tint matrix, so store the Main-context matrix per
+cell with `setTintMatrix(_:for:)`, captured via
+`GlassMaterialStyleAtlas.captureTintMatrix(from:)` at tint-selection time —
+the user picks the color in an active window, which is exactly the
+participation the matrix needs. Strength then drives alpha as
+`sourceAlpha × value²` on the captured hue.
+
+`unfreeze()` returns to live behavior at the next rebuild. One caveat is
+inherited from an open research question: whether AppKit writes an
+intermediate Recipe during active/inactive transitions before the restamp runs
+(roadmap P2). `GlassMaterialEffectView` refreshes on window main/key,
+application activation, and appearance notifications, plus a follow-up
+main-actor job — this covers the common orderings but does not establish a
+deterministic final writer until that question is settled by capture.
 
 ## Take it
 
 Copy this directory. It has no dependency on the rest of Liquid Glass Lab —
-three files, AppKit only:
+four files, AppKit only:
 
 | File | Role |
 |---|---|
-| `GlassMaterialAccess.swift` | The minimum private-API surface: layer lookup, filter read/write, rim gate, color matrices |
+| `GlassMaterialAccess.swift` | The minimum private-API surface: layer lookup, filter read/write, render bounds, rim gate/payload, color matrices |
 | `GlassMaterialCurve.swift` | The measured curve: shapes, channel table, baseline |
+| `GlassMaterialAtlas.swift` | The captured style atlas: appearance × variant × participation × size samples, Codable, interpolated |
 | `GlassMaterialStrength.swift` | The controller and the `NSGlassEffectView` subclass |
 
 ## How it works
