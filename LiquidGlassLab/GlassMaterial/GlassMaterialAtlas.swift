@@ -146,12 +146,14 @@ public struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
             ))
         }
 
-        // The supported Regular/Clear topology always resolves both untinted
-        // grades, the rim, and the render bounds. A capture that finds
-        // `glassBackground` but not the rest sampled a partially materialized
-        // tree; admitting it would replay exactly the hybrid/clipped material
-        // the freeze exists to prevent.
-        guard !matrices.isEmpty, !rims.isEmpty,
+        // The supported Regular/Clear topology always resolves exactly two
+        // untinted grade slots, one key-fill rim, and the render bounds. A
+        // capture that finds `glassBackground` but not the rest — or only
+        // part of it — sampled a partially materialized tree; admitting it
+        // would fail the count-guarded restamp against the complete
+        // destination topology and replay exactly the hybrid/clipped
+        // material the freeze exists to prevent.
+        guard matrices.count == 2, rims.count == 1,
               let marginWidth = GlassMaterialAccess.marginWidth(under: glass),
               let output = GlassMaterialAccess.outputBounds(under: glass)
         else { return nil }
