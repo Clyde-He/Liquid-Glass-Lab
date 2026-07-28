@@ -36,7 +36,7 @@ work, not an optional refinement.
 | Priority | Track | Current state |
 |---|---|---|
 | P0 | AppKit observed-pass completeness and control | Regular/Clear target topology closed: all five passes have accepted controls; V14/V19 outlier-family audits remain separate |
-| P1 | Material Strength and system preset-curve research | Regular/Clear curve closed on macOS 26: baseline-driven scalar, environment and geometry matrices accepted, author visual acceptance passed. Resize-reconstruction test, P1.4 cost, and the reduced macOS 27 set remain |
+| P1 | Material Strength and system preset-curve research | Regular/Clear curve closed on macOS 26: baseline-driven scalar, environment and geometry matrices accepted, author visual acceptance and resize reconstruction passed. P1.4 cost and the reduced macOS 27 set remain |
 | P2 | Recipe-axis closure | Fixed macOS 26/27 products captured; targeted axes remain |
 | P3 | Pass injection/transplant | Deferred, high risk, not required for Override |
 | P4 | Broader SwiftUI private authoring | Role inventory and fixed-context trees complete |
@@ -777,18 +777,37 @@ P1 is complete when:
   visual acceptance, macOS 26);
 - ✅ intermediate points remain continuous and recognizably Glass (author visual
   acceptance, macOS 26);
-- ⬜ context/resize reconstruction cannot permanently replace the authored state
-  — the pristine-baseline recapture is implemented and restamps after layout,
-  but no controlled resize/reconstruction test has been run against it;
+- ✅ context/resize reconstruction cannot permanently replace the authored state
+  — closed by the controlled resize test below;
 - ⬜ runtime cost is measured against whole-view alpha — P1.4 is untouched;
   the visual comparison against `alphaValue` has been accepted, the cost
   comparison has not;
 - ✅ a consumer can expose one strength control while low-level pass inputs
   remain implementation detail.
 
-Two criteria remain, both narrow. Separately, everything above is macOS 26
-only; extending it needs the reduced macOS 27 set described in P1.1, not
-another full matrix, because endpoints are read rather than authored.
+One criterion remains. Separately, everything above is macOS 26 only; extending
+it needs the reduced macOS 27 set described in P1.1, not another full matrix,
+because endpoints are read rather than authored.
+
+#### Resize reconstruction — 2026-07-27
+
+Strength is written **once** and never rewritten; everything after that is the
+layout restamp re-reading the baseline. Run with
+`--verify-resize-restamp`:
+
+```text
+step0 short=200 resized=false faceOpacity=0.5000 shadowHeight=41.600 (want 41.600)
+step1 short=400 resized=true  faceOpacity=0.5000 shadowHeight=81.600 (want 81.600)
+step2 short= 96 resized=true  faceOpacity=0.5000 shadowHeight=20.800 (want 20.800)
+step3 short=200 resized=true  faceOpacity=0.5000 shadowHeight=41.600 (want 41.600)
+```
+
+Two things had to hold and both did. `g` stayed at 0.5 through every resize
+rather than being snapped back to 1 by the system's own reconstruction. And
+`shadowHeight` tracked each new geometry's endpoint exactly — at short side 96
+that is `0.4 × 96 × shape(0.5, 96) = 20.8` — which is only possible if the
+baseline was genuinely recaptured against the new geometry rather than scaled
+from the old one.
 
 ## P2 — Recipe-axis closure
 
