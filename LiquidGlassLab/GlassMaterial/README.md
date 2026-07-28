@@ -61,7 +61,7 @@ both participation and size; sampling is what serves them without an authored
 per-channel ratio/cap table. Choose probe sizes that bracket the surface's
 range plus the resolver's gates (the ≤64pt floor and the 64–160pt blur ramp).
 
-Each sample carries the complete verified transplant set: every typed shader
+Each sample carries the restampable transplant groups: every typed shader
 input including captured nils, the render-bounds group, both untinted color
 grades with their scalar inputs, and the full rim payload — a flat context
 resolves zero-alpha rim colors, so the gate alone would open onto an invisible
@@ -71,13 +71,24 @@ machine rather than burning in fixture values — a handful of resolved fields
 are display-sensitive, which is why the `Golden/` archives are regression
 references, not a runtime source.
 
+One transplant group cannot be restamped and falls on the host layout:
+**window room**. The backing surface hard-clips everything at the window
+frame, so the glass must sit inset by at least the sample's `marginWidth`
+inside a transparent window — a content-sized HUD whose glass fills its panel
+edge-to-edge will still clip the Main-On outer passes no matter what this
+module writes. Size the panel to content plus `marginWidth` padding;
+`sample(for:at:)` exposes the captured value.
+
 Tint under a frozen Main-On lock needs one extra capture: a non-main window
 resolves the hue-suppressed tint matrix, so store the Main-context matrix per
 cell with `setTintMatrix(_:for:)`, captured via
 `GlassMaterialStyleAtlas.captureTintMatrix(from:)` at tint-selection time —
 the user picks the color in an active window, which is exactly the
 participation the matrix needs. Strength then drives alpha as
-`sourceAlpha × value²` on the captured hue.
+`sourceAlpha × value²` on the captured hue. The matrix is bound to the color
+it was resolved for: after `tintColor` changes, the hue falls back to the live
+(suppressed) resolution until the new color's matrix is captured and the
+atlas refrozen.
 
 `unfreeze()` returns to live behavior at the next rebuild. One caveat is
 inherited from an open research question: whether AppKit writes an

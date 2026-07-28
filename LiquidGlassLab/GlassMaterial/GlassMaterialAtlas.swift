@@ -190,13 +190,24 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
         }
     }
 
-    private var cells: [Cell: [GlassMaterialStyleSample]] = [:]
-    /// The full 20-coefficient Tint matrix per cell for the current tint
-    /// color. The transition only animates coefficient 18 (alpha); the 19 hue
+    /// A captured Tint matrix bound to the color it was resolved for. The
+    /// transition only animates coefficient 18 (alpha); the 19 hue
     /// coefficients are context-resolved constants, and a non-main window
     /// resolves the hue-suppressed variant — so a Main-On lock restamps the
-    /// captured matrix wholesale.
-    private var tintMatrices: [Cell: [Float]] = [:]
+    /// captured matrix wholesale. The binding is what keeps a Coral matrix
+    /// from serving a Cyan `tintColor` after the caller changes colors.
+    public struct TintMatrix: Codable, Hashable, Sendable {
+        public var sourceColor: GlassMaterialColorValue
+        public var matrix: [Float]
+
+        public init(sourceColor: GlassMaterialColorValue, matrix: [Float]) {
+            self.sourceColor = sourceColor
+            self.matrix = matrix
+        }
+    }
+
+    private var cells: [Cell: [GlassMaterialStyleSample]] = [:]
+    private var tintMatrices: [Cell: TintMatrix] = [:]
 
     public init() {}
 
@@ -215,12 +226,23 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
         cells[cell] = samples
     }
 
-    public mutating func setTintMatrix(_ matrix: [Float]?, for cell: Cell) {
+    public mutating func setTintMatrix(_ matrix: TintMatrix?, for cell: Cell) {
         tintMatrices[cell] = matrix
     }
 
-    public func tintMatrix(for cell: Cell) -> [Float]? {
-        tintMatrices[cell]
+    /// The captured Tint matrix for a cell, but only when it was resolved for
+    /// this color — a stale matrix carries the previous color's hue, which is
+    /// worse than the live hue-suppressed fallback.
+    public func tintMatrix(for cell: Cell, matching color: NSColor) -> [Float]? {
+        guard let entry = tintMatrices[cell],
+              let requested = GlassMaterialColorValue(color) else { return nil }
+        let stored = entry.sourceColor
+        let tolerance = 0.001
+        guard abs(stored.red - requested.red) <= tolerance,
+              abs(stored.green - requested.green) <= tolerance,
+              abs(stored.blue - requested.blue) <= tolerance,
+              abs(stored.alpha - requested.alpha) <= tolerance else { return nil }
+        return entry.matrix
     }
 
     public func sampleShortSides(for cell: Cell) -> [Double] {
@@ -257,14 +279,25 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
 
     // MARK: Interpolation
 
-    /// Linear except for gates: a pair of exactly {0, 1} endpoints is a
-    /// discrete resolver flag (`inputBleedDarkenBlend`,
-    /// `inputSDRHoldingToneEnabled`), which snaps to the nearer sample rather
-    /// than resolving a value the system never produces.
-    private static func mix(_ a: Double, _ b: Double, _ t: Double) -> Double {
+    /// The measured discrete resolver flags. Only these snap to the nearer
+    /// sample instead of interpolating — a value-shape heuristic would
+    /// misclassify continuous channels whose sampled endpoints happen to be
+    /// 0 and 1, such as `inputShadowVibrancyContribution` across the size
+    /// ramp.
+    private static let discreteKeys: Set<String> = [
+        "inputBleedDarkenBlend",
+        "inputSDRHoldingToneEnabled",
+        "global",
+    ]
+
+    private static func mix(
+        _ key: String,
+        _ a: Double,
+        _ b: Double,
+        _ t: Double
+    ) -> Double {
         if a == b { return a }
-        let gate: Set<Double> = [0, 1]
-        if gate.contains(a), gate.contains(b) { return t < 0.5 ? a : b }
+        if discreteKeys.contains(key) { return t < 0.5 ? a : b }
         return a + (b - a) * t
     }
 
@@ -285,12 +318,12 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
         _ a: [String: Value],
         _ b: [String: Value],
         _ t: Double,
-        using mix: (Value, Value, Double) -> Value
+        using mix: (String, Value, Value, Double) -> Value
     ) -> [String: Value] {
         var out: [String: Value] = [:]
         for (key, lowValue) in a {
             if let highValue = b[key] {
-                out[key] = mix(lowValue, highValue, t)
+                out[key] = mix(key, lowValue, highValue, t)
             } else if t < 0.5 {
                 out[key] = lowValue
             }
@@ -310,11 +343,13 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
         var out = t < 0.5 ? low : high
         out.shortSide = shortSide
         out.numeric = mixDictionaries(low.numeric, high.numeric, t, using: mix)
-        out.colors = mixDictionaries(low.colors, high.colors, t, using: mix)
-        out.points = mixDictionaries(low.points, high.points, t) {
+        out.colors = mixDictionaries(low.colors, high.colors, t) {
+            _, a, b, t in mix(a, b, t)
+        }
+        out.points = mixDictionaries(low.points, high.points, t) { _, a, b, t in
             CGPoint(
-                x: $0.x + ($1.x - $0.x) * $2,
-                y: $0.y + ($1.y - $0.y) * $2
+                x: a.x + (b.x - a.x) * t,
+                y: a.y + (b.y - a.y) * t
             )
         }
         out.nilKeys = t < 0.5 ? low.nilKeys : high.nilKeys
@@ -336,9 +371,11 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
         if low.rims.count == high.rims.count {
             out.rims = zip(low.rims, high.rims).map { a, b in
                 GlassMaterialRimSample(
-                    layerOpacity: mix(a.layerOpacity, b.layerOpacity, t),
+                    layerOpacity: mix("layerOpacity", a.layerOpacity, b.layerOpacity, t),
                     values: mixDictionaries(a.values, b.values, t, using: mix),
-                    colors: mixDictionaries(a.colors, b.colors, t, using: mix)
+                    colors: mixDictionaries(a.colors, b.colors, t) {
+                        _, a, b, t in mix(a, b, t)
+                    }
                 )
             }
         }
@@ -351,7 +388,7 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
         _ t: Double
     ) -> Double? {
         guard let a, let b else { return t < 0.5 ? a : b }
-        return mix(a, b, t)
+        return a + (b - a) * t
     }
 }
 
@@ -363,10 +400,13 @@ extension GlassMaterialStyleAtlas {
     @MainActor
     public static func captureTintMatrix(
         from glass: NSGlassEffectView
-    ) -> [Float]? {
-        guard let layer = GlassMaterialAccess.tintMatrixLayer(under: glass)
+    ) -> TintMatrix? {
+        guard let tintColor = glass.tintColor,
+              let sourceColor = GlassMaterialColorValue(tintColor),
+              let layer = GlassMaterialAccess.tintMatrixLayer(under: glass),
+              let matrix = GlassMaterialAccess.colorMatrix(on: layer)
         else { return nil }
-        return GlassMaterialAccess.colorMatrix(on: layer)
+        return TintMatrix(sourceColor: sourceColor, matrix: matrix)
     }
 }
 #endif

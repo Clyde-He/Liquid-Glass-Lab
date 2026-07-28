@@ -116,14 +116,32 @@ public final class GlassMaterialStrength {
     }
 
     /// True when the glass currently has a `glassBackground` pass and this
-    /// controller has values to drive it — a live baseline or a frozen atlas.
-    /// False before first layout or on a Variant that resolves without that
-    /// pass, regardless of whether an atlas is installed.
+    /// controller has values to drive it — a live baseline, or a frozen atlas
+    /// with samples for the *currently selected* cell. A partial atlas that
+    /// lacks the live appearance × variant cell reports false: the previously
+    /// stamped values remain on the tree, but nothing tracks `value` until
+    /// the cell is captured or the context returns.
     public var isAvailable: Bool {
         guard let glass,
               GlassMaterialAccess.glassBackgroundTarget(under: glass) != nil
         else { return false }
-        return baseline != nil || frozenAtlas != nil
+        if let frozenAtlas {
+            return frozenAtlas.sample(
+                for: currentCell(for: glass),
+                at: min(glass.bounds.width, glass.bounds.height)
+            ) != nil
+        }
+        return baseline != nil
+    }
+
+    private func currentCell(
+        for glass: NSGlassEffectView
+    ) -> GlassMaterialStyleAtlas.Cell {
+        GlassMaterialStyleAtlas.Cell(
+            isLightAppearance: Self.isLightAppearance(glass),
+            isClear: Self.isClear(glass),
+            hasMainParticipation: frozenMainParticipation
+        )
     }
 
     public init(glass: NSGlassEffectView, value: Double = 1) {
@@ -315,12 +333,11 @@ public final class GlassMaterialStrength {
     ) {
         let isClear = Self.isClear(glass)
         let isLight = Self.isLightAppearance(glass)
-        let cell = GlassMaterialStyleAtlas.Cell(
-            isLightAppearance: isLight,
-            isClear: isClear,
-            hasMainParticipation: frozenMainParticipation
-        )
+        let cell = currentCell(for: glass)
         let shortSide = min(glass.bounds.width, glass.bounds.height)
+        // A cell with no samples leaves the previous stamp in place and
+        // reports isAvailable == false — visually continuous, but nothing
+        // tracks `value`. Cover every cell the product exposes.
         guard let sample = atlas.sample(for: cell, at: shortSide) else { return }
 
         var sampleColors: [String: NSColor] = [:]
@@ -408,10 +425,12 @@ public final class GlassMaterialStrength {
         if let tintColor,
            let sourceAlpha = tintColor.usingColorSpace(.deviceRGB)?.alphaComponent,
            let tintLayer = GlassMaterialAccess.tintMatrixLayer(under: glass) {
-            // The captured cell matrix carries the Main-context hue; without
-            // one, the live matrix serves with our alpha, hue-suppressed as
-            // the window's real participation resolves it.
-            var matrix = atlas.tintMatrix(for: cell)
+            // The captured cell matrix carries the Main-context hue, and only
+            // serves while it matches the current tint color. Without a
+            // match, the live matrix serves with our alpha — hue-suppressed
+            // as the window's real participation resolves it — until the new
+            // color's matrix is captured and the atlas refrozen.
+            var matrix = atlas.tintMatrix(for: cell, matching: tintColor)
                 ?? GlassMaterialAccess.colorMatrix(on: tintLayer)
             if matrix?.count == 20 {
                 matrix?[18] = Float(
@@ -445,11 +464,7 @@ public final class GlassMaterialStrength {
             GlassMaterialAccess.write(color.cgColor, forKey: key, to: target)
         }
         for (key, point) in points {
-            GlassMaterialAccess.write(
-                NSValue(point: point),
-                forKey: key,
-                to: target
-            )
+            GlassMaterialAccess.writePair(point, forKey: key, to: target)
         }
         for key in nilKeys {
             GlassMaterialAccess.write(nil, forKey: key, to: target)

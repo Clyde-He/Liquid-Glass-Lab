@@ -147,12 +147,40 @@ enum GlassMaterialAccess {
                 if let color = NSColor(cgColor: raw as! CGColor) {
                     inputs.colors[key] = color
                 }
-            } else if let value = raw as? NSValue,
-                      String(cString: value.objCType).hasPrefix("{CGPoint") {
-                inputs.points[key] = value.pointValue
+            } else if let value = raw as? NSValue {
+                // `inputShadowOffset` resolves as an NSSize-encoded NSValue on
+                // both captured systems; a point encoding is accepted too.
+                // Either way the pair is stored as a CGPoint and re-boxed to
+                // the destination's own encoding on write.
+                let encoding = String(cString: value.objCType)
+                if encoding.hasPrefix("{CGPoint") {
+                    inputs.points[key] = value.pointValue
+                } else if encoding.hasPrefix("{CGSize") {
+                    let size = value.sizeValue
+                    inputs.points[key] = CGPoint(x: size.width, y: size.height)
+                }
             }
         }
         return inputs
+    }
+
+    /// Boxes a captured pair to match the destination's current encoding, so
+    /// a size-typed input is never handed a point-typed NSValue. Falls back to
+    /// the size encoding both accepted fixtures resolve.
+    static func writePair(
+        _ pair: CGPoint,
+        forKey key: String,
+        to target: GlassBackgroundTarget
+    ) {
+        guard target.inputKeys.contains(key) else { return }
+        let current = target.filter.value(forKey: key) as? NSValue
+        let boxed: NSValue
+        if let current, String(cString: current.objCType).hasPrefix("{CGPoint") {
+            boxed = NSValue(point: pair)
+        } else {
+            boxed = NSValue(size: NSSize(width: pair.x, height: pair.y))
+        }
+        write(boxed, forKey: key, to: target)
     }
 
     static func readColors(
@@ -313,14 +341,9 @@ enum GlassMaterialAccess {
         guard !values.isEmpty else { return nil }
         var colors: [String: NSColor] = [:]
         for key in rimColorKeys {
-            guard let raw = valueIfResponds(forKey: key, on: effect),
-                  CFGetTypeID(raw as CFTypeRef) == CGColor.typeID else {
-                continue
-            }
-            // swiftlint:disable:next force_cast
-            if let color = NSColor(cgColor: raw as! CGColor) {
-                colors[key] = color
-            }
+            guard let cgColor = effectColor(effect, getter: key),
+                  let color = NSColor(cgColor: cgColor) else { continue }
+            colors[key] = color
         }
         return (values, colors)
     }
@@ -336,16 +359,46 @@ enum GlassMaterialAccess {
             for (key, value) in values where hasSetter(for: key, on: copy) {
                 copy.setValue(value, forKey: key)
             }
-            for (key, color) in colors where hasSetter(for: key, on: copy) {
-                copy.setValue(color.cgColor, forKey: key)
+            for (key, color) in colors {
+                setEffectColor(color.cgColor, on: copy, key: key)
             }
         }
     }
 
     private static func hasSetter(for key: String, on object: NSObject) -> Bool {
-        guard let first = key.first else { return false }
-        let selector = "set\(first.uppercased())\(key.dropFirst()):"
-        return object.responds(to: NSSelectorFromString(selector))
+        object.responds(to: NSSelectorFromString(setterName(for: key)))
+    }
+
+    private static func setterName(for key: String) -> String {
+        guard let first = key.first else { return key }
+        return "set\(first.uppercased())\(key.dropFirst()):"
+    }
+
+    /// The rim color properties are raw `CGColorRef`s, which KVC cannot box —
+    /// reads and writes go through typed IMPs, per the accepted mutation
+    /// contract.
+    private static func effectColor(
+        _ effect: NSObject,
+        getter: String
+    ) -> CGColor? {
+        let selector = NSSelectorFromString(getter)
+        guard effect.responds(to: selector) else { return nil }
+        typealias GetColor = @convention(c) (NSObject, Selector)
+            -> Unmanaged<CGColor>?
+        let imp = unsafeBitCast(effect.method(for: selector), to: GetColor.self)
+        return imp(effect, selector)?.takeUnretainedValue()
+    }
+
+    private static func setEffectColor(
+        _ color: CGColor?,
+        on effect: NSObject,
+        key: String
+    ) {
+        let selector = NSSelectorFromString(setterName(for: key))
+        guard effect.responds(to: selector) else { return }
+        typealias SetColor = @convention(c) (NSObject, Selector, CGColor?) -> Void
+        let imp = unsafeBitCast(effect.method(for: selector), to: SetColor.self)
+        imp(effect, selector, color)
     }
 
     /// The rim gate is system-animated. A leftover property animation pins the
