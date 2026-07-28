@@ -244,4 +244,72 @@ export default [
       }
     },
   },
+
+  {
+    id: "appearance-moves-static-recipe-values",
+    claim:
+      "Appearance is a Recipe input on the static side too, not only during a "
+      + "transition. It moves resolved values for a majority of Variants while "
+      + "changing none of the pass inventory, which is why a strength control "
+      + "can read one baseline per context and ignore appearance entirely — but "
+      + "also why a capture that pins appearance to one value answers "
+      + "\"which Variants follow appearance\" for only half the vocabulary",
+    source: "AppKitGlassReverseEngineering.md — Recipe topology",
+    sections: [SECTION],
+    verify({ sections, expect }) {
+      const appearances = sections[SECTION].axes.values.appearance ?? [];
+      if (appearances.length < 2) {
+        expect.unverifiable(
+          `only appearance ${appearances.join(",") || "none"} captured — the `
+          + "static core has to sweep both controlled appearances before this "
+          + "can be re-derived"
+        );
+      }
+
+      // Pair rows that differ in appearance and nothing else.
+      const groups = new Map();
+      for (const row of sections[SECTION].rows ?? []) {
+        if (row.slice !== "core") continue;
+        const key = [
+          row.cell.variant, row.cell.subvariant, row.cell.main,
+          row.cell.key, row.cell.subdued, row.cell.width, row.cell.height,
+          row.cell.cornerRadius, row.cell.host,
+        ].join("|");
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(row);
+      }
+
+      const movedVariants = new Set();
+      const movedChannels = new Set();
+      let compared = 0;
+      for (const members of groups.values()) {
+        if (members.length !== 2) continue;
+        compared += 1;
+        const [a, b] = members;
+        for (const [channel, value] of Object.entries(a.inputs ?? {})) {
+          const other = b.inputs?.[channel];
+          if (typeof value !== "number" || typeof other !== "number") continue;
+          const scale = Math.max(1e-6, Math.abs(value));
+          if (Math.abs(value - other) / scale > 0.001) {
+            movedVariants.add(a.cell.variant);
+            movedChannels.add(channel);
+          }
+        }
+      }
+
+      expect.requireSamples(compared, 84, "appearance pairs compared");
+      expect.ok(
+        movedVariants.size > 0,
+        "appearance moves resolved values",
+        `${movedVariants.size} of 21 Variants, ${movedChannels.size} channels`
+      );
+      // Reported, never asserted: which Variants and channels follow appearance
+      // is a measured property of the release.
+      expect.ok(
+        true,
+        "Variants following appearance",
+        [...movedVariants].sort((x, y) => x - y).join(",")
+      );
+    },
+  },
 ];

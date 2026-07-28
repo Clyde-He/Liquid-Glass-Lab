@@ -42,15 +42,23 @@ below, and it is the half `GlassMaterialStrength` depends on, since it reads
 Resolved shader inputs, rim projection, layer geometry, and colors. One row per
 cell. No trees.
 
-### Core product — 336 rows
+### Core product — 672 rows
 
 ```text
 21 variants × 4 subvariants × Main{off,on} × Subdued{off,on}
-at 480 × 200, cornerRadius 16, Panel, Light appearance/backdrop,
-no tint, no overrides
+  × appearance{Light,Dark}
+at 480 × 200, cornerRadius 16, Panel, Light backdrop, no tint, no overrides
 ```
 
 Fixes the whole variant vocabulary at one reference geometry.
+
+Appearance is an **axis** here, not a constant. Appearance moves resolved static
+values, so pinning it answers "which Variants follow appearance" for only half
+the vocabulary — and that question is what the accepted "appearance moves
+endpoints" finding rests on outside the two materials the dynamic section
+covers. The earlier archive recorded appearance as `null` because it was
+uncontrolled, and the first controlled capture differed from it on 240 of 336
+cells: that difference *was* the appearance axis, discovered by accident.
 
 ### Axis slices — 72 rows
 
@@ -83,17 +91,24 @@ one axis the harness actively forbade — every export path asserted
 `!isActuallyKey`, because the hard case it was built for is main-*without*-key —
 so it needs an explicit opt-in, now `state.isTestWindowKey`.
 
-**Total: 408 rows, ≈ 1 MB.**
+**Total: 744 rows, ≈ 2 MB.**
 
 ## Section 2 — `static-tree`
 
 Recursive layer/pass/property inventory with topology and value signatures.
 
 ```text
-core     336 rows   same product as static-scalar, same reference geometry
-repeat    21 rows   variants × nil subvariant × Main on, captured a second time
-                    in the same display session
+core        336 rows   the static-scalar core at Light, same reference geometry
+repeat       21 rows   variants × nil subvariant × Main on, captured a second
+                       time in the same display session
+appearance   21 rows   variants × nil subvariant × Main on, under DarkAqua
 ```
+
+The tree is the expensive section, so appearance is a **slice** here rather than
+a second full product. It buys the whole variant vocabulary at one participation
+state, which is enough to answer the one question that matters — does topology
+follow appearance — and that question cannot be assumed: the dynamic section
+answers it for Variants 1 and 2 only.
 
 The repeat is the direct capture's stability evidence for the static tree. It
 lands as additional rows on cells that already exist; the archive treats a
@@ -105,7 +120,7 @@ Variant 4 is the measured adaptive exception: its
 the two sweeps. Repeat comparison excludes only those three fields for that
 variant and still requires every other layer, pass, and property to agree.
 
-**Total: 357 rows, ≈ 7 MB.**
+**Total: 378 rows, ≈ 7 MB.**
 
 ## Section 3 — `dynamic`
 
@@ -171,21 +186,21 @@ later is backward compatible: rows written before it read as null, meaning
 uncontrolled, and every assertion keeps working. This is why the schema does not
 need to anticipate future axes.
 
-The direct static sections explicitly record their fixed Light appearance and
-Light backdrop. **Subdued** stays null on dynamic rows because SwiftUI exposes
-no such concept, and cross-section comparison must treat that null as
-compatible rather than false.
+The static sections sweep appearance and record their fixed Light backdrop.
+**Subdued** stays null on dynamic rows because SwiftUI exposes no such concept,
+and cross-section comparison must treat that null as compatible rather than
+false.
 
 ## Totals
 
 | | rows | size |
 | --- | ---: | ---: |
-| `static-scalar` | 408 | ≈ 1 MB |
-| `static-tree` | 357 | ≈ 7 MB |
+| `static-scalar` | 744 | ≈ 2 MB |
+| `static-tree` | 378 | ≈ 7 MB |
 | `dynamic` | 104 runs / 936 samples | ≈ 5 MB |
-| **per OS** | | **≈ 13 MB, 4 files** |
+| **per OS** | | **≈ 14 MB, 4 files** |
 
-Two OS directories: **8 files, ≈ 26 MB**, against today's 11 source files and
+Two OS directories: **8 files, ≈ 28 MB**, against today's 11 source files and
 138 MB.
 
 ## Retired on completion

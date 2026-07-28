@@ -101,7 +101,6 @@ extension GlassLabView {
                             variant: variant,
                             subvariant: subvariant,
                             context: context,
-                            appearance: GlassLabGoldenPlan.staticAppearance,
                             backdrop: GlassLabGoldenPlan.staticBackdrop
                         ).identity)
                     }
@@ -249,13 +248,11 @@ extension GlassLabView {
         // Materialize studies it is meant to replace.
         state.isCapturingRecipeMatrix = true
         let scalar = try await captureStaticScalarSection(
-            appearance: appearance,
             environment: environment,
             capturedAt: capturedAt,
             operatingSystem: operatingSystem
         )
         let tree = try await captureStaticTreeSection(
-            appearance: appearance,
             environment: environment,
             capturedAt: capturedAt,
             operatingSystem: operatingSystem
@@ -295,7 +292,7 @@ extension GlassLabView {
 
             state.rendererMode = .recipe
             state.windowHostType = context.host
-            state.testAppearance = GlassLabGoldenPlan.staticAppearance
+            state.testAppearance = context.appearance
             state.testBackdrop = GlassLabGoldenPlan.staticBackdrop
             state.windowPadding = 40
             state.hasScrim = false
@@ -318,7 +315,7 @@ extension GlassLabView {
             guard NSApp.isActive else { continue }
             guard state.testWindow.isActuallyMain == context.main,
                   state.testWindow.isActuallyKey == context.key,
-                  GlassLabGoldenPlan.staticAppearance.matchesName(
+                  context.appearance.matchesName(
                       state.testWindow.effectiveAppearanceName ?? ""
                   ),
                   let glass = state.testWindow.liveGlass else {
@@ -359,7 +356,6 @@ extension GlassLabView {
     // MARK: - Section 1
 
     private func captureStaticScalarSection(
-        appearance: GlassLabTestAppearance,
         environment: GoldenEnvironment,
         capturedAt: String,
         operatingSystem: String
@@ -398,7 +394,6 @@ extension GlassLabView {
                         variant: entry.variant,
                         subvariant: entry.subvariant,
                         context: context,
-                        appearance: appearance,
                         backdrop: GlassLabGoldenPlan.staticBackdrop
                     ),
                     slice: context.slice
@@ -427,7 +422,6 @@ extension GlassLabView {
     // MARK: - Section 2
 
     private func captureStaticTreeSection(
-        appearance: GlassLabTestAppearance,
         environment: GoldenEnvironment,
         capturedAt: String,
         operatingSystem: String
@@ -458,7 +452,6 @@ extension GlassLabView {
                         variant: entry.variant,
                         subvariant: entry.subvariant,
                         context: context,
-                        appearance: appearance,
                         backdrop: GlassLabGoldenPlan.staticBackdrop
                     ),
                     slice: context.slice

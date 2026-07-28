@@ -297,4 +297,53 @@ export default [
       expect.equal(inconsistent.length, 0, "signatures with mixed inventories");
     },
   },
+
+  {
+    id: "topology-does-not-follow-appearance",
+    claim:
+      "Appearance moves resolved values but never the pass inventory. That is "
+      + "what lets the tree be captured under one appearance and still describe "
+      + "the whole variant vocabulary — and it is asserted rather than assumed, "
+      + "because the dynamic section can only answer it for Variants 1 and 2",
+    source: "AppKitGlassReverseEngineering.md — Recipe topology",
+    sections: [SECTION],
+    verify({ sections, expect }) {
+      const rows = sections[SECTION].rows ?? [];
+      const slice = rows.filter((row) => row.slice === "appearance");
+      if (slice.length === 0) {
+        expect.unverifiable(
+          "no appearance slice in the tree — capture one DarkAqua row per "
+          + "Variant before this can be re-derived"
+        );
+      }
+
+      const reference = new Map();
+      for (const row of coreRows(sections[SECTION])) {
+        if (row.cell.subvariant !== null) continue;
+        if (row.cell.main !== true || row.cell.subdued !== false) continue;
+        reference.set(row.cell.variant, row);
+      }
+
+      const missing = [];
+      const differing = [];
+      for (const row of slice) {
+        const other = reference.get(row.cell.variant);
+        if (!other) { missing.push(row.cell.variant); continue; }
+        expect.ok(
+          row.cell.appearance !== other.cell.appearance,
+          `Variant ${row.cell.variant} pairs across appearance`,
+          `${other.cell.appearance} vs ${row.cell.appearance}`
+        );
+        if (row.topologySignature !== other.topologySignature) {
+          differing.push(`v${row.cell.variant}:topology`);
+        }
+        if (inventory(row) !== inventory(other)) {
+          differing.push(`v${row.cell.variant}:inventory`);
+        }
+      }
+      expect.equal(missing.join(",") || "none", "none", "slice rows with no core counterpart");
+      expect.equal(slice.length, 21, "Variants covered by the appearance slice");
+      expect.equal(differing.join(",") || "none", "none", "Variants whose topology follows appearance");
+    },
+  },
 ];

@@ -827,12 +827,24 @@ endpoints agree at the reference geometry — a regression there would be real �
 and reports which sizes and channels diverge on every capture, so a future
 release moving the threshold shows up without anyone re-deriving it.
 
-Two things were deliberately left undone. The capture harness still starts each
-dissolve from a directly-created presented view rather than one that has
-genuinely materialized in, so the archive records the long-lived case only; that
-is also the case a strength control actually meets, since it reads its baseline
-from whatever tree it is handed. And the static sections sweep Light only, so
-endpoint parity is unverified under DarkAqua.
+Two follow-ups came out of it, both now specified in
+[`CAPTURE-SPEC.md`](../Golden/CAPTURE-SPEC.md):
+
+- **Removal lifecycle.** The capture that produced the numbers above started
+  each dissolve from a directly-created presented view rather than one that had
+  genuinely materialized in, so it records the long-lived case only. That is
+  also the case a strength control actually meets, since it reads its baseline
+  from whatever tree it is handed — but the other case is real too, and the spec
+  now requires each removal to perform a real Materialize In on a fresh hidden
+  subtree first. Until that lands the divergence figures here describe the
+  long-lived path.
+- **Appearance on the static side.** The first direct capture pinned appearance
+  to Light. That was an improvement over the earlier archive's uncontrolled
+  `null`, but it made appearance a constant rather than an axis, so "which
+  Variants follow appearance" was answered for half the vocabulary. The static
+  core now sweeps both controlled appearances, and the tree carries a
+  one-row-per-Variant DarkAqua slice to settle whether topology follows it at
+  all — a question the dynamic section can only answer for Variants 1 and 2.
 
 #### Resize reconstruction — 2026-07-27
 

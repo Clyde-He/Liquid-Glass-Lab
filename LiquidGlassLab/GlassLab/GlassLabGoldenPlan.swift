@@ -33,6 +33,7 @@ enum GlassLabGoldenPlan {
         let main: Bool
         let key: Bool
         let subdued: Bool
+        let appearance: GlassLabTestAppearance
         let host: GlassLabWindowHostType
         /// Nil sweeps all 21 variants; otherwise only these, at nil subvariant.
         let variants: [Int]?
@@ -67,8 +68,14 @@ enum GlassLabGoldenPlan {
     static func staticContexts() -> [StaticContext] {
         var contexts: [StaticContext] = []
 
-        // Core: the whole variant vocabulary at one reference geometry.
-        for main in [false, true] {
+        // Core: the whole variant vocabulary at one reference geometry, under
+        // both controlled appearances. Appearance is an axis here and not a
+        // constant because it moves resolved static values — the earlier
+        // archive was captured under an uncontrolled appearance, and pinning it
+        // to one value would have answered "which Variants follow appearance"
+        // for only half the vocabulary.
+        for appearance in GlassLabTestAppearance.controlledCases {
+            for main in [false, true] {
             for subdued in [false, true] {
                 contexts.append(StaticContext(
                     slice: "core",
@@ -78,9 +85,11 @@ enum GlassLabGoldenPlan {
                     main: main,
                     key: false,
                     subdued: subdued,
+                    appearance: appearance,
                     host: .panel,
                     variants: nil
                 ))
+            }
             }
         }
 
@@ -95,6 +104,7 @@ enum GlassLabGoldenPlan {
                     main: main,
                     key: false,
                     subdued: false,
+                    appearance: staticAppearance,
                     host: .panel,
                     variants: sliceVariants
                 ))
@@ -112,6 +122,7 @@ enum GlassLabGoldenPlan {
                     main: main,
                     key: false,
                     subdued: false,
+                    appearance: staticAppearance,
                     host: .panel,
                     variants: sliceVariants
                 ))
@@ -129,6 +140,7 @@ enum GlassLabGoldenPlan {
                     main: main,
                     key: false,
                     subdued: false,
+                    appearance: staticAppearance,
                     host: .panel,
                     variants: sliceVariants
                 ))
@@ -150,6 +162,7 @@ enum GlassLabGoldenPlan {
                 main: false,
                 key: true,
                 subdued: subdued,
+                appearance: staticAppearance,
                 host: .panel,
                 variants: sliceVariants
             ))
@@ -161,7 +174,9 @@ enum GlassLabGoldenPlan {
     /// The tree is expensive per row, so it takes the core product only, plus
     /// one repeat pass for within-capture stability evidence.
     static func treeContexts() -> [StaticContext] {
-        var contexts = staticContexts().filter { $0.slice == "core" }
+        var contexts = staticContexts().filter {
+            $0.slice == "core" && $0.appearance == staticAppearance
+        }
         // One row per variant at nil subvariant, not a second full product:
         // enough to show the tree settles to the same signatures twice, at a
         // fraction of the cost of re-sweeping all 336 cells.
@@ -173,6 +188,24 @@ enum GlassLabGoldenPlan {
             main: true,
             key: false,
             subdued: false,
+            appearance: staticAppearance,
+            host: .panel,
+            variants: GlassLabTuning.variants
+        ))
+        // Appearance slice: one row per Variant under DarkAqua. The tree is the
+        // expensive section, so this buys the whole variant vocabulary at one
+        // participation state rather than a second full product. It exists to
+        // answer one question — does topology follow appearance — which the
+        // dynamic section can only answer for Variants 1 and 2.
+        contexts.append(StaticContext(
+            slice: "appearance",
+            width: referenceWidth,
+            height: referenceHeight,
+            cornerRadius: referenceCornerRadius,
+            main: true,
+            key: false,
+            subdued: false,
+            appearance: .dark,
             host: .panel,
             variants: GlassLabTuning.variants
         ))
@@ -259,10 +292,10 @@ extension GoldenCell {
         variant: Int,
         subvariant: String?,
         context: GlassLabGoldenPlan.StaticContext,
-        appearance: GlassLabTestAppearance,
         backdrop: GlassLabBackdropMode
     ) -> GoldenCell {
-        GoldenCell(
+        let appearance = context.appearance
+        return GoldenCell(
             variant: variant,
             subvariant: subvariant,
             main: context.main,
