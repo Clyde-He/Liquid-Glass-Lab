@@ -223,7 +223,6 @@ extension GlassLabView {
         // The historical sweeps recorded whatever the machine happened to be
         // in, which is why that comparison was never expressible.
         let appearance = GlassLabGoldenPlan.staticAppearance
-        state.isCapturingRecipeMatrix = true
         state.hasScrim = false
         state.hasReducedTintOpacity = false
         state.adaptiveAppearance = 2
@@ -242,6 +241,15 @@ extension GlassLabView {
         let capturedAt = ISO8601DateFormatter().string(from: Date())
         let operatingSystem = ProcessInfo.processInfo.operatingSystemVersionString
 
+        // Scoped to the static sections, and deliberately not held across the
+        // dynamic one. The flag stops the host from stamping the Recipe on
+        // every state change — which the static sweeps need, because they
+        // stamp it themselves per context — but it also suppresses the
+        // post-layout restamp the Materialize probe relies on. Holding it
+        // through the dynamic section would capture the transition under
+        // conditions no accepted fixture was captured under, and the whole
+        // value of the dynamic section is being comparable to those.
+        state.isCapturingRecipeMatrix = true
         let scalar = try await captureStaticScalarSection(
             appearance: appearance,
             environment: environment,
@@ -254,6 +262,7 @@ extension GlassLabView {
             capturedAt: capturedAt,
             operatingSystem: operatingSystem
         )
+        state.isCapturingRecipeMatrix = false
         let dynamic = try await captureDynamicSection(
             environment: environment,
             capturedAt: capturedAt,
