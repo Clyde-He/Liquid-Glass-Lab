@@ -36,7 +36,7 @@ work, not an optional refinement.
 | Priority | Track | Current state |
 |---|---|---|
 | P0 | AppKit observed-pass completeness and control | Regular/Clear target topology closed: all five passes have accepted controls; V14/V19 outlier-family audits remain separate |
-| P1 | Material Strength and system preset-curve research | Regular/Clear curve closed on **macOS 26 and 27** from one table with no version branch: baseline-driven scalar, environment and geometry matrices accepted on both, author visual acceptance and resize reconstruction passed. macOS 27's 22 new inputs are classified — 17 animate, all linear in face progress. P1.4 cost is the only open exit criterion |
+| P1 | Material Strength and system preset-curve research | Regular/Clear capture and curve model closed on **macOS 26 and 27** from one table with no version branch. macOS 26 author visual acceptance and resize reconstruction passed; targeted macOS 27 visual acceptance at the compact size remains. Of 27's 22 new inputs, 17 animate and are modelled, one is verified static, and four aberration inputs never resolve in the public dynamic domain. P1.4 cost also remains |
 | P2 | Recipe-axis closure | Fixed macOS 26/27 products captured; targeted axes remain |
 | P3 | Pass injection/transplant | Deferred, high risk, not required for Override |
 | P4 | Broader SwiftUI private authoring | Role inventory and fixed-context trees complete |
@@ -738,12 +738,23 @@ The capture landed and **17 of the 22 animate**, so the omission was real: left
 untracked, a glass held at `G = 0.3` would have rendered with a full-strength
 ring shadow and blur fill. All 17 are now in the table.
 
-Classifying them was cheaper than expected. Every one is linear in face
-progress — normalized against its own start, each traces the `inputFaceOpacity`
-profile to within 1e-3 across 52 insertion runs — so no new shape was needed,
-only new start values, three of which are neither 0 nor 1 (`0.4`, `-0.25`,
-`1.309`). An earlier reading that `clamp` fit better on mean error was wrong: the
-systematic offset it captured is the sampling lag every channel shares.
+The remaining five are not one homogeneous "static" bucket.
+`inputKeyFillHighlightAngle` resolves one value across all 832 dynamic samples
+and is verified static. The four `inputAberration*` properties never resolve a
+numeric value anywhere in the public Regular/Clear dynamic section, so they are
+**unresolved in the sampled domain**, not verified static and not inputs the
+controller can currently author. That does not leave a live transition value
+behind — a missing baseline endpoint is skipped — but it remains an explicit
+scope boundary. The cross-version learning reports the split and fails if an
+unclassified input ever begins moving.
+
+Classifying the 17 animated additions was cheaper than expected. Every one is
+linear in face progress — normalized against its own start, each traces the
+`inputFaceOpacity` profile to within 1e-3 across 52 insertion runs — so no new
+shape was needed, only new start values, three of which are neither 0 nor 1
+(`0.4`, `-0.25`, `1.309`). An earlier reading that `clamp` fit better on mean
+error was wrong: the systematic offset it captured is the sampling lag every
+channel shares.
 
 macOS 27's one genuine non-linearity is elsewhere, on a channel that already
 existed. `inputBlurOpacity0` is gated off below a 64pt short side and ramps to
@@ -761,6 +772,38 @@ systems, as does Regular at every size on macOS 26, so `(1 - endpoint)` is zero
 and it reduces to the ramp measured there. One table, both systems, no version
 branch and no variant branch.
 
+##### Why the hump exists — 2026-07-28
+
+Reproducing it was briefly questioned on the grounds that a strength control
+should be monotonic, and below a 124pt short side this channel is not. That
+reasoning was wrong, and the archive says why.
+
+`inputBlurOpacity2` is quadratic, so it starts slower than linear and runs a
+deficit of `0.3 · g(1 - g)` early in the ramp — the same basis as the hump.
+`inputBlurOpacity0` carries that early load and hands off as the quadratic
+catches up. The two taps are a **crossfade**:
+
+```text
+48pt Regular, Main on        Opacity0   Opacity2      sum   without the hump
+g = 0.23                       0.1759     0.0611   0.2370             0.0612
+g = 0.49                       0.2498     0.1681   0.4179             0.1681
+g = 0.85                       0.1246     0.3897   0.5143             0.3897
+g = 1.00                       0.0000     0.5000   0.5000             0.5000
+```
+
+The sum is monotonic in 24 of 28 sampled cells and steps backwards by at most
+2.9% of its resting value in the other four — a plateau overshoot near the top
+of the ramp, not a fade. Flattening the hump would not buy monotonicity; it
+would delete the compensator and leave the slow quadratic alone, so blur would
+arrive late and abruptly. At `g = 0.25` the pair reads 0.256 with the hump and
+0.069 without.
+
+A single channel being non-monotonic is not the same as the perceived quantity
+being non-monotonic. The P1.3 checklist already asks for exactly that
+distinction — "verify monotonic perceived strength without assuming monotonic
+raw values" — and this is the first case where the two actually come apart.
+`the-blur-taps-crossfade-so-perceived-blur-stays-monotonic` asserts it.
+
 One residual is accepted rather than modelled: `inputBlurOpacity1` humps in the
 same basis but needs a coefficient per participation whose derivation is not
 understood, and at 48pt under Main its endpoint is zero, so the controller emits
@@ -768,6 +811,8 @@ a flat zero while the system reaches 0.05. That is the largest remaining
 deviation on macOS 27. It carries an explicit ceiling in
 `gated-blur-overshoots-by-its-saturation-deficit` — reporting the number without
 bounding it would have let a future regression from 0.05 to 0.5 print green.
+The ceiling is 5.25%: the ordinary compact 5% replay bound plus the same 5%
+numerical slack used by the general channel replay assertion.
 
 ### P1.3 — Curve construction
 
@@ -830,10 +875,14 @@ P1 is complete when:
 - ✅ strength `1` reproduces the accepted source Recipe — by construction, since
   the endpoints are captured from it. Qualified below 200pt: see "Two endpoints
   below 200pt";
-- ✅ strength `0` has no residue beyond the explicitly chosen endpoint (author
-  visual acceptance, macOS 26);
-- ✅ intermediate points remain continuous and recognizably Glass (author visual
-  acceptance, macOS 26);
+- ⬜ strength `0` has no residue beyond the explicitly chosen endpoint — author
+  visual acceptance passed on macOS 26 and the numeric endpoint is verified on
+  macOS 27, but the targeted macOS 27 visual acceptance remains;
+- ⬜ intermediate points remain continuous and recognizably Glass — author visual
+  acceptance passed on macOS 26; the compact macOS 27 path still needs review.
+  The numeric evidence now supports it: the one non-monotonic channel there is
+  half of a crossfade whose sum is monotonic to within 2.9%, so this is a
+  confirmation pass rather than an open question;
 - ✅ context/resize reconstruction cannot permanently replace the authored state
   — closed by the controlled resize test below;
 - ⬜ runtime cost is measured against whole-view alpha — P1.4 is untouched;
@@ -842,9 +891,10 @@ P1 is complete when:
 - ✅ a consumer can expose one strength control while low-level pass inputs
   remain implementation detail.
 
-One criterion remains. Separately, everything above is macOS 26 only; extending
-it needs the reduced macOS 27 set described in P1.1, not another full matrix,
-because endpoints are read rather than authored.
+The reduced macOS 27 capture and curve modelling are complete. Two work items
+remain before the cross-version P1 claim is closed: targeted visual acceptance
+of the compact macOS 27 path, and the P1.4 runtime-cost comparison. No additional
+full capture matrix is required for either.
 
 #### Two endpoints below 200pt — 2026-07-28
 

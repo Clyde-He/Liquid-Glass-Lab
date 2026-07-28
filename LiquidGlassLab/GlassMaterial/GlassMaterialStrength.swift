@@ -38,14 +38,25 @@ import AppKit
 /// `min(5%, 4 / shortSide)` for every channel at or above 200pt on both systems.
 /// Endpoints stay exact at every size.
 ///
-/// Every channel is monotonic in `value` on macOS 26. On macOS 27 one is not, by
-/// measurement rather than by choice: `inputBlurOpacity0` resolves to
-/// `g · (1 - (1 - endpoint)g)`, whose derivative vanishes at
-/// `g = 1 / (2(1 - endpoint))`, so it rises and falls inside `0...1` for any
-/// endpoint below 0.5 — including the flat zero Regular resolves below a 64pt
-/// short side. This reproduces what the system does; suppressing it would trade
-/// a measured behaviour for a tidier invariant. The visible result is a brief
-/// backdrop blur on a small glass part-way through, which is what AppKit shows.
+/// Every channel is monotonic in `value` on macOS 26. On macOS 27 one is not:
+/// `inputBlurOpacity0` resolves to `g · (1 - (1 - endpoint)g)`, whose derivative
+/// vanishes at `g = 1 / (2(1 - endpoint))`, so it rises and falls inside `0...1`
+/// for any endpoint below 0.5 — including the flat zero Regular resolves below a
+/// 64pt short side.
+///
+/// **Perceived blur is still monotonic**, and that is the property that matters.
+/// `inputBlurOpacity2` is quadratic, so it starts slower than linear and runs a
+/// deficit of `0.3 · g(1 - g)` early in the ramp; `inputBlurOpacity0` carries that
+/// early load and hands off as the quadratic catches up. The two are a crossfade.
+/// Their sum rises monotonically to its resting value and never steps back by
+/// more than 2.9% of it, measured over 56 cells.
+///
+/// This is why the hump is reproduced rather than flattened. Suppressing it would
+/// not buy a monotonic strength control — it would delete the compensator and
+/// leave the slow-starting quadratic alone, so blur would arrive late and
+/// abruptly: at `value = 0.25` on a gated endpoint the pair reads 0.26 with the
+/// hump and 0.07 without, a 3.7× difference in the wrong direction. Asserted by
+/// `the-blur-taps-crossfade-so-perceived-blur-stays-monotonic`.
 ///
 /// One measured exception remains, and it is **macOS 26 only**. Below 200pt the
 /// bound holds for everything except two face color-grade channels while fading

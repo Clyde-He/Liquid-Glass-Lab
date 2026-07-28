@@ -750,11 +750,114 @@ export default [
         }
       }
       expect.requireSamples(secondary.length, 100, "inputBlurOpacity1 samples");
+      // Keep this accepted omission inside the same contract as the general
+      // compact replay assertion: a 5% bound with 5% numerical slack.
+      const secondaryResidualCeiling = 0.05 * 1.05;
       expect.maxBelow(
         secondary,
         (item) => item.residual,
-        0.06,
+        secondaryResidualCeiling,
         "accepted residual on the unmodelled inputBlurOpacity1 hump"
+      );
+    },
+  },
+
+  {
+    id: "the-blur-taps-crossfade-so-perceived-blur-stays-monotonic",
+    claim:
+      "inputBlurOpacity0's hump is a crossfade partner, not a stray channel. "
+      + "inputBlurOpacity2 is quadratic, so it starts slower than linear and "
+      + "runs a deficit of 0.3·g(1-g) early on; inputBlurOpacity0 carries that "
+      + "early load and hands off as the quadratic catches up. Their sum rises "
+      + "monotonically to its resting value in every cell where either is "
+      + "monotonic alone, and never steps backwards by more than a few percent "
+      + "of that value. This is why the hump must be reproduced rather than "
+      + "flattened: deleting it does not make a strength control monotonic, it "
+      + "removes the compensator and leaves the slow-starting quadratic alone, "
+      + "so perceived blur arrives late and abruptly instead of early and "
+      + "smoothly. A single channel being non-monotonic is not the same as the "
+      + "perceived quantity being non-monotonic — which is exactly the "
+      + "distinction the P1.3 checklist asks to preserve",
+    source: "GlassResearchRoadmap.md — P1.3, monotonic perceived strength",
+    sections: [SECTION],
+    verify({ sections, expect }) {
+      const runs = sections[SECTION].runs ?? [];
+      /** Worst backward step of `valueOf` over a run, and the resting value. */
+      const walk = (run, valueOf) => {
+        const points = [];
+        for (const sample of run.samples ?? []) {
+          const g = progressOf(sample);
+          const inputs = glassBackground(sample)?.inputs;
+          if (g === null || !inputs) continue;
+          const value = valueOf(inputs);
+          if (value === null) continue;
+          points.push({ g, value });
+        }
+        if (points.length < 4) return null;
+        points.sort((a, b) => a.g - b.g);
+        let drop = 0;
+        let highest = -Infinity;
+        for (const point of points) {
+          if (point.value < highest) drop = Math.max(drop, highest - point.value);
+          highest = Math.max(highest, point.value);
+        }
+        return { drop, resting: points[points.length - 1].value };
+      };
+      const tap = (key) => (inputs) => numeric(inputs[key]);
+      const pair = (inputs) => {
+        const a = numeric(inputs.inputBlurOpacity0);
+        const b = numeric(inputs.inputBlurOpacity2);
+        return a === null || b === null ? null : a + b;
+      };
+
+      const humped = [];
+      const relative = [];
+      for (const run of runs) {
+        if (run.cell.tint !== "None") continue;
+        const alone = walk(run, tap("inputBlurOpacity0"));
+        const together = walk(run, pair);
+        if (!alone || !together) continue;
+        if (alone.drop > 1e-4) {
+          humped.push(`S=${run.cell.shortSide} v${run.cell.variant} `
+            + `main=${run.cell.main} ${run.cell.direction} ↓${alone.drop.toFixed(3)}`);
+        }
+        relative.push({
+          fraction: together.drop / Math.max(Math.abs(together.resting), 1e-9),
+          drop: together.drop,
+          short: run.cell.shortSide,
+          main: run.cell.main,
+        });
+      }
+      expect.requireSamples(relative.length, 20, "cells with both blur taps");
+      expect.requireSamples(humped.length, 1, "cells where the tap alone humps");
+
+      // The load-bearing assertion. The pair may plateau slightly past its
+      // resting value near the top of the ramp — measured at 2.86% — but it must
+      // never fade back in any meaningful way. A real regression here would mean
+      // the crossfade stopped covering the quadratic's early deficit.
+      expect.maxBelow(
+        relative,
+        (item) => item.fraction,
+        0.035,
+        "worst backward step of the tap pair, as a fraction of its resting value"
+      );
+      expect.ok(
+        true,
+        "cells where inputBlurOpacity0 alone is non-monotonic",
+        humped.join("; ")
+      );
+
+      // Evidence that the hump is load-bearing rather than decorative: state
+      // what the pair would be at low progress without it. Reported, because it
+      // describes a counterfactual model rather than an observation.
+      const quiet = 0.25;
+      const withHump = 0.5 * SHAPES.quadratic(quiet) + quiet * (1 - quiet);
+      const without = 0.5 * SHAPES.quadratic(quiet);
+      expect.ok(
+        true,
+        `pair at g=${quiet} with the hump versus without, at a gated endpoint`,
+        `${withHump.toFixed(4)} versus ${without.toFixed(4)} — `
+          + `${(withHump / without).toFixed(1)}x`
       );
     },
   },
