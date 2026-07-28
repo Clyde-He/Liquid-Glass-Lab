@@ -2097,6 +2097,19 @@ struct GlassLabView: View {
         }
     }
 
+    /// Built with named intermediates rather than inline in the row: as one
+    /// concatenation inside the section body it timed out the type checker.
+    private static func previewContextSummary(state: GlassLabState) -> String {
+        let requestedMain = state.isTestWindowMain ? "On" : "Off"
+        let actualMain = state.testWindow.isActuallyMain ? "On" : "Off"
+        let effectiveAppearance = state.testWindow.effectiveAppearanceName ?? "?"
+        return "\(state.windowHostType.rawValue)"
+            + " · requested Main \(requestedMain)"
+            + " · actual \(actualMain)"
+            + " · \(state.testAppearance.rawValue) / \(effectiveAppearance)"
+            + " · \(state.testBackdrop.rawValue) backdrop"
+    }
+
     @ViewBuilder
     private func semanticTransitionSections(
         state labState: GlassLabState
@@ -2206,15 +2219,7 @@ struct GlassLabView: View {
                 )
             }
             LabeledContent("Current Preview") {
-                Text(
-                    "\(state.windowHostType.rawValue)"
-                        + " · requested Main "
-                        + "\(state.isTestWindowMain ? "On" : "Off")"
-                        + " · actual \(state.testWindow.isActuallyMain ? "On" : "Off")"
-                        + " · \(state.testAppearance.rawValue)"
-                        + " / \(state.testWindow.effectiveAppearanceName ?? "?")"
-                        + " · \(state.testBackdrop.rawValue) backdrop"
-                )
+                Text(Self.previewContextSummary(state: state))
             }
             LabeledContent("Current Geometry") {
                 Text(
