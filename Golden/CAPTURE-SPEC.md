@@ -9,21 +9,33 @@ Nothing else belongs in `unified/`.
 
 ## The boundary
 
-`unified/` holds exactly what is addressed by an **`NSGlassEffectView` cell**:
-variant, subvariant, participation, appearance, geometry, host, and — for the
-dynamic section — transition progress.
+`unified/` holds exactly what is addressed by an **`NSGlassEffectView` cell**
+and is producible by **this** exporter: variant, subvariant, participation,
+appearance, geometry, host, and — for the dynamic section — transition progress.
 
-SwiftUI Semantic roles are deliberately **outside** it. `_Glass.Variant.Role`
-tags are a different vocabulary that maps onto variants rather than being them;
-folding them in would mean a `role` axis that is null on 95% of rows and a
-`variant` axis that is null on the rest. `semantic-usage-trees.json` stays a
-standalone fixture.
+Two things stay outside, each for its own reason, and each costs a claim the
+suite will not verify. Both costs are accepted.
 
-The cost of that line is explicit: the claim that *Semantic Regular's 66 numeric
-values match AppKit raw 0/1* stays unverified by the suite. It is a P4 question
-about what Semantic is made of, not a P1 question about the strength curve, and
-the reference layer in `LiquidGlassLab/GlassMaterial` never touches the role
-space.
+**SwiftUI Semantic roles** — `_Glass.Variant.Role` is a different vocabulary
+that maps onto variants rather than being them. Folding it in would mean a
+`role` axis null on 95% of rows against a `variant` axis null on the rest.
+`semantic-usage-trees.json` stays a standalone fixture, and the claim that
+*Semantic Regular's 66 numeric values match AppKit raw 0/1* stays unverified.
+That is a P4 question about what Semantic is made of; the reference layer in
+`LiquidGlassLab/GlassMaterial` never touches the role space.
+
+**The 19 controlled window conditions** — this codebase cannot reproduce them.
+That evidence came from a separate signed app-bundle probe that is not part of
+the lab; only its output survives, as `window-context-matrix.json`. It stays a
+standalone fixture, and the claim that *window class, style, level, opacity,
+shadow, and a spoofed `isKeyWindow` do not change the branch* stays unverified
+here. Re-deriving it means rebuilding that probe, which is out of scope for
+P1.
+
+What the exporter *can* produce is the load-bearing half of that finding: real
+key participation alone selects the active branch. That is the `key` slice
+below, and it is the half `GlassMaterialStrength` depends on, since it reads
+`isMainWindow || isKeyWindow`.
 
 ## Section 1 — `static-scalar`
 
@@ -39,7 +51,7 @@ at 480 × 200, cornerRadius 16, Panel, no tint, no overrides
 
 Fixes the whole variant vocabulary at one reference geometry.
 
-### Axis slices — 95 rows
+### Axis slices — 72 rows
 
 Slices exist because a claim needs an axis, not because the axis is
 interesting. Each runs on Variant 1 and 2, nil subvariant, Subdued off, unless
@@ -47,11 +59,10 @@ noted.
 
 | slice | values | rows | the claim it exists for |
 | --- | --- | ---: | --- |
-| size | 480 × {16, 24, 32, 48, 64, 80, 96, 128, 200, 300, 400, 480, 600} | 52 | size formulas are proportional / capped / floored, and which |
+| size | 480 × {16, 24, 32, 48, 64, 80, 96, 128, 300, 400, 480, 600} | 48 | size formulas are proportional / capped / floored, and which |
 | transposed size | {200×480, 400×480} | 8 | `shortSide = min(w, h)` is the only geometry variable |
 | corner radius | {0, 8, 32} at 480×200 | 12 | corner radius reaches no shader input |
-| real key | `key = true`, Main off, Subdued {off, on} | 4 | key alone selects the active branch |
-| window conditions | the 19 controlled host configurations | 19 | the branch follows real key-or-main, not window class, style, level, or a spoofed getter |
+| real key | `key = true` on the Panel host, Main off, Subdued {off, on} | 4 | key alone selects the active branch, which is why `GlassMaterialStrength` reads `isMainWindow \|\| isKeyWindow` |
 
 The size list is chosen to straddle every known cap: inner refraction amount
 caps at −60 (crossing at short side 75 on macOS 26, 120 on macOS 27), inner
@@ -59,7 +70,19 @@ refraction height at 20 (crossing at 80), outer refraction floors at 16
 (crossing at 64). A sweep that misses the crossing cannot tell a cap from a
 different ratio — which is exactly how the −0.8·S versus −0.5·S difference hid.
 
-**Total: 431 rows, ≈ 1 MB.**
+Short side 200 is absent from the size slice because the core product already
+captures it at the reference geometry; a slice row there would collide on the
+cell coordinate. A learning fitting the size curve joins core and slice rows by
+cell, not by slice.
+
+The key slice runs on the **Panel** host, not Window: a titled window that
+becomes key also becomes main, which would confound the two participation
+states the slice exists to separate. A panel can hold key alone. This is the
+one axis the harness actively forbade — every export path asserted
+`!isActuallyKey`, because the hard case it was built for is main-*without*-key —
+so it needs an explicit opt-in, now `state.isTestWindowKey`.
+
+**Total: 408 rows, ≈ 1 MB.**
 
 ## Section 2 — `static-tree`
 
@@ -119,9 +142,12 @@ Kept, because something reads it:
 
 ## Cell fields
 
-`variant`, `subvariant`, `main`, `subdued`, `appearance`, `backdrop`, `tint`,
-`width`, `height`, `cornerRadius`, `host`, `direction`, plus `key` and
-`windowKind` for the window-condition slice. `shortSide` is derived.
+`variant`, `subvariant`, `main`, `key`, `subdued`, `appearance`, `backdrop`,
+`tint`, `width`, `height`, `cornerRadius`, `host`, `direction`. `shortSide` is
+derived.
+
+`key` is new. It is `false` on every row the current harness produces and
+`true` only on the key slice, so adding it changes no existing comparison.
 
 A field is **null when the capture did not control that axis**. Adding a field
 later is backward compatible: rows written before it read as null, meaning
@@ -140,7 +166,7 @@ dynamic sample from being compared against its static Recipe row:
 
 | | rows | size |
 | --- | ---: | ---: |
-| `static-scalar` | 431 | ≈ 1 MB |
+| `static-scalar` | 408 | ≈ 1 MB |
 | `static-tree` | 357 | ≈ 7 MB |
 | `dynamic` | 100 runs / 900 samples | ≈ 5 MB |
 | **per OS** | | **≈ 13 MB, 4 files** |
@@ -160,11 +186,13 @@ evidence lives in the sections above:
   provenance for a decision already made, and display context is not a cell axis
 - `materialize-environment-matrix.json`, `materialize-geometry-sweep.json` →
   `dynamic`
-- `window-context-matrix.json` → `static-scalar` window-condition slice
 - `formula-analysis.json` → deleted. It is a computed report, not evidence;
   regenerate it from the size slice when needed
 
 Kept outside `unified/`:
 
-- `semantic-usage-trees.json` — a different coordinate space, see the boundary
-  section above.
+- `semantic-usage-trees.json` — a different coordinate space;
+- `window-context-matrix.json` — produced by a probe this codebase does not
+  contain, so it cannot be re-captured or kept in sync.
+
+Both are covered by the boundary section above.

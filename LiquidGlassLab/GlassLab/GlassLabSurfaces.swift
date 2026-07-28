@@ -421,7 +421,12 @@ private final class GlassLabManagedPanel: NSPanel, GlassLabManagedWindow {
     var allowsMainWindow = false
     var participationDidChange: (() -> Void)?
 
-    override var canBecomeKey: Bool { false }
+    /// A panel is the only host that can be genuinely key *without* being main,
+    /// which is the isolation the "key alone selects the active branch" claim
+    /// needs. This used to be a hard `false` because every other capture path
+    /// wants a panel that permanently refuses key; those paths leave
+    /// `allowsKeyWindow` false, so they are unaffected.
+    override var canBecomeKey: Bool { allowsKeyWindow }
     override var canBecomeMain: Bool { allowsMainWindow }
 
     override func becomeKey() {
@@ -535,6 +540,9 @@ final class GlassLabTestWindowController {
             if state.isTestWindowMain {
                 state.isTestWindowMain = false
             }
+            if state.isTestWindowKey {
+                state.isTestWindowKey = false
+            }
             discardWindow()
             return
         }
@@ -554,8 +562,16 @@ final class GlassLabTestWindowController {
         // matches would re-front the window and schedule context
         // re-resolutions on every tick.
         if didRecreateWindow
-            || !participationSatisfiesRequest(state.isTestWindowMain, for: window) {
-            applyMainWindowState(state.isTestWindowMain, to: window)
+            || !participationSatisfiesRequest(
+                main: state.isTestWindowMain,
+                key: state.isTestWindowKey,
+                for: window
+            ) {
+            applyParticipation(
+                main: state.isTestWindowMain,
+                key: state.isTestWindowKey,
+                to: window
+            )
         }
         scheduleMainWindowReconciliation(for: state)
     }
@@ -736,10 +752,33 @@ final class GlassLabTestWindowController {
         currentRendererMode = nil
     }
 
-    private func applyMainWindowState(_ wantsMain: Bool, to window: NSWindow) {
+    private func applyParticipation(
+        main wantsMain: Bool,
+        key wantsKey: Bool,
+        to window: NSWindow
+    ) {
         guard let managedWindow = window as? GlassLabManagedWindow else { return }
         isApplyingParticipation = true
         defer { isApplyingParticipation = false }
+
+        if wantsKey {
+            // Key-without-main, which only a panel can hold. Requested by the
+            // Golden key slice to isolate real key participation from main;
+            // every other path leaves this false and keeps the historical
+            // behaviour of a panel that can never become key.
+            rememberCurrentControlWindows()
+            managedWindow.allowsKeyWindow = true
+            managedWindow.allowsMainWindow = wantsMain
+            window.orderFrontRegardless()
+            if NSApp.isActive {
+                window.makeKeyAndOrderFront(nil)
+                if !wantsMain, NSApp.mainWindow === window {
+                    preferredMainWindow(excluding: window)?.makeMain()
+                }
+            }
+            refreshResolvedContextAfterSettling()
+            return
+        }
 
         if wantsMain {
             rememberCurrentControlWindows()
@@ -783,14 +822,17 @@ final class GlassLabTestWindowController {
     /// the actual participation match; allows-flags alone can linger from a
     /// recreate while AppKit has already moved main elsewhere.
     private func participationSatisfiesRequest(
-        _ wantsMain: Bool,
+        main wantsMain: Bool,
+        key wantsKey: Bool,
         for window: NSWindow
     ) -> Bool {
         guard let managedWindow = window as? GlassLabManagedWindow else { return true }
+        let expectedAllowsKey = wantsKey
+            || (wantsMain && currentHostType == .window)
         return managedWindow.allowsMainWindow == wantsMain
-            && managedWindow.allowsKeyWindow == (wantsMain && currentHostType == .window)
+            && managedWindow.allowsKeyWindow == expectedAllowsKey
             && isActuallyMain == wantsMain
-            && !isActuallyKey
+            && isActuallyKey == wantsKey
     }
 
     /// A Toggle click finishes by making the control window key/main after its
@@ -807,10 +849,14 @@ final class GlassLabTestWindowController {
                       self.currentHostType == state.windowHostType,
                       let window = self.window else { return }
                 let matchesRequest = self.isActuallyMain == state.isTestWindowMain
-                    && !self.isActuallyKey
+                    && self.isActuallyKey == state.isTestWindowKey
                 if matchesRequest { return }
                 guard NSApp.isActive else { return }
-                self.applyMainWindowState(state.isTestWindowMain, to: window)
+                self.applyParticipation(
+                    main: state.isTestWindowMain,
+                    key: state.isTestWindowKey,
+                    to: window
+                )
             }
         }
     }

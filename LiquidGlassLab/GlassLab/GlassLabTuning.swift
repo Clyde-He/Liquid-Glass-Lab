@@ -2986,11 +2986,14 @@ enum GlassLabTuning {
     /// Main/Subdued context. The caller owns the outer four-context loop so a
     /// context interrupted by application deactivation can be retried whole.
     @MainActor
+    /// See `captureMatrix` for the meaning of `requestedKey` and `variants`.
     static func capturePassAudit(
         on glass: NSGlassEffectView,
         context: String,
         requestedMain: Bool,
+        requestedKey: Bool = false,
         subdued: Bool,
+        variants selectedVariants: [Int]? = nil,
         restoring state: GlassLabState
     ) async throws -> [PassAuditEntry] {
         var entries: [PassAuditEntry] = []
@@ -3001,8 +3004,11 @@ enum GlassLabTuning {
             applyRecipe(from: state, to: glass)
         }
 
-        let subvariants: [String?] = [nil] + knownSubvariants.map(Optional.some)
-        for variant in variants {
+        let sweptVariants = selectedVariants ?? variants
+        let subvariants: [String?] = selectedVariants == nil
+            ? [nil] + knownSubvariants.map(Optional.some)
+            : [nil]
+        for variant in sweptVariants {
             for subvariant in subvariants {
                 guard NSApp.isActive else {
                     throw MatrixCaptureError.applicationInactive
@@ -3015,7 +3021,7 @@ enum GlassLabTuning {
                 guard NSApp.isActive else {
                     throw MatrixCaptureError.applicationInactive
                 }
-                guard actualMain == requestedMain, !actualKey else {
+                guard actualMain == requestedMain, actualKey == requestedKey else {
                     throw MatrixCaptureError.participationChanged(
                         expectedMain: requestedMain,
                         actualMain: actualMain,
@@ -3089,11 +3095,23 @@ enum GlassLabTuning {
     /// The real key/main participation of `glass.window` is part of what is
     /// being measured, so run once per surface.
     @MainActor
+    /// - Parameters:
+    ///   - requestedKey: the expected real key participation. Every historical
+    ///     export path required this to be false, because the hard case the
+    ///     harness was built for is main-*without*-key. The Golden key slice is
+    ///     the one caller that wants it true, and it has to be requested rather
+    ///     than tolerated so a window that stole focus mid-sweep still fails.
+    ///   - variants: nil sweeps the whole vocabulary against every subvariant.
+    ///     An explicit list sweeps only those, at nil subvariant, for slices
+    ///     that exist to move a geometry or participation axis rather than the
+    ///     material axis.
     static func captureMatrix(
         on glass: NSGlassEffectView,
         context: String,
         requestedMain: Bool,
+        requestedKey: Bool = false,
         subdued: Bool,
+        variants selectedVariants: [Int]? = nil,
         restoring state: GlassLabState
     ) async throws -> [MatrixEntry] {
         var entries: [MatrixEntry] = []
@@ -3107,8 +3125,11 @@ enum GlassLabTuning {
             applyRecipe(from: state, to: glass)
         }
 
-        let subvariants: [String?] = [nil] + knownSubvariants.map(Optional.some)
-        for variant in variants {
+        let sweptVariants = selectedVariants ?? variants
+        let subvariants: [String?] = selectedVariants == nil
+            ? [nil] + knownSubvariants.map(Optional.some)
+            : [nil]
+        for variant in sweptVariants {
             for subvariant in subvariants {
                 guard NSApp.isActive else {
                     throw MatrixCaptureError.applicationInactive
@@ -3124,7 +3145,7 @@ enum GlassLabTuning {
                 guard NSApp.isActive else {
                     throw MatrixCaptureError.applicationInactive
                 }
-                guard actualMain == requestedMain, !actualKey else {
+                guard actualMain == requestedMain, actualKey == requestedKey else {
                     throw MatrixCaptureError.participationChanged(
                         expectedMain: requestedMain,
                         actualMain: actualMain,

@@ -184,6 +184,12 @@ final class GlassLabState {
     /// key. A titled Window briefly becomes key while AppKit establishes main
     /// participation, then immediately returns key status to the control.
     var isTestWindowMain = false
+    /// On makes the test surface genuinely key. Only the Panel host can hold
+    /// key without also becoming main, which is the isolation the Golden key
+    /// slice needs: real key participation alone must select the active branch.
+    /// Every other capture path leaves this off, and the whole harness is built
+    /// around the harder main-*without*-key case.
+    var isTestWindowKey = false
     /// Extra transparent/content area around the test glass. A window's
     /// backing surface hard-clips at its frame, so the recipe's shadow and
     /// outer passes need this room to render; 0 reproduces a zero-margin

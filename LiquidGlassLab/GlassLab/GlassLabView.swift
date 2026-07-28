@@ -25,7 +25,7 @@ struct GlassLabView: View {
         var id: Self { self }
     }
 
-    private enum SemanticPage: String, CaseIterable, Identifiable {
+    enum SemanticPage: String, CaseIterable, Identifiable {
         case general = "General"
         case layerInspector = "Layer Inspector"
         case transition = "Transition"
@@ -96,8 +96,8 @@ struct GlassLabView: View {
     let state: GlassLabState
     @State private var selectedRecipePage = RecipePage.general
     @State private var selectedPassSlotID: String?
-    @State private var selectedSemanticPage = SemanticPage.general
-    @State private var isCapturingMatrix = false
+    @State var selectedSemanticPage = SemanticPage.general
+    @State var isCapturingMatrix = false
     @State private var isCapturingPassAudit = false
     @State private var isCapturingSemanticTrees = false
     @State private var liveSnapshot: LiveReadoutSnapshot?
@@ -105,9 +105,9 @@ struct GlassLabView: View {
     @State private var passObjectIdentityBySlot: [String: ObjectIdentifier] = [:]
     @State private var replacedPassSlots: Set<String> = []
     @State private var semanticSnapshot: GlassLabSemanticSnapshot?
-    @State private var materializeAnimationMode:
+    @State var materializeAnimationMode:
         GlassLabMaterializeAnimationMode = .systemDefault
-    @State private var materializeLinearDuration = 4.0
+    @State var materializeLinearDuration = 4.0
     @State private var materializeRequestedMain = false
     @State private var materializeRequestedAppearance:
         GlassLabTestAppearance = .system
@@ -150,7 +150,7 @@ struct GlassLabView: View {
     @State private var inspectorShaderMetadata: [String: GlassLabTuning.AttributeMetadata] = [:]
     @State private var inspectorHighlightMetadata: [String: GlassLabTuning.AttributeMetadata] = [:]
     @State private var liveRefreshTask: Task<Void, Never>?
-    @State private var matrixCaptureTask: Task<Void, Never>?
+    @State var matrixCaptureTask: Task<Void, Never>?
     @State private var passAuditCaptureTask: Task<Void, Never>?
     @State private var semanticCaptureTask: Task<Void, Never>?
     @State private var foregroundProbeTask: Task<Void, Never>?
@@ -2440,6 +2440,18 @@ struct GlassLabView: View {
                         exportPassAudit()
                     }
                     .disabled(isCapturingMatrix || isCapturingPassAudit)
+                    Divider()
+                    Button(
+                        isCapturingMatrix
+                            ? "Capturing…"
+                            : "Capture Golden Archive (unified/)"
+                    ) {
+                        exportGoldenArchive()
+                    }
+                    .disabled(isCapturingMatrix || isCapturingPassAudit)
+                    Text("Golden Archive replaces the two exports above. It writes unified/ as four files — static-scalar, static-tree, dynamic, and meta — in one run, so every section shares an environment and can be compared cell by cell. See Golden/CAPTURE-SPEC.md for what each slice exists to prove.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                     Text("Recipe Matrix records 1,008 compact Shader/Rim rows across representative Heights. Recursive Pass Audit is a separate 336-row Panel capture at 480×200@16 and Margin 40; it walks sublayers, masks, filters, background filters, compositing filters, and object-backed effects across Main × Subdued × Variant × Subvariant. Both exports pause while the app is inactive and require clean system state with Overrides disabled.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -4459,7 +4471,7 @@ struct GlassLabView: View {
             && abs(state.windowPadding - 40) < 0.001
     }
 
-    private func configureSemanticTransitionProbe() {
+    func configureSemanticTransitionProbe() {
         let enabled = state.rendererMode == .semanticUsage
             && selectedSemanticPage == .transition
             && state.isTestWindowVisible
@@ -4927,9 +4939,21 @@ struct GlassLabView: View {
         let arguments = ProcessInfo.processInfo.arguments
         let sizeFlag = arguments.firstIndex(of: "--capture-size-study")
         let resizeFlag = arguments.firstIndex(of: "--verify-resize-restamp")
-        guard let flagIndex = sizeFlag ?? resizeFlag,
-              arguments.index(after: flagIndex) < arguments.endIndex else {
+        let goldenFlag = arguments.firstIndex(of: "--capture-golden")
+        let planFlag = arguments.firstIndex(of: "--print-golden-plan")
+        guard let flagIndex = sizeFlag ?? resizeFlag ?? goldenFlag ?? planFlag,
+              arguments.index(after: flagIndex) < arguments.endIndex
+                || planFlag != nil else {
             return
+        }
+        // The plan is pure data, so it can be reported without a window, an
+        // activation, or a single private read. Checking the shape of a capture
+        // before paying for it is the point.
+        if planFlag != nil {
+            FileHandle.standardError.write(Data(
+                (Self.goldenPlanReport() + "\n").utf8
+            ))
+            exit(0)
         }
         let destination = URL(
             fileURLWithPath: arguments[arguments.index(after: flagIndex)]
@@ -4943,7 +4967,16 @@ struct GlassLabView: View {
         do {
             let payload: Data
             let report: String
-            if resizeFlag != nil {
+            if goldenFlag != nil {
+                // The Golden exporter writes a directory of its own, so it
+                // reports rather than handing back one payload to write.
+                let meta = try await captureGoldenArchive(into: destination)
+                FileHandle.standardError.write(Data(
+                    (Self.goldenReport(meta) + "\nWrote \(destination.path)\n").utf8
+                ))
+                state.testWindow.tearDown()
+                exit(0)
+            } else if resizeFlag != nil {
                 let result = try await performResizeRestampCheck()
                 payload = try JSONSerialization.data(
                     withJSONObject: result,
@@ -5111,7 +5144,7 @@ struct GlassLabView: View {
     }
 
     @MainActor
-    private func performMaterializeCapture(
+    func performMaterializeCapture(
         usage: GlassLabSemanticUsage,
         direction: GlassLabMaterializeDirection,
         animationMode: GlassLabMaterializeAnimationMode,
@@ -6171,7 +6204,7 @@ struct GlassLabView: View {
     }
 
     @MainActor
-    private func waitUntilApplicationIsActive(progress: String) async throws {
+    func waitUntilApplicationIsActive(progress: String) async throws {
         var reportedPause = false
         while !NSApp.isActive {
             if !reportedPause {
@@ -6310,7 +6343,7 @@ struct GlassLabView: View {
     }
 
     @MainActor
-    private func restoreTestWindowContext(
+    func restoreTestWindowContext(
         visibility: Bool,
         isMainWindow: Bool,
         isSubdued: Bool,
