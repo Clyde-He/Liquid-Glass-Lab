@@ -19,6 +19,8 @@ struct GlassLabView: View {
     private enum RecipePage: String, CaseIterable, Identifiable {
         case general = "General"
         case passes = "Passes"
+        case materialize = "Materialize"
+        case tint = "Tint"
 
         var id: Self { self }
     }
@@ -26,6 +28,7 @@ struct GlassLabView: View {
     private enum SemanticPage: String, CaseIterable, Identifiable {
         case general = "General"
         case layerInspector = "Layer Inspector"
+        case transition = "Transition"
 
         var id: Self { self }
     }
@@ -62,6 +65,34 @@ struct GlassLabView: View {
         }
     }
 
+    private enum TintStudyError: LocalizedError {
+        case contextRejected(String)
+        case missingAppKitSnapshot
+        case missingSemanticSnapshot
+        case transitionContextChanged
+        case invalidCounts(appKit: Int, semantic: Int, transitions: Int)
+        case invalidMaterializeStudy(expected: Int, actual: Int)
+
+        var errorDescription: String? {
+            switch self {
+            case let .contextRejected(context):
+                "Tint study could not establish \(context)."
+            case .missingAppKitSnapshot:
+                "Tint study could not capture the NSGlass pass tree."
+            case .missingSemanticSnapshot:
+                "Tint study could not capture the SwiftUI semantic tree."
+            case .transitionContextChanged:
+                "Tint study lost its requested Main/Key context during Materialize."
+            case let .invalidCounts(appKit, semantic, transitions):
+                "Tint study expected 28/20/40 rows but captured "
+                    + "\(appKit)/\(semantic)/\(transitions)."
+            case let .invalidMaterializeStudy(expected, actual):
+                "P1 Materialize study expected \(expected) transitions but "
+                    + "captured \(actual)."
+            }
+        }
+    }
+
     let state: GlassLabState
     @State private var selectedRecipePage = RecipePage.general
     @State private var selectedPassSlotID: String?
@@ -74,6 +105,43 @@ struct GlassLabView: View {
     @State private var passObjectIdentityBySlot: [String: ObjectIdentifier] = [:]
     @State private var replacedPassSlots: Set<String> = []
     @State private var semanticSnapshot: GlassLabSemanticSnapshot?
+    @State private var materializeAnimationMode:
+        GlassLabMaterializeAnimationMode = .systemDefault
+    @State private var materializeLinearDuration = 4.0
+    @State private var materializeRequestedMain = false
+    @State private var materializeRequestedAppearance:
+        GlassLabTestAppearance = .system
+    @State private var materializeRequestedBackdrop:
+        GlassLabBackdropMode = .ambient
+    /// The geometry the probe is currently waiting to settle into. Fixed at the
+    /// baseline 480×200 for every page and study except the geometry sweep.
+    @State private var materializeRequestedSize = CGSize(
+        width: 480,
+        height: 200
+    )
+    @State private var materializePresented = true
+    @State private var materializeCapture: GlassLabMaterializeCapture?
+    @State private var materializeCaptureStatus: String?
+    @State private var materializeCaptureTask: Task<Void, Never>?
+    @State private var isCapturingMaterialize = false
+    @State private var materializeStudyDocument:
+        GlassLabMaterializeStudyDocument?
+    @State private var materializeStudyStatus: String?
+    @State private var materializeStudyTask: Task<Void, Never>?
+    @State private var isCapturingMaterializeStudy = false
+    @State private var appKitMaterializeVariant = 1
+    @State private var appKitMaterializeRequestedMain = false
+    @State private var appKitMaterializeProgress = 1.0
+    @State private var appKitMaterializeIncludesViewEnvelope = false
+    @State private var appKitMaterializeResult:
+        GlassLabTuning.MaterializeBackgroundTransplantResult?
+    @State private var appKitMaterializeStatus: String?
+    @State private var appKitMaterializeTask: Task<Void, Never>?
+    @State private var isAnimatingAppKitMaterialize = false
+    @State private var tintStudyDocument: GlassLabTintStudyDocument?
+    @State private var tintStudyStatus: String?
+    @State private var tintStudyTask: Task<Void, Never>?
+    @State private var isCapturingTintStudy = false
     @State private var shaderOverrideBaseline: LiveReadoutSnapshot?
     @State private var highlightOverrideBaseline: LiveReadoutSnapshot?
     @State private var vibrantMatrixOverrideBaseline:
@@ -101,7 +169,11 @@ struct GlassLabView: View {
         .navigationTitle(state.rendererMode.navigationTitle)
         .onAppear {
             state.testWindow.activate(with: state)
+            configureSemanticTransitionProbe()
             scheduleLiveReadoutRefresh(refreshSchema: true)
+        }
+        .task {
+            await runHeadlessCaptureIfRequested()
         }
         .onChange(of: liveReadoutTrigger) {
             state.testWindow.sync(with: state)
@@ -113,15 +185,59 @@ struct GlassLabView: View {
         }
         .onChange(of: recipeStructureTrigger) {
             cancelForegroundProbe(clearReport: true)
+            if !isCapturingMaterialize {
+                cancelMaterializeCapture()
+            }
+            if state.rendererMode != .recipe {
+                cancelAppKitMaterializeProbe(rebuild: false)
+            } else if selectedRecipePage == .materialize,
+                      !isAnimatingAppKitMaterialize,
+                      !appKitMaterializeProbeContextIsReady {
+                requestAppKitMaterializeProbeContext()
+            }
             state.testWindow.sync(with: state)
+            configureSemanticTransitionProbe()
             scheduleLiveReadoutRefresh(refreshSchema: true)
         }
         .onChange(of: selectedRecipePage) {
+            if selectedRecipePage == .materialize {
+                requestAppKitMaterializeProbeContext()
+            } else {
+                cancelAppKitMaterializeProbe(rebuild: true)
+            }
+            scheduleLiveReadoutRefresh()
+        }
+        .onChange(of: appKitMaterializeVariant) {
+            if state.rendererMode == .recipe,
+               selectedRecipePage == .materialize {
+                requestAppKitMaterializeProbeContext()
+            } else {
+                cancelAppKitMaterializeProbe(rebuild: true)
+            }
+        }
+        .onChange(of: appKitMaterializeRequestedMain) {
+            if state.rendererMode == .recipe,
+               selectedRecipePage == .materialize {
+                requestAppKitMaterializeProbeContext()
+            } else {
+                cancelAppKitMaterializeProbe(rebuild: true)
+            }
+        }
+        .onChange(of: selectedSemanticPage) {
+            cancelMaterializeCapture()
+            state.testWindow.sync(with: state)
+            configureSemanticTransitionProbe()
             scheduleLiveReadoutRefresh()
         }
         .onReceive(liveContextNotifications) { notification in
             if notification.name == NSApplication.didBecomeActiveNotification {
                 state.testWindow.applicationDidBecomeActive(with: state)
+                if state.rendererMode == .recipe,
+                   selectedRecipePage == .materialize,
+                   !appKitMaterializeProbeContextIsReady,
+                   !isAnimatingAppKitMaterialize {
+                    requestAppKitMaterializeProbeContext()
+                }
             } else if notification.name == NSApplication.didResignActiveNotification {
                 state.testWindow.applicationDidResignActive(with: state)
             }
@@ -137,6 +253,10 @@ struct GlassLabView: View {
             semanticCaptureTask?.cancel()
             foregroundProbeTask?.cancel()
             vibrantMatrixProbeTask?.cancel()
+            materializeCaptureTask?.cancel()
+            materializeStudyTask?.cancel()
+            appKitMaterializeTask?.cancel()
+            tintStudyTask?.cancel()
         }
     }
 
@@ -165,6 +285,7 @@ struct GlassLabView: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
+            .disabled(isCapturingTintStudy)
             .padding(.horizontal, 20)
             .padding(.top, 10)
             .padding(.bottom, 10)
@@ -187,7 +308,12 @@ struct GlassLabView: View {
                     .padding(20)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .disabled(isCapturingMatrix || isCapturingPassAudit || isCapturingSemanticTrees)
+                .disabled(
+                    isCapturingMatrix
+                        || isCapturingPassAudit
+                        || isCapturingSemanticTrees
+                        || isCapturingTintStudy
+                )
             } else {
             Form {
                 switch state.rendererMode {
@@ -245,9 +371,14 @@ struct GlassLabView: View {
                 Toggle(isOn: $state.hasReducedTintOpacity) {
                     LabRowLabel(
                         "Reduced Tint Opacity",
-                        description: "Lowers the tint color's contribution to the material. No visible change unless a tint is set."
+                        description: "Private capability probe. This runtime exposes neither the guarded setter nor a getter, so the control is unavailable and does not claim a material effect."
                     )
                 }
+                .disabled(
+                    !(state.testWindow.liveGlass.map {
+                        GlassLabTuning.supportsReducedTintOpacitySetter(on: $0)
+                    } ?? false)
+                )
 
                 VStack(alignment: .leading, spacing: 6) {
                     Picker("Adaptive Appearance", selection: $state.adaptiveAppearance) {
@@ -255,7 +386,7 @@ struct GlassLabView: View {
                         Text("1").tag(1)
                         Text("2 — Default (adaptive)").tag(2)
                     }
-                    Text("Liquid Glass flips between light and dark treatment based on the luminance behind it, resolved in the render server. This pins the mode — try 0/1 to stop surfaces from adapting differently.")
+                    Text("Private NSGlass raw field. Values 0/1/2 are writable, but current evidence does not map them to macOS Light/Dark or prove that they pin backdrop adaptation. Use Test Window Appearance and Backdrop below for controlled public-environment experiments.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -274,6 +405,10 @@ struct GlassLabView: View {
 
                 case .passes:
                     EmptyView()
+                case .materialize:
+                    appKitMaterializeSections(state: state)
+                case .tint:
+                    tintStudySections(state: state)
                 }
 
                 case .semanticUsage:
@@ -282,12 +417,19 @@ struct GlassLabView: View {
                     semanticGeneralSections(state: state)
                 case .layerInspector:
                     semanticInspectorSections(state: state, snapshot: semanticSnapshot)
+                case .transition:
+                    semanticTransitionSections(state: state)
                 }
 
                 }
         }
         .formStyle(.grouped)
-        .disabled(isCapturingMatrix || isCapturingPassAudit || isCapturingSemanticTrees)
+        .disabled(
+            isCapturingMatrix
+                || isCapturingPassAudit
+                || isCapturingSemanticTrees
+                || isCapturingTintStudy
+        )
             }
         }
     }
@@ -694,6 +836,17 @@ struct GlassLabView: View {
             }
 
             Text(state.semanticUsage.implementationHint)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Public Tint") {
+            ColorPicker(
+                "Glass Tint",
+                selection: tintBinding,
+                supportsOpacity: true
+            )
+            Text("Applies SwiftUI `Glass.tint(_:)` to the resolved Regular, Clear, or private semantic Usage. Zero opacity restores nil so static and Transition captures share one explicit tint axis.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
@@ -1114,6 +1267,1092 @@ struct GlassLabView: View {
     }
 
     @ViewBuilder
+    private func appKitMaterializeSections(
+        state labState: GlassLabState
+    ) -> some View {
+        @Bindable var state = labState
+        let materializeBackgroundFieldCount =
+            appKitMaterializeRequestedMain
+                ? (appKitMaterializeVariant == 1 ? 38 : 33)
+                : (appKitMaterializeVariant == 1 ? 22 : 23)
+
+        Section("SwiftUI → NSGlass Transplant") {
+            Picker("Public Endpoint", selection: $appKitMaterializeVariant) {
+                Text("Regular").tag(1)
+                Text("Clear").tag(2)
+            }
+            .disabled(isAnimatingAppKitMaterialize)
+
+            Picker(
+                "Participation",
+                selection: $appKitMaterializeRequestedMain
+            ) {
+                Text("Main Off").tag(false)
+                Text("Main On").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .disabled(isAnimatingAppKitMaterialize)
+
+            ColorPicker(
+                "Tint Endpoint",
+                selection: appKitMaterializeTintBinding,
+                supportsOpacity: true
+            )
+            .disabled(isAnimatingAppKitMaterialize)
+            HStack {
+                Button("Coral 50%") {
+                    setAppKitMaterializeTint(
+                        NSColor(
+                            srgbRed: 0.92,
+                            green: 0.18,
+                            blue: 0.38,
+                            alpha: 0.5
+                        )
+                    )
+                }
+                Button("Clear Tint") {
+                    setAppKitMaterializeTint(nil)
+                }
+            }
+            .disabled(isAnimatingAppKitMaterialize)
+
+            Text("This probe replays only channels whose pass already exists in the matching NSGlass tree. Main Off uses the measured 22/23-field background vector. Main On uses its distinct 38/33-field vector and the observed discrete Rim gate. A nonnil public Tint adds its own matrix branch; only coefficient 18 receives sourceAlpha × g². SwiftUI-only passes are never injected.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            LabeledContent("glassBackground") {
+                Text(
+                    "\(materializeBackgroundFieldCount)"
+                        + " changing fields · direct transplant"
+                )
+                    .foregroundStyle(.green)
+            }
+            LabeledContent("View Envelope") {
+                Text("opacity + nonuniform scale · optional comparison")
+                    .foregroundStyle(.secondary)
+            }
+            LabeledContent("Content gaussianBlur") {
+                Text("pass absent in stable NSGlass")
+                    .foregroundStyle(.orange)
+            }
+            LabeledContent("glassForeground") {
+                Text("pass absent in Regular / Clear NSGlass")
+                    .foregroundStyle(.orange)
+            }
+            LabeledContent("Content/Rim Matrix · Output") {
+                Text("observed stable · intentionally untouched")
+                    .foregroundStyle(.secondary)
+            }
+            LabeledContent("Tint Matrix") {
+                Text(
+                    state.tintColor == nil
+                        ? "nil · branch absent"
+                        : "coefficient 18 · sourceAlpha × g²"
+                )
+                .foregroundStyle(
+                    state.tintColor == nil
+                        ? AnyShapeStyle(.secondary)
+                        : AnyShapeStyle(.green)
+                )
+            }
+            LabeledContent("Rim") {
+                Text(
+                    appKitMaterializeRequestedMain
+                        ? "owner gate · 0 at g=0, 1 while active"
+                        : "system Main-Off gate · untouched"
+                )
+                .foregroundStyle(
+                    appKitMaterializeRequestedMain ? .green : .secondary
+                )
+            }
+        }
+
+        Section("Probe Context") {
+            LabeledContent("Variant") {
+                Text(GlassLabTuning.variantLabel(for: state.variant))
+            }
+            LabeledContent("Host / Participation") {
+                Text(
+                    "\(state.windowHostType.rawValue) · requested Main "
+                        + "\(state.isTestWindowMain ? "On" : "Off")"
+                        + " · actual \(state.testWindow.isActuallyMain ? "On" : "Off")"
+                )
+            }
+            LabeledContent("Geometry") {
+                Text(
+                    "\(formatKnobValue(state.glassWidth))×"
+                        + "\(formatKnobValue(state.glassHeight))"
+                        + "@\(formatKnobValue(state.cornerRadius))"
+                        + " · margin \(formatKnobValue(state.windowPadding))"
+                )
+                .monospacedDigit()
+            }
+
+            Text("Entering this page automatically prepares Panel, 480×200@16, Margin 40, the selected Regular/Clear endpoint, and the selected Main participation. Controls unlock only after actual Main/Key state matches.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if appKitMaterializeProbeContextIsReady {
+                Text("Context ready.")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            } else {
+                Text(
+                    "Synchronizing Panel, requested and actual Main "
+                        + (appKitMaterializeRequestedMain ? "On" : "Off")
+                        + ", actual Key Off, and the fixed probe baseline…"
+                )
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+
+        Section("Shared-Pass Progress") {
+            labeledSlider(
+                "Materialize g",
+                value: appKitMaterializeProgressBinding,
+                in: 0...1
+            )
+            .disabled(!appKitMaterializeProbeContextIsReady
+                || isAnimatingAppKitMaterialize)
+
+            Toggle(
+                isOn: appKitMaterializeViewEnvelopeBinding
+            ) {
+                LabRowLabel(
+                    "Include View Envelope",
+                    description: "Comparison-only: also applies the observed whole-content opacity and nonuniform scale. Keep this Off to judge the reusable glassBackground pass by itself."
+                )
+            }
+            .disabled(!appKitMaterializeProbeContextIsReady
+                || isAnimatingAppKitMaterialize)
+
+            HStack {
+                Button("Linear In · 4s") {
+                    animateAppKitMaterialize(to: 1)
+                }
+                Button("Linear Out · 4s") {
+                    animateAppKitMaterialize(to: 0)
+                }
+                Button("Restore Endpoint") {
+                    setAppKitMaterializeProgress(1)
+                }
+            }
+            .disabled(!appKitMaterializeProbeContextIsReady
+                || isAnimatingAppKitMaterialize)
+
+            if isAnimatingAppKitMaterialize {
+                ProgressView(appKitMaterializeStatus ?? "Replaying transplant…")
+                    .controlSize(.small)
+            } else if let appKitMaterializeStatus {
+                Text(appKitMaterializeStatus)
+                    .font(.caption)
+                    .foregroundStyle(
+                        appKitMaterializeResult?.isAccepted == false
+                            ? AnyShapeStyle(.orange)
+                            : AnyShapeStyle(.secondary)
+                    )
+            }
+        }
+
+        if let result = appKitMaterializeResult {
+            Section("Latest Readback") {
+                LabeledContent("Endpoint") {
+                    Text(result.variant == 1 ? "Regular" : "Clear")
+                }
+                LabeledContent("Participation") {
+                    Text(result.requestedMain ? "Main On" : "Main Off")
+                }
+                LabeledContent("Progress") {
+                    Text(formatKnobValue(result.progress)).monospacedDigit()
+                }
+                LabeledContent("Background Keys") {
+                    Text(
+                        "\(result.acceptedKeyCount)/\(result.requestedKeys.count)"
+                    )
+                    .monospacedDigit()
+                    .foregroundStyle(result.missingKeys.isEmpty ? .green : .orange)
+                }
+                LabeledContent("Model Readback") {
+                    Text(
+                        result.mismatchedKeys.isEmpty
+                            ? "all requested values matched"
+                            : "\(result.mismatchedKeys.count) mismatches"
+                    )
+                    .foregroundStyle(
+                        result.mismatchedKeys.isEmpty ? .green : .orange
+                    )
+                }
+                if result.requestedMain {
+                    LabeledContent("Rim Gate") {
+                        Text(
+                            "\(result.acceptedRimKeyCount)/"
+                                + "\(result.requestedRimKeys.count)"
+                        )
+                        .monospacedDigit()
+                        .foregroundStyle(
+                            result.missingRimKeys.isEmpty
+                                && result.mismatchedRimKeys.isEmpty
+                                ? .green : .orange
+                        )
+                    }
+                }
+                if let requestedAlpha = result.requestedTintAlpha,
+                   let expectedAlpha = result.expectedTintMatrixAlpha {
+                    LabeledContent("Tint Matrix α") {
+                        Text(
+                            "source \(formatKnobValue(requestedAlpha)) · "
+                                + "expected \(formatKnobValue(expectedAlpha)) · "
+                                + "read \(result.actualTintMatrixAlpha.map(formatKnobValue) ?? "missing")"
+                        )
+                        .monospacedDigit()
+                        .foregroundStyle(
+                            result.tintMatrixFound && result.tintMatrixMatched
+                                ? .green : .orange
+                        )
+                    }
+                }
+                if !result.missingKeys.isEmpty {
+                    LabeledContent("Missing") {
+                        Text(result.missingKeys.joined(separator: ", "))
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                }
+                if !result.mismatchedKeys.isEmpty {
+                    LabeledContent("Mismatch") {
+                        Text(result.mismatchedKeys.joined(separator: ", "))
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                }
+                if !result.missingRimKeys.isEmpty
+                    || !result.mismatchedRimKeys.isEmpty {
+                    LabeledContent("Rim Issue") {
+                        Text(
+                            (result.missingRimKeys
+                                + result.mismatchedRimKeys)
+                                .joined(separator: ", ")
+                        )
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func tintStudySections(
+        state labState: GlassLabState
+    ) -> some View {
+        @Bindable var state = labState
+
+        Section("Full Tint Study") {
+            Text("Captures one controlled document spanning static NSGlass routing, static SwiftUI endpoints, and explicit-linear SwiftUI Materialize insertion/removal. Every row records the fixed window contract, complete model/presentation pass trees, and layer color state.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            LabeledContent("NSGlass Static") {
+                Text("28 rows")
+                    .monospacedDigit()
+            }
+            LabeledContent("SwiftUI Static") {
+                Text("20 rows")
+                    .monospacedDigit()
+            }
+            LabeledContent("SwiftUI Transition") {
+                Text("40 runs · 360 samples")
+                    .monospacedDigit()
+            }
+            LabeledContent("Tint Cases") {
+                Text("nil · Coral 25/50/100% · Cyan 50% · Reduced controls")
+                    .multilineTextAlignment(.trailing)
+            }
+
+            Button("Capture Full Tint Study") {
+                captureFullTintStudy()
+            }
+            .disabled(isCapturingTintStudy)
+
+            if isCapturingTintStudy {
+                ProgressView(tintStudyStatus ?? "Capturing Tint study…")
+                    .controlSize(.small)
+            } else if let tintStudyStatus {
+                Text(tintStudyStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        if let tintStudyDocument {
+            Section("Latest Study") {
+                LabeledContent("AppKit Static") {
+                    Text(String(tintStudyDocument.appKitStatic.count))
+                        .monospacedDigit()
+                }
+                LabeledContent("SwiftUI Static") {
+                    Text(String(tintStudyDocument.swiftUIStatic.count))
+                        .monospacedDigit()
+                }
+                LabeledContent("Transitions") {
+                    Text(String(tintStudyDocument.swiftUITransitions.count))
+                        .monospacedDigit()
+                }
+                HStack {
+                    Button("Copy Study Report") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(
+                            tintStudyDocument.report,
+                            forType: .string
+                        )
+                    }
+                    Button("Export Study JSON") {
+                        exportTintStudy()
+                    }
+                }
+                Text(tintStudyDocument.report)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+            }
+        }
+
+        Section("Current Tint Preview") {
+            ColorPicker(
+                "Tint Color",
+                selection: tintBinding,
+                supportsOpacity: true
+            )
+            Toggle(
+                "Reduced Tint Opacity (NSGlass only)",
+                isOn: $state.hasReducedTintOpacity
+            )
+            .disabled(
+                !(state.testWindow.liveGlass.map {
+                    GlassLabTuning.supportsReducedTintOpacitySetter(on: $0)
+                } ?? false)
+            )
+            Text("Tint remains available for qualitative follow-up. Reduced Tint Opacity is a capability probe: it is disabled when the runtime exposes no guarded setter. The automated study records that availability instead of treating a skipped write as an effect.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func captureFullTintStudy() {
+        guard !isCapturingTintStudy else { return }
+        guard !state.hasActiveOverrides else {
+            tintStudyStatus =
+                "Disable Filter, Rim, and Color Matrix overrides before capturing."
+            return
+        }
+
+        cancelMaterializeCapture()
+        liveRefreshTask?.cancel()
+        tintStudyDocument = nil
+        tintStudyStatus = "Preparing fixed Tint study context…"
+        isCapturingTintStudy = true
+
+        let originalRenderer = state.rendererMode
+        let originalRecipePage = selectedRecipePage
+        let originalSemanticPage = selectedSemanticPage
+        let originalUsage = state.semanticUsage
+        let originalVariant = state.variant
+        let originalSubvariant = state.subvariant
+        let originalSubdued = state.isSubdued
+        let originalScrim = state.hasScrim
+        let originalReducedTintOpacity = state.hasReducedTintOpacity
+        let originalAdaptiveAppearance = state.adaptiveAppearance
+        let originalTint = state.tintColor
+        let originalWidth = state.glassWidth
+        let originalHeight = state.glassHeight
+        let originalCornerRadius = state.cornerRadius
+        let originalHost = state.windowHostType
+        let originalAppearance = state.testAppearance
+        let originalBackdrop = state.testBackdrop
+        let originalMain = state.isTestWindowMain
+        let originalPadding = state.windowPadding
+        let originalVisibility = state.isTestWindowVisible
+        let originalMaterializeMain = materializeRequestedMain
+        let originalMaterializeAppearance = materializeRequestedAppearance
+        let originalMaterializeBackdrop = materializeRequestedBackdrop
+        let originalMaterializeMode = materializeAnimationMode
+        let originalMaterializeDuration = materializeLinearDuration
+        let originalMaterializePresented = materializePresented
+
+        tintStudyTask = Task { @MainActor in
+            let activity = ProcessInfo.processInfo.beginActivity(
+                options: [
+                    .userInitiated,
+                    .idleSystemSleepDisabled,
+                    .idleDisplaySleepDisabled,
+                ],
+                reason: "Capturing Full Liquid Glass Tint Study"
+            )
+            defer {
+                ProcessInfo.processInfo.endActivity(activity)
+                state.rendererMode = originalRenderer
+                selectedRecipePage = originalRecipePage
+                selectedSemanticPage = originalSemanticPage
+                state.semanticUsage = originalUsage
+                state.variant = originalVariant
+                state.subvariant = originalSubvariant
+                state.isSubdued = originalSubdued
+                state.hasScrim = originalScrim
+                state.hasReducedTintOpacity = originalReducedTintOpacity
+                state.adaptiveAppearance = originalAdaptiveAppearance
+                state.tintColor = originalTint
+                state.glassWidth = originalWidth
+                state.glassHeight = originalHeight
+                state.cornerRadius = originalCornerRadius
+                state.windowHostType = originalHost
+                state.testAppearance = originalAppearance
+                state.testBackdrop = originalBackdrop
+                state.isTestWindowMain = originalMain
+                state.windowPadding = originalPadding
+                state.isTestWindowVisible = originalVisibility
+                materializeRequestedMain = originalMaterializeMain
+                materializeRequestedAppearance =
+                    originalMaterializeAppearance
+                materializeRequestedBackdrop = originalMaterializeBackdrop
+                materializeAnimationMode = originalMaterializeMode
+                materializeLinearDuration = originalMaterializeDuration
+                materializePresented = originalMaterializePresented
+                state.testWindow.sync(with: state)
+                configureSemanticTransitionProbe()
+                isCapturingTintStudy = false
+                tintStudyTask = nil
+                scheduleLiveReadoutRefresh(refreshSchema: true)
+            }
+
+            do {
+                configureFixedTintStudyContext()
+                var appKitEntries: [GlassLabAppKitTintEntry] = []
+                var semanticEntries: [GlassLabSemanticTintEntry] = []
+                var transitionEntries: [GlassLabMaterializeCapture] = []
+
+                state.rendererMode = .recipe
+                selectedRecipePage = .tint
+                state.testWindow.sync(with: state)
+                try await Task.sleep(for: .milliseconds(240))
+
+                let appKitTotal = 2 * 2 * GlassLabTintPreset.allCases.count
+                var appKitIndex = 0
+                for requestedMain in [false, true] {
+                    for variant in [1, 2] {
+                        for tintPreset in GlassLabTintPreset.allCases {
+                            appKitIndex += 1
+                            tintStudyStatus =
+                                "NSGlass static \(appKitIndex)/\(appKitTotal) · "
+                                + "V\(variant) · Main "
+                                + (requestedMain ? "On" : "Off")
+                                + " · \(tintPreset.displayName)"
+                            appKitEntries.append(
+                                try await captureAppKitTintEntry(
+                                    variant: variant,
+                                    requestedMain: requestedMain,
+                                    tintPreset: tintPreset
+                                )
+                            )
+                        }
+                    }
+                }
+
+                state.rendererMode = .semanticUsage
+                selectedSemanticPage = .general
+                state.hasReducedTintOpacity = false
+                state.testWindow.sync(with: state)
+                configureSemanticTransitionProbe()
+                try await Task.sleep(for: .milliseconds(240))
+
+                let semanticTotal =
+                    2 * 2 * GlassLabTintPreset.semanticCases.count
+                var semanticIndex = 0
+                for requestedMain in [false, true] {
+                    for usage in [
+                        GlassLabSemanticUsage.regular,
+                        GlassLabSemanticUsage.clear,
+                    ] {
+                        for tintPreset in GlassLabTintPreset.semanticCases {
+                            semanticIndex += 1
+                            tintStudyStatus =
+                                "SwiftUI static \(semanticIndex)/\(semanticTotal) · "
+                                + "\(usage.displayName) · Main "
+                                + (requestedMain ? "On" : "Off")
+                                + " · \(tintPreset.displayName)"
+                            semanticEntries.append(
+                                try await captureSemanticTintEntry(
+                                    usage: usage,
+                                    requestedMain: requestedMain,
+                                    tintPreset: tintPreset
+                                )
+                            )
+                        }
+                    }
+                }
+
+                selectedSemanticPage = .transition
+                materializeAnimationMode = .linear
+                materializeLinearDuration = 1
+                configureSemanticTransitionProbe()
+                let transitionTotal = 2
+                    * 2
+                    * GlassLabTintPreset.transitionCases.count
+                    * GlassLabMaterializeDirection.allCases.count
+                var transitionIndex = 0
+                for requestedMain in [false, true] {
+                    for usage in [
+                        GlassLabSemanticUsage.regular,
+                        GlassLabSemanticUsage.clear,
+                    ] {
+                        for tintPreset in GlassLabTintPreset.transitionCases {
+                            for direction in GlassLabMaterializeDirection.allCases {
+                                transitionIndex += 1
+                                tintStudyStatus =
+                                    "SwiftUI Transition "
+                                    + "\(transitionIndex)/\(transitionTotal) · "
+                                    + "\(usage.displayName) · Main "
+                                    + (requestedMain ? "On" : "Off")
+                                    + " · \(tintPreset.displayName)"
+                                    + " · \(direction.rawValue)"
+                                transitionEntries.append(
+                                    try await performMaterializeCapture(
+                                        usage: usage,
+                                        direction: direction,
+                                        animationMode: .linear,
+                                        linearDuration: 1,
+                                        requestedMain: requestedMain,
+                                        tint: tintPreset.descriptor,
+                                        tintColor: tintPreset.color,
+                                        appearance: .system,
+                                        backdrop: .ambient
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                guard appKitEntries.count == 28,
+                      semanticEntries.count == 20,
+                      transitionEntries.count == 40 else {
+                    throw TintStudyError.invalidCounts(
+                        appKit: appKitEntries.count,
+                        semantic: semanticEntries.count,
+                        transitions: transitionEntries.count
+                    )
+                }
+                guard transitionEntries.allSatisfy({
+                    $0.samples.count == 9
+                        && $0.context.actualMain == $0.context.requestedMain
+                        && !$0.context.actualKey
+                }) else {
+                    throw TintStudyError.transitionContextChanged
+                }
+
+                let document = GlassLabTintStudyDocument(
+                    formatVersion: 1,
+                    capturedAt: ISO8601DateFormatter().string(from: Date()),
+                    operatingSystem:
+                        ProcessInfo.processInfo.operatingSystemVersionString,
+                    context: .init(
+                        hostType: GlassLabWindowHostType.panel.rawValue,
+                        glassWidth: 480,
+                        glassHeight: 200,
+                        cornerRadius: 16,
+                        windowMargin: 40,
+                        adaptiveAppearance: 2,
+                        subvariant: nil,
+                        subdued: false,
+                        scrim: false,
+                        overridesEnabled: false,
+                        transitionAnimation:
+                            GlassLabMaterializeAnimationMode.linear.rawValue,
+                        transitionDuration: 1
+                    ),
+                    appKitStatic: appKitEntries,
+                    swiftUIStatic: semanticEntries,
+                    swiftUITransitions: transitionEntries
+                )
+                tintStudyDocument = document
+                state.reportOutput = document.report
+                tintStudyStatus =
+                    "Complete · 28 AppKit rows · 20 SwiftUI rows · "
+                    + "40 transitions / 360 samples."
+            } catch is CancellationError {
+                tintStudyStatus = "Tint study cancelled; partial data discarded."
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription
+                    ?? error.localizedDescription
+                tintStudyStatus = "Tint study failed: \(message)"
+                state.reportOutput = tintStudyStatus ?? message
+            }
+        }
+    }
+
+    @MainActor
+    private func configureFixedTintStudyContext() {
+        state.variant = 1
+        state.subvariant = ""
+        state.isSubdued = false
+        state.hasScrim = false
+        state.hasReducedTintOpacity = false
+        state.adaptiveAppearance = 2
+        state.tintColor = nil
+        state.glassWidth = 480
+        state.glassHeight = 200
+        state.cornerRadius = 16
+        state.windowHostType = .panel
+        state.testAppearance = .system
+        state.testBackdrop = .ambient
+        state.isTestWindowMain = false
+        state.windowPadding = 40
+        state.isTestWindowVisible = true
+        materializePresented = true
+        state.testWindow.sync(with: state)
+    }
+
+    @MainActor
+    private func captureAppKitTintEntry(
+        variant: Int,
+        requestedMain: Bool,
+        tintPreset: GlassLabTintPreset
+    ) async throws -> GlassLabAppKitTintEntry {
+        state.variant = variant
+        state.isTestWindowMain = requestedMain
+        state.tintColor = tintPreset.color
+        state.hasReducedTintOpacity = tintPreset.reducedTintOpacity
+
+        for attempt in 1...5 {
+            try await waitUntilApplicationIsActive(
+                progress: tintStudyStatus ?? "NSGlass Tint study paused."
+            )
+            state.testWindow.sync(with: state)
+            guard let glass = state.testWindow.liveGlass else {
+                try await Task.sleep(for: .milliseconds(180))
+                continue
+            }
+            GlassLabTuning.applyRecipe(from: state, to: glass)
+            do {
+                let model = try await GlassLabTuning
+                    .settledPassAuditSnapshot(from: glass)
+                guard NSApp.isActive,
+                      state.testWindow.isActuallyMain == requestedMain,
+                      !state.testWindow.isActuallyKey else {
+                    if attempt < 5 { continue }
+                    throw TintStudyError.contextRejected(
+                        "NSGlass V\(variant) · Main "
+                            + (requestedMain ? "On" : "Off")
+                    )
+                }
+                CATransaction.flush()
+                let presentationRoot = glass.layer?.presentation()
+                return GlassLabAppKitTintEntry(
+                    variant: variant,
+                    material: variant == 1 ? "Regular" : "Clear",
+                    requestedMain: requestedMain,
+                    actualMain: state.testWindow.isActuallyMain,
+                    actualKey: state.testWindow.isActuallyKey,
+                    tint: tintPreset.descriptor,
+                    storedTint: GlassLabTintDescriptor(
+                        label: "NSGlass readback",
+                        color: glass.tintColor,
+                        reducedTintOpacity:
+                            capturedReducedTintOpacity(from: glass) ?? false
+                    ),
+                    reducedTintOpacitySetterAvailable:
+                        reducedTintOpacitySetterAvailable(on: glass),
+                    reducedTintOpacityGetterAvailable:
+                        reducedTintOpacityGetterAvailable(on: glass),
+                    storedReducedTintOpacity:
+                        capturedReducedTintOpacity(from: glass),
+                    snapshot: GlassLabAppKitTintSnapshot(
+                        model: model,
+                        presentation:
+                            GlassLabTuning.capturePassAuditSnapshot(
+                                from: presentationRoot
+                            ),
+                        modelLayerAppearance:
+                            GlassLabTuning.captureTintLayerAppearance(
+                                from: glass.layer
+                            ),
+                        presentationLayerAppearance:
+                            presentationRoot.map {
+                                GlassLabTuning.captureTintLayerAppearance(
+                                    from: $0
+                                )
+                            }
+                    )
+                )
+            } catch GlassLabTuning.MatrixCaptureError.applicationInactive {
+                continue
+            } catch GlassLabTuning.MatrixCaptureError.missingLayerTree {
+                if attempt == 5 {
+                    throw TintStudyError.missingAppKitSnapshot
+                }
+            }
+        }
+        throw TintStudyError.contextRejected(
+            "NSGlass V\(variant) · Main "
+                + (requestedMain ? "On" : "Off")
+        )
+    }
+
+    @MainActor
+    private func capturedReducedTintOpacity(
+        from glass: NSGlassEffectView
+    ) -> Bool? {
+        let object = glass as NSObject
+        let key = "_tintOpacityReduced"
+        guard reducedTintOpacityGetterAvailable(on: glass) else {
+            return nil
+        }
+        return (object.value(forKey: key) as? NSNumber)?.boolValue
+    }
+
+    @MainActor
+    private func reducedTintOpacityGetterAvailable(
+        on glass: NSGlassEffectView
+    ) -> Bool {
+        (glass as NSObject).responds(
+            to: NSSelectorFromString("_tintOpacityReduced")
+        )
+    }
+
+    @MainActor
+    private func reducedTintOpacitySetterAvailable(
+        on glass: NSGlassEffectView
+    ) -> Bool {
+        GlassLabTuning.supportsReducedTintOpacitySetter(on: glass)
+    }
+
+    @MainActor
+    private func captureSemanticTintEntry(
+        usage: GlassLabSemanticUsage,
+        requestedMain: Bool,
+        tintPreset: GlassLabTintPreset
+    ) async throws -> GlassLabSemanticTintEntry {
+        state.semanticUsage = usage
+        state.isTestWindowMain = requestedMain
+        state.tintColor = tintPreset.color
+        materializePresented = true
+        state.testWindow.sync(with: state)
+        configureSemanticTransitionProbe()
+
+        for attempt in 1...5 {
+            try await waitUntilApplicationIsActive(
+                progress: tintStudyStatus ?? "SwiftUI Tint study paused."
+            )
+            state.testWindow.sync(with: state)
+            configureSemanticTransitionProbe()
+            try await Task.sleep(for: .milliseconds(240))
+            try Task.checkCancellation()
+            guard NSApp.isActive,
+                  state.testWindow.isActuallyMain == requestedMain,
+                  !state.testWindow.isActuallyKey else {
+                if attempt < 5 { continue }
+                throw TintStudyError.contextRejected(
+                    "SwiftUI \(usage.displayName) · Main "
+                        + (requestedMain ? "On" : "Off")
+                )
+            }
+            if let snapshot = captureCurrentMaterializeSnapshot() {
+                return GlassLabSemanticTintEntry(
+                    roleTag: usage.rawValue,
+                    usage: usage.displayName,
+                    requestedMain: requestedMain,
+                    actualMain: state.testWindow.isActuallyMain,
+                    actualKey: state.testWindow.isActuallyKey,
+                    tint: tintPreset.descriptor,
+                    snapshot: snapshot
+                )
+            }
+        }
+        throw TintStudyError.missingSemanticSnapshot
+    }
+
+    private func exportTintStudy() {
+        guard let document = tintStudyDocument else {
+            tintStudyStatus = "Capture the full Tint study before exporting."
+            return
+        }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "glass-tint-study.json"
+        guard panel.runModal() == .OK, let destinationURL = panel.url else {
+            return
+        }
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(document)
+            try data.write(to: destinationURL, options: .atomic)
+            let rowCount = document.appKitStatic.count
+                + document.swiftUIStatic.count
+                + document.swiftUITransitions.count
+            tintStudyStatus = "Exported \(rowCount) study rows to "
+                + destinationURL.path
+            state.reportOutput = tintStudyStatus ?? document.report
+        } catch {
+            tintStudyStatus = "Tint study export failed: \(error.localizedDescription)"
+        }
+    }
+
+    @ViewBuilder
+    private func semanticTransitionSections(
+        state labState: GlassLabState
+    ) -> some View {
+        @Bindable var state = labState
+
+        Section("Materialize Transition Probe") {
+            Picker("Public Material", selection: $state.semanticUsage) {
+                Text("Regular").tag(GlassLabSemanticUsage.regular)
+                Text("Clear").tag(GlassLabSemanticUsage.clear)
+            }
+            .disabled(isCapturingMaterialize || isCapturingMaterializeStudy)
+
+            Picker("Outer Animation", selection: $materializeAnimationMode) {
+                ForEach(GlassLabMaterializeAnimationMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(isCapturingMaterialize || isCapturingMaterializeStudy)
+
+            ColorPicker(
+                "Glass Tint",
+                selection: tintBinding,
+                supportsOpacity: true
+            )
+            .disabled(isCapturingMaterialize || isCapturingMaterializeStudy)
+
+            if materializeAnimationMode == .linear {
+                labeledSlider(
+                    "Linear Duration",
+                    value: $materializeLinearDuration,
+                    in: 1...8
+                )
+                .disabled(isCapturingMaterialize || isCapturingMaterializeStudy)
+            }
+
+            Text("`.materialize` owns the material mapping. This selector changes only the surrounding SwiftUI transaction so the system mapping can be separated from outer timing.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            LabeledContent("Current Endpoint") {
+                Text(materializePresented ? "Presented" : "Removed")
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Button("Materialize In") {
+                    runManualMaterializeTransition(.insertion)
+                }
+                .disabled(
+                    materializePresented
+                        || isCapturingMaterialize
+                        || isCapturingMaterializeStudy
+                )
+                Button("Materialize Out") {
+                    runManualMaterializeTransition(.removal)
+                }
+                .disabled(
+                    !materializePresented
+                        || isCapturingMaterialize
+                        || isCapturingMaterializeStudy
+                )
+            }
+        }
+
+        Section("Capture Context") {
+            Picker(
+                "Capture Participation",
+                selection: $materializeRequestedMain
+            ) {
+                Text("Main Off").tag(false)
+                Text("Main On").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .disabled(isCapturingMaterialize || isCapturingMaterializeStudy)
+
+            Picker(
+                "Capture Appearance",
+                selection: $materializeRequestedAppearance
+            ) {
+                ForEach(GlassLabTestAppearance.allCases) { appearance in
+                    Text(appearance.rawValue).tag(appearance)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(isCapturingMaterialize || isCapturingMaterializeStudy)
+
+            Picker(
+                "Capture Backdrop",
+                selection: $materializeRequestedBackdrop
+            ) {
+                ForEach(GlassLabBackdropMode.allCases) { backdrop in
+                    Text(backdrop.rawValue).tag(backdrop)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(isCapturingMaterialize || isCapturingMaterializeStudy)
+
+            LabeledContent("Capture Target") {
+                Text(
+                    "Panel · Main "
+                        + (materializeRequestedMain ? "On" : "Off")
+                        + " · \(materializeRequestedAppearance.rawValue)"
+                        + " · \(materializeRequestedBackdrop.rawValue) backdrop"
+                        + " · 480×200@16 · margin 40"
+                )
+            }
+            LabeledContent("Current Preview") {
+                Text(
+                    "\(state.windowHostType.rawValue)"
+                        + " · requested Main "
+                        + "\(state.isTestWindowMain ? "On" : "Off")"
+                        + " · actual \(state.testWindow.isActuallyMain ? "On" : "Off")"
+                        + " · \(state.testAppearance.rawValue)"
+                        + " / \(state.testWindow.effectiveAppearanceName ?? "?")"
+                        + " · \(state.testBackdrop.rawValue) backdrop"
+                )
+            }
+            LabeledContent("Current Geometry") {
+                Text(
+                    "\(formatKnobValue(state.glassWidth))×"
+                        + "\(formatKnobValue(state.glassHeight))"
+                        + "@\(formatKnobValue(state.cornerRadius))"
+                        + " · margin \(formatKnobValue(state.windowPadding))"
+                )
+                .monospacedDigit()
+            }
+
+            Text("Capture prepares this fixed target automatically and waits for actual Main/Key participation before sampling. Manual Materialize In/Out always uses the current Preview context and never rewrites it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Time-Series Capture") {
+            HStack {
+                Button("Capture Insertion") {
+                    captureMaterializeTransition(.insertion)
+                }
+                Button("Capture Removal") {
+                    captureMaterializeTransition(.removal)
+                }
+            }
+            .disabled(isCapturingMaterialize || isCapturingMaterializeStudy)
+
+            Text("Each run records a settled start, the first post-trigger frame, then 0.125/0.25/0.5/0.75/0.875/1.0 samples. Every sample contains model and presentation trees, resolved filters/effects, and recursively attached CAAnimation metadata.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            if isCapturingMaterialize {
+                ProgressView(materializeCaptureStatus ?? "Capturing Materialize…")
+                    .controlSize(.small)
+            } else if let materializeCaptureStatus {
+                Text(materializeCaptureStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        Section("P1 Full Coverage Matrix") {
+            Button(
+                isCapturingMaterializeStudy
+                    ? "Capturing 64-Run Matrix…"
+                    : "Capture Full P1 Matrix (64 Runs)"
+            ) {
+                captureFullMaterializeStudy()
+            }
+            .disabled(isCapturingMaterialize || isCapturingMaterializeStudy)
+
+            Text("Runs Regular/Clear × Main Off/On × Aqua/DarkAqua × Light/Dark backdrop × None/Coral-50 Tint × Insertion/Removal with a one-second linear transaction. Every run keeps the real test window non-key and verifies its requested Main and effective appearance before sampling.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            if isCapturingMaterializeStudy {
+                ProgressView(
+                    materializeStudyStatus
+                        ?? "Capturing full P1 Materialize matrix…"
+                )
+                .controlSize(.small)
+            } else if let materializeStudyStatus {
+                Text(materializeStudyStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let document = materializeStudyDocument {
+                LabeledContent("Transitions") {
+                    Text(String(document.transitions.count))
+                        .monospacedDigit()
+                }
+                LabeledContent("Samples") {
+                    Text(
+                        String(
+                            document.transitions.reduce(0) {
+                                $0 + $1.samples.count
+                            }
+                        )
+                    )
+                    .monospacedDigit()
+                }
+                HStack {
+                    Button("Copy Matrix Report") {
+                        state.reportOutput = document.report
+                        copyToPasteboard(document.report)
+                    }
+                    Button("Export Matrix JSON") {
+                        exportMaterializeStudy()
+                    }
+                }
+            }
+        }
+
+        if let capture = materializeCapture {
+            Section("Latest Capture") {
+                LabeledContent("Usage") {
+                    Text(capture.usage)
+                }
+                LabeledContent("Direction") {
+                    Text(capture.direction.rawValue)
+                }
+                LabeledContent("Animation") {
+                    Text(capture.animationMode.rawValue)
+                }
+                LabeledContent("Samples") {
+                    Text(String(capture.samples.count)).monospacedDigit()
+                }
+                LabeledContent("Attached Animations") {
+                    Text(
+                        String(
+                            capture.samples.map {
+                                $0.snapshot.animations.count
+                            }.max() ?? 0
+                        )
+                    )
+                    .monospacedDigit()
+                }
+                HStack {
+                    Button("Copy Capture Report") {
+                        copyMaterializeCaptureReport()
+                    }
+                    Button("Export Capture JSON") {
+                        exportMaterializeCapture()
+                    }
+                }
+                ScrollView(.horizontal) {
+                    Text(capture.report)
+                        .font(.system(size: 10, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 240)
+            }
+        }
+    }
+
+    @ViewBuilder
     private func generalWindowSections(state labState: GlassLabState) -> some View {
         @Bindable var state = labState
 
@@ -1138,6 +2377,25 @@ struct GlassLabView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("Window Appearance", selection: $state.testAppearance) {
+                    ForEach(GlassLabTestAppearance.allCases) { appearance in
+                        Text(appearance.rawValue).tag(appearance)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Picker("Backdrop", selection: $state.testBackdrop) {
+                    ForEach(GlassLabBackdropMode.allCases) { backdrop in
+                        Text(backdrop.rawValue).tag(backdrop)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("Window Appearance forces Aqua/DarkAqua on this test window only. Backdrop Light/Dark draws a fixed neutral sRGB surface below the Glass; Ambient preserves the transparent Panel or colorful Window behavior. These are independent public-environment axes and do not write `_adaptiveAppearance`.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .disabled(!state.isTestWindowVisible)
 
             Toggle(isOn: $state.isTestWindowMain) {
                 LabRowLabel(
@@ -2628,6 +3886,8 @@ struct GlassLabView: View {
             String(state.vibrantMatrixOverridesEnabled),
             String(state.isTestWindowMain),
             String(state.windowPadding),
+            state.testAppearance.rawValue,
+            state.testBackdrop.rawValue,
             String(state.isCapturingRecipeMatrix),
         ].joined(separator: "|")
     }
@@ -2932,6 +4192,1041 @@ struct GlassLabView: View {
             + "\(state.semanticUsage.rawValue)) from \(state.windowHostType.rawValue). "
             + "Actual main: \(state.testWindow.isActuallyMain), "
             + "actual key: \(state.testWindow.isActuallyKey). \(status)."
+    }
+
+    private var appKitMaterializeProbeContextIsReady: Bool {
+        state.rendererMode == .recipe
+            && selectedRecipePage == .materialize
+            && state.variant == appKitMaterializeVariant
+            && (state.variant == 1 || state.variant == 2)
+            && state.subvariant.isEmpty
+            && !state.isSubdued
+            && !state.hasScrim
+            && !state.hasReducedTintOpacity
+            && state.adaptiveAppearance == 2
+            && !state.hasActiveOverrides
+            && state.windowHostType == .panel
+            && state.isTestWindowMain == appKitMaterializeRequestedMain
+            && state.testWindow.isActuallyMain
+                == appKitMaterializeRequestedMain
+            && !state.testWindow.isActuallyKey
+            && state.isTestWindowVisible
+            && abs(state.glassWidth - 480) < 0.001
+            && abs(state.glassHeight - 200) < 0.001
+            && abs(state.cornerRadius - 16) < 0.001
+            && abs(state.windowPadding - 40) < 0.001
+            && (
+                state.tintColor == nil
+                    || state.testWindow.liveGlass.map {
+                        GlassLabTuning.hasTintColorMatrix(on: $0)
+                    } == true
+            )
+    }
+
+    private var appKitMaterializeProgressBinding: Binding<Double> {
+        Binding {
+            appKitMaterializeProgress
+        } set: { value in
+            setAppKitMaterializeProgress(value)
+        }
+    }
+
+    private var appKitMaterializeViewEnvelopeBinding: Binding<Bool> {
+        Binding {
+            appKitMaterializeIncludesViewEnvelope
+        } set: { enabled in
+            appKitMaterializeIncludesViewEnvelope = enabled
+            applyAppKitMaterializeProgress()
+        }
+    }
+
+    private var appKitMaterializeTintBinding: Binding<Color> {
+        Binding {
+            state.tintColor.map(Color.init) ?? Color.black.opacity(0)
+        } set: { color in
+            let nsColor = NSColor(color)
+            setAppKitMaterializeTint(
+                nsColor.alphaComponent > 0 ? nsColor : nil
+            )
+        }
+    }
+
+    private func setAppKitMaterializeTint(_ color: NSColor?) {
+        state.tintColor = color
+        requestAppKitMaterializeProbeContext()
+    }
+
+    private func requestAppKitMaterializeProbeContext() {
+        cancelAppKitMaterializeProbe(rebuild: true)
+        isAnimatingAppKitMaterialize = true
+        if state.hasActiveOverrides {
+            overridesEnabledBinding.wrappedValue = false
+        }
+
+        state.rendererMode = .recipe
+        state.variant = appKitMaterializeVariant
+        state.subvariant = ""
+        state.isSubdued = false
+        state.hasScrim = false
+        state.hasReducedTintOpacity = false
+        state.adaptiveAppearance = 2
+        state.glassWidth = 480
+        state.glassHeight = 200
+        state.cornerRadius = 16
+        state.windowPadding = 40
+        state.windowHostType = .panel
+        state.isTestWindowVisible = true
+        state.isTestWindowMain = appKitMaterializeRequestedMain
+        appKitMaterializeProgress = 1
+        appKitMaterializeStatus =
+            "Preparing the stable NSGlass Main "
+            + (appKitMaterializeRequestedMain ? "On" : "Off")
+            + " endpoint…"
+        state.testWindow.sync(with: state)
+
+        appKitMaterializeTask = Task { @MainActor in
+            do {
+                guard try await waitForAppKitMaterializeProbeContext() else {
+                    appKitMaterializeStatus =
+                        "The fixed NSGlass context did not settle truthfully."
+                    isAnimatingAppKitMaterialize = false
+                    return
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                appKitMaterializeStatus =
+                    "The fixed NSGlass context did not settle truthfully."
+                isAnimatingAppKitMaterialize = false
+                return
+            }
+            applyAppKitMaterializeProgress()
+            isAnimatingAppKitMaterialize = false
+        }
+    }
+
+    private func waitForAppKitMaterializeProbeContext() async throws -> Bool {
+        var activeAttempts = 0
+        while activeAttempts < 24 {
+            try Task.checkCancellation()
+            if appKitMaterializeProbeContextIsReady {
+                return true
+            }
+            guard NSApp.isActive else {
+                try await Task.sleep(for: .milliseconds(100))
+                continue
+            }
+            if activeAttempts > 0, activeAttempts.isMultiple(of: 4) {
+                state.testWindow.sync(with: state)
+            }
+            activeAttempts += 1
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        return appKitMaterializeProbeContextIsReady
+    }
+
+    private func setAppKitMaterializeProgress(_ progress: Double) {
+        appKitMaterializeProgress = min(max(progress, 0), 1)
+        applyAppKitMaterializeProgress()
+    }
+
+    private func applyAppKitMaterializeProgress(
+        publishesResult: Bool = true
+    ) {
+        guard appKitMaterializeProbeContextIsReady else {
+            if publishesResult {
+                appKitMaterializeStatus =
+                    "The fixed Regular/Clear NSGlass context is still settling."
+            }
+            return
+        }
+        guard let result =
+            state.testWindow.applyAppKitMaterializeBackgroundProbe(
+                progress: appKitMaterializeProgress,
+                variant: appKitMaterializeVariant,
+                requestedMain: appKitMaterializeRequestedMain,
+                tintColor: state.tintColor,
+                includesViewEnvelope: appKitMaterializeIncludesViewEnvelope
+            ) else {
+            if publishesResult {
+                appKitMaterializeResult = nil
+                appKitMaterializeStatus =
+                    "The live NSGlass tree has no glassBackground pass."
+            }
+            return
+        }
+        guard publishesResult else { return }
+        appKitMaterializeResult = result
+        if result.isAccepted {
+            let tintSuffix: String
+            if result.requestedTintAlpha != nil {
+                tintSuffix = result.tintMatrixMatched
+                    ? " and Tint matrix alpha."
+                    : " with a Tint matrix mismatch."
+            } else {
+                tintSuffix = ""
+            }
+            appKitMaterializeStatus =
+                "Applied and read back \(result.acceptedKeyCount)/"
+                + "\(result.requestedKeys.count) background fields"
+                + (result.requestedMain
+                    ? " and \(result.acceptedRimKeyCount)/"
+                        + "\(result.requestedRimKeys.count) Rim gate"
+                    : "")
+                + tintSuffix
+                + (tintSuffix.isEmpty ? "." : "")
+        } else {
+            appKitMaterializeStatus =
+                "Applied \(result.acceptedKeyCount)/\(result.requestedKeys.count); "
+                + "\(result.mismatchedKeys.count) background and "
+                + "\(result.mismatchedRimKeys.count) Rim readback mismatches"
+                + (result.requestedTintAlpha != nil
+                    ? "; Tint matrix "
+                        + (result.tintMatrixFound ? "mismatched." : "missing.")
+                    : ".")
+        }
+        publishLiveReadoutSnapshot()
+    }
+
+    private func animateAppKitMaterialize(to target: Double) {
+        guard appKitMaterializeProbeContextIsReady else {
+            appKitMaterializeStatus =
+                "The fixed Regular/Clear NSGlass context is still settling."
+            return
+        }
+        appKitMaterializeTask?.cancel()
+        let start = appKitMaterializeProgress
+        let destination = min(max(target, 0), 1)
+        guard abs(destination - start) > 0.0001 else {
+            applyAppKitMaterializeProgress()
+            return
+        }
+
+        isAnimatingAppKitMaterialize = true
+        appKitMaterializeStatus =
+            destination > start ? "Replaying Linear In…" : "Replaying Linear Out…"
+        appKitMaterializeTask = Task { @MainActor in
+            let frameCount = 240
+            for frame in 1...frameCount {
+                guard !Task.isCancelled else {
+                    isAnimatingAppKitMaterialize = false
+                    return
+                }
+                let progress = Double(frame) / Double(frameCount)
+                appKitMaterializeProgress =
+                    start + (destination - start) * progress
+                applyAppKitMaterializeProgress(publishesResult: false)
+                if frame < frameCount {
+                    try? await Task.sleep(for: .nanoseconds(16_666_667))
+                }
+            }
+            applyAppKitMaterializeProgress()
+            isAnimatingAppKitMaterialize = false
+        }
+    }
+
+    private func cancelAppKitMaterializeProbe(rebuild: Bool) {
+        let hadProbe = appKitMaterializeResult != nil
+            || abs(appKitMaterializeProgress - 1) > 0.0001
+            || isAnimatingAppKitMaterialize
+        appKitMaterializeTask?.cancel()
+        appKitMaterializeTask = nil
+        isAnimatingAppKitMaterialize = false
+        state.testWindow.clearAppKitMaterializeBackgroundProbe(
+            rebuild: rebuild && hadProbe
+        )
+        appKitMaterializeProgress = 1
+        appKitMaterializeResult = nil
+        appKitMaterializeStatus = nil
+    }
+
+    private var materializeProbeContextIsReady: Bool {
+        state.rendererMode == .semanticUsage
+            && selectedSemanticPage == .transition
+            && (state.semanticUsage == .regular || state.semanticUsage == .clear)
+            && state.windowHostType == .panel
+            && state.isTestWindowMain == materializeRequestedMain
+            && state.testWindow.isActuallyMain == materializeRequestedMain
+            && !state.testWindow.isActuallyKey
+            && state.testAppearance == materializeRequestedAppearance
+            && materializeRequestedAppearance.matchesName(
+                state.testWindow.effectiveAppearanceName ?? ""
+            )
+            && state.testBackdrop == materializeRequestedBackdrop
+            && state.isTestWindowVisible
+            && abs(state.glassWidth - materializeRequestedSize.width) < 0.001
+            && abs(state.glassHeight - materializeRequestedSize.height) < 0.001
+            && abs(state.cornerRadius - 16) < 0.001
+            && abs(state.windowPadding - 40) < 0.001
+    }
+
+    private func configureSemanticTransitionProbe() {
+        let enabled = state.rendererMode == .semanticUsage
+            && selectedSemanticPage == .transition
+            && state.isTestWindowVisible
+
+        if enabled,
+           state.semanticUsage != .regular,
+           state.semanticUsage != .clear {
+            state.semanticUsage = .regular
+            state.testWindow.sync(with: state)
+        }
+        if !enabled {
+            materializePresented = true
+        }
+        state.testWindow.configureSemanticTransitionProbe(
+            enabled: enabled,
+            presented: materializePresented
+        )
+    }
+
+    private func requestMaterializeCaptureContext(
+        usage: GlassLabSemanticUsage,
+        requestedMain: Bool,
+        tintColor: NSColor?,
+        appearance: GlassLabTestAppearance,
+        backdrop: GlassLabBackdropMode,
+        glassSize: CGSize = CGSize(width: 480, height: 200)
+    ) {
+        materializeRequestedSize = glassSize
+        state.rendererMode = .semanticUsage
+        state.semanticUsage = usage
+        state.tintColor = tintColor
+        state.glassWidth = glassSize.width
+        state.glassHeight = glassSize.height
+        state.cornerRadius = 16
+        state.windowHostType = .panel
+        state.testAppearance = appearance
+        state.testBackdrop = backdrop
+        state.isTestWindowMain = requestedMain
+        state.windowPadding = 40
+        state.isTestWindowVisible = true
+        materializePresented = true
+        state.testWindow.sync(with: state)
+        configureSemanticTransitionProbe()
+        scheduleLiveReadoutRefresh(refreshSchema: true)
+    }
+
+    private func waitForMaterializeCaptureContext() async throws -> Bool {
+        for attempt in 0..<24 {
+            try Task.checkCancellation()
+            try await waitUntilApplicationIsActive(
+                progress: "Materialize capture paused while the app is inactive."
+            )
+            if materializeProbeContextIsReady {
+                return true
+            }
+            if attempt > 0, attempt.isMultiple(of: 4) {
+                state.testWindow.sync(with: state)
+                configureSemanticTransitionProbe()
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        return materializeProbeContextIsReady
+    }
+
+    private func runManualMaterializeTransition(
+        _ direction: GlassLabMaterializeDirection
+    ) {
+        guard state.rendererMode == .semanticUsage,
+              selectedSemanticPage == .transition else {
+            materializeCaptureStatus = "Open the SwiftUI Transition page first."
+            return
+        }
+        let target = direction.targetPresentedState
+        materializePresented = target
+        state.testWindow.setSemanticTransitionPresented(
+            target,
+            animationMode: materializeAnimationMode,
+            linearDuration: materializeLinearDuration
+        )
+        materializeCaptureStatus = "\(direction.rawValue) triggered with \(materializeAnimationMode.rawValue)."
+    }
+
+    private func cancelMaterializeCapture() {
+        materializeCaptureTask?.cancel()
+        materializeCaptureTask = nil
+        isCapturingMaterialize = false
+    }
+
+    private func captureMaterializeTransition(
+        _ direction: GlassLabMaterializeDirection
+    ) {
+        guard state.rendererMode == .semanticUsage,
+              selectedSemanticPage == .transition else {
+            materializeCaptureStatus =
+                "Open the SwiftUI Transition page before capturing."
+            return
+        }
+        guard !isCapturingMaterialize else { return }
+
+        cancelMaterializeCapture()
+        isCapturingMaterialize = true
+        materializeCapture = nil
+        let usage: GlassLabSemanticUsage =
+            state.semanticUsage == .clear ? .clear : .regular
+        let requestedMain = materializeRequestedMain
+        let animationMode = materializeAnimationMode
+        let linearDuration = materializeLinearDuration
+        materializeCaptureStatus =
+            "Preparing Panel · Main "
+            + (requestedMain ? "On" : "Off")
+            + " · 480×200 capture context…"
+        let tintColor = state.tintColor
+        let tint = GlassLabTintDescriptor(
+            label: tintColor == nil ? "None" : "Custom",
+            color: tintColor,
+            reducedTintOpacity: false
+        )
+
+        materializeCaptureTask = Task { @MainActor in
+            let activity = ProcessInfo.processInfo.beginActivity(
+                options: [
+                    .userInitiated,
+                    .idleSystemSleepDisabled,
+                    .idleDisplaySleepDisabled,
+                ],
+                reason: "Capturing SwiftUI Materialize Transition"
+            )
+            defer {
+                ProcessInfo.processInfo.endActivity(activity)
+                isCapturingMaterialize = false
+                materializeCaptureTask = nil
+            }
+
+            do {
+                let capture = try await performMaterializeCapture(
+                    usage: usage,
+                    direction: direction,
+                    animationMode: animationMode,
+                    linearDuration: linearDuration,
+                    requestedMain: requestedMain,
+                    tint: tint,
+                    tintColor: tintColor,
+                    appearance: materializeRequestedAppearance,
+                    backdrop: materializeRequestedBackdrop
+                )
+                materializeCapture = capture
+                state.reportOutput = capture.report
+                let presentationStates = Set(capture.samples.compactMap {
+                    $0.snapshot.presentation?.report
+                }).count
+                let maximumAnimations = capture.samples.map {
+                    $0.snapshot.animations.count
+                }.max() ?? 0
+                materializeCaptureStatus = "Captured \(capture.samples.count) samples · "
+                    + "\(presentationStates) presentation states · "
+                    + "up to \(maximumAnimations) attached animations."
+            } catch is CancellationError {
+                materializeCaptureStatus = "Materialize capture cancelled."
+            } catch {
+                materializeCaptureStatus = "Materialize capture failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func captureFullMaterializeStudy() {
+        guard !isCapturingMaterializeStudy else { return }
+        guard state.rendererMode == .semanticUsage,
+              selectedSemanticPage == .transition else {
+            materializeStudyStatus =
+                "Open the SwiftUI Transition page before capturing."
+            return
+        }
+
+        cancelMaterializeCapture()
+        materializeStudyDocument = nil
+        materializeStudyStatus = "Preparing full P1 coverage context…"
+        isCapturingMaterializeStudy = true
+
+        let originalRenderer = state.rendererMode
+        let originalSemanticPage = selectedSemanticPage
+        let originalUsage = state.semanticUsage
+        let originalTint = state.tintColor
+        let originalWidth = state.glassWidth
+        let originalHeight = state.glassHeight
+        let originalCornerRadius = state.cornerRadius
+        let originalHost = state.windowHostType
+        let originalAppearance = state.testAppearance
+        let originalBackdrop = state.testBackdrop
+        let originalMain = state.isTestWindowMain
+        let originalPadding = state.windowPadding
+        let originalVisibility = state.isTestWindowVisible
+        let originalRequestedMain = materializeRequestedMain
+        let originalRequestedAppearance = materializeRequestedAppearance
+        let originalRequestedBackdrop = materializeRequestedBackdrop
+        let originalAnimationMode = materializeAnimationMode
+        let originalDuration = materializeLinearDuration
+        let originalPresented = materializePresented
+
+        materializeStudyTask = Task { @MainActor in
+            let activity = ProcessInfo.processInfo.beginActivity(
+                options: [
+                    .userInitiated,
+                    .idleSystemSleepDisabled,
+                    .idleDisplaySleepDisabled,
+                ],
+                reason: "Capturing Full P1 Liquid Glass Materialize Matrix"
+            )
+            defer {
+                ProcessInfo.processInfo.endActivity(activity)
+                state.rendererMode = originalRenderer
+                selectedSemanticPage = originalSemanticPage
+                state.semanticUsage = originalUsage
+                state.tintColor = originalTint
+                state.glassWidth = originalWidth
+                state.glassHeight = originalHeight
+                state.cornerRadius = originalCornerRadius
+                state.windowHostType = originalHost
+                state.testAppearance = originalAppearance
+                state.testBackdrop = originalBackdrop
+                state.isTestWindowMain = originalMain
+                state.windowPadding = originalPadding
+                state.isTestWindowVisible = originalVisibility
+                materializeRequestedMain = originalRequestedMain
+                materializeRequestedAppearance = originalRequestedAppearance
+                materializeRequestedBackdrop = originalRequestedBackdrop
+                materializeAnimationMode = originalAnimationMode
+                materializeLinearDuration = originalDuration
+                materializePresented = originalPresented
+                state.testWindow.sync(with: state)
+                configureSemanticTransitionProbe()
+                isCapturingMaterializeStudy = false
+                materializeStudyTask = nil
+                scheduleLiveReadoutRefresh(refreshSchema: true)
+            }
+
+            do {
+                state.rendererMode = .semanticUsage
+                selectedSemanticPage = .transition
+                materializeAnimationMode = .linear
+                materializeLinearDuration = 1
+                configureSemanticTransitionProbe()
+
+                let materials: [GlassLabSemanticUsage] = [.regular, .clear]
+                let tintPresets: [GlassLabTintPreset] = [.none, .coral50]
+                let expectedCount = materials.count
+                    * 2
+                    * GlassLabTestAppearance.controlledCases.count
+                    * GlassLabBackdropMode.controlledCases.count
+                    * tintPresets.count
+                    * GlassLabMaterializeDirection.allCases.count
+                var transitions: [GlassLabMaterializeCapture] = []
+                transitions.reserveCapacity(expectedCount)
+
+                for appearance in GlassLabTestAppearance.controlledCases {
+                    for backdrop in GlassLabBackdropMode.controlledCases {
+                        for requestedMain in [false, true] {
+                            for usage in materials {
+                                for tintPreset in tintPresets {
+                                    for direction in
+                                        GlassLabMaterializeDirection.allCases {
+                                        let ordinal = transitions.count + 1
+                                        materializeStudyStatus =
+                                            "P1 \(ordinal)/\(expectedCount) · "
+                                            + "\(usage.displayName) · Main "
+                                            + (requestedMain ? "On" : "Off")
+                                            + " · \(appearance.rawValue)"
+                                            + " · \(backdrop.rawValue) backdrop"
+                                            + " · \(tintPreset.displayName)"
+                                            + " · \(direction.rawValue)"
+                                        transitions.append(
+                                            try await performMaterializeCapture(
+                                                usage: usage,
+                                                direction: direction,
+                                                animationMode: .linear,
+                                                linearDuration: 1,
+                                                requestedMain: requestedMain,
+                                                tint: tintPreset.descriptor,
+                                                tintColor: tintPreset.color,
+                                                appearance: appearance,
+                                                backdrop: backdrop
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                guard transitions.count == expectedCount else {
+                    throw TintStudyError.invalidMaterializeStudy(
+                        expected: expectedCount,
+                        actual: transitions.count
+                    )
+                }
+                guard transitions.allSatisfy({
+                    $0.samples.count == 9
+                        && $0.context.actualMain == $0.context.requestedMain
+                        && !$0.context.actualKey
+                        && $0.context.requestedAppearance.matchesName(
+                            $0.context.effectiveAppearance
+                        )
+                        && GlassLabBackdropMode.controlledCases.contains(
+                            $0.context.backdrop
+                        )
+                }) else {
+                    throw TintStudyError.transitionContextChanged
+                }
+
+                let document = GlassLabMaterializeStudyDocument(
+                    formatVersion: 1,
+                    capturedAt: ISO8601DateFormatter().string(from: Date()),
+                    operatingSystem:
+                        ProcessInfo.processInfo.operatingSystemVersionString,
+                    context: .init(
+                        hostType: GlassLabWindowHostType.panel.rawValue,
+                        glassWidth: 480,
+                        glassHeight: 200,
+                        cornerRadius: 16,
+                        windowMargin: 40,
+                        animationMode: .linear,
+                        animationDuration: 1,
+                        materials: materials.map(\.displayName),
+                        participation: ["Main Off", "Main On"],
+                        appearances:
+                            GlassLabTestAppearance.controlledCases,
+                        backdrops: GlassLabBackdropMode.controlledCases,
+                        tints: tintPresets.map(\.displayName),
+                        directions:
+                            GlassLabMaterializeDirection.allCases
+                    ),
+                    transitions: transitions
+                )
+                materializeStudyDocument = document
+                state.reportOutput = document.report
+                let sampleCount = transitions.reduce(0) {
+                    $0 + $1.samples.count
+                }
+                materializeStudyStatus =
+                    "Complete · \(transitions.count) transitions / "
+                    + "\(sampleCount) samples."
+            } catch is CancellationError {
+                materializeStudyStatus =
+                    "P1 Materialize matrix cancelled; partial data discarded."
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription
+                    ?? error.localizedDescription
+                materializeStudyStatus =
+                    "P1 Materialize matrix failed: \(message)"
+                state.reportOutput = materializeStudyStatus ?? message
+            }
+        }
+    }
+
+    /// Unattended entry point for the geometry spot check, so the sweep can run
+    /// from a script instead of a save panel:
+    ///
+    ///     LiquidGlassLab.app/Contents/MacOS/LiquidGlassLab \
+    ///       --capture-size-study /path/to/output.json
+    ///
+    /// The app still needs a real session and foreground activation because
+    /// Main-On participation is a genuine AppKit window state; this only
+    /// removes the manual button press and the save panel.
+    @MainActor
+    private func runHeadlessCaptureIfRequested() async {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flagIndex = arguments.firstIndex(of: "--capture-size-study"),
+              arguments.index(after: flagIndex) < arguments.endIndex else {
+            return
+        }
+        let destination = URL(
+            fileURLWithPath: arguments[arguments.index(after: flagIndex)]
+        )
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        // Let the scene, the test window, and the first Recipe resolution
+        // settle before the first participation request.
+        try? await Task.sleep(for: .seconds(2))
+
+        var exitCode: Int32 = 0
+        do {
+            let document = try await performMaterializeSizeStudy()
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let payload = try encoder.encode(document)
+            // The app is sandboxed, so an arbitrary destination usually needs a
+            // save panel. Fall back to the container's temporary directory and
+            // report where the capture actually landed.
+            var written = destination
+            do {
+                try payload.write(to: destination, options: .atomic)
+            } catch {
+                written = URL(fileURLWithPath: NSTemporaryDirectory())
+                    .appendingPathComponent(destination.lastPathComponent)
+                try payload.write(to: written, options: .atomic)
+            }
+            FileHandle.standardError.write(Data(
+                (document.report + "\nWrote \(written.path)\n").utf8
+            ))
+        } catch {
+            let message = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+            FileHandle.standardError.write(Data(
+                "Size study failed: \(message)\n".utf8
+            ))
+            exitCode = 1
+        }
+        state.testWindow.tearDown()
+        exit(exitCode)
+    }
+
+    /// Sweeps `shortSide` while holding every closed axis fixed. 48 sits below
+    /// both refraction caps, 200 reproduces the accepted baseline geometry, and
+    /// 400 sits above them, so a cap-crossing shape change cannot hide.
+    ///
+    /// Window padding stays at the baseline 40 rather than tracking
+    /// `0.35 · shortSide`. That under-insets the largest surface visually, but
+    /// this study only reads model values, which the window frame does not
+    /// affect, and holding it fixed keeps the 200 rows comparable with the
+    /// 64-run matrix.
+    @MainActor
+    private func performMaterializeSizeStudy() async throws
+        -> GlassLabMaterializeSizeStudyDocument
+    {
+        let shortSides: [Double] = [48, 200, 400]
+        let glassWidth: Double = 480
+        let materials: [GlassLabSemanticUsage] = [.regular, .clear]
+        let appearance = GlassLabTestAppearance.light
+        let backdrop = GlassLabBackdropMode.light
+        let direction = GlassLabMaterializeDirection.insertion
+        let tintPreset = GlassLabTintPreset.none
+
+        state.rendererMode = .semanticUsage
+        selectedSemanticPage = .transition
+        materializeAnimationMode = .linear
+        materializeLinearDuration = 1
+        configureSemanticTransitionProbe()
+
+        let expectedCount = shortSides.count * materials.count * 2
+        var transitions: [GlassLabMaterializeCapture] = []
+        transitions.reserveCapacity(expectedCount)
+
+        for shortSide in shortSides {
+            for usage in materials {
+                for requestedMain in [false, true] {
+                    materializeStudyStatus =
+                        "Size \(transitions.count + 1)/\(expectedCount) · "
+                        + "shortSide \(Int(shortSide)) · \(usage.displayName)"
+                        + " · Main \(requestedMain ? "On" : "Off")"
+                    transitions.append(
+                        try await performMaterializeCapture(
+                            usage: usage,
+                            direction: direction,
+                            animationMode: .linear,
+                            linearDuration: 1,
+                            requestedMain: requestedMain,
+                            tint: tintPreset.descriptor,
+                            tintColor: tintPreset.color,
+                            appearance: appearance,
+                            backdrop: backdrop,
+                            glassSize: CGSize(
+                                width: glassWidth,
+                                height: shortSide
+                            )
+                        )
+                    )
+                }
+            }
+        }
+
+        guard transitions.count == expectedCount else {
+            throw TintStudyError.invalidMaterializeStudy(
+                expected: expectedCount,
+                actual: transitions.count
+            )
+        }
+        guard transitions.allSatisfy({
+            $0.context.actualMain == $0.context.requestedMain
+                && !$0.context.actualKey
+        }) else {
+            throw TintStudyError.transitionContextChanged
+        }
+
+        return GlassLabMaterializeSizeStudyDocument(
+            formatVersion: 1,
+            capturedAt: ISO8601DateFormatter().string(from: Date()),
+            operatingSystem:
+                ProcessInfo.processInfo.operatingSystemVersionString,
+            context: .init(
+                hostType: GlassLabWindowHostType.panel.rawValue,
+                glassWidth: glassWidth,
+                shortSides: shortSides,
+                cornerRadius: 16,
+                windowMargin: 40,
+                animationMode: .linear,
+                animationDuration: 1,
+                materials: materials.map(\.displayName),
+                participation: ["Main Off", "Main On"],
+                appearance: appearance,
+                backdrop: backdrop,
+                direction: direction
+            ),
+            transitions: transitions
+        )
+    }
+
+    private func exportMaterializeStudy() {
+        guard let document = materializeStudyDocument else {
+            materializeStudyStatus =
+                "Capture the full P1 Materialize matrix before exporting."
+            return
+        }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "glass-materialize-p1-matrix.json"
+        guard panel.runModal() == .OK, let destinationURL = panel.url else {
+            return
+        }
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(document).write(
+                to: destinationURL,
+                options: .atomic
+            )
+            materializeStudyStatus =
+                "Exported \(document.transitions.count) transitions to "
+                + destinationURL.path
+        } catch {
+            materializeStudyStatus =
+                "P1 Materialize export failed: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    private func performMaterializeCapture(
+        usage: GlassLabSemanticUsage,
+        direction: GlassLabMaterializeDirection,
+        animationMode: GlassLabMaterializeAnimationMode,
+        linearDuration: Double,
+        requestedMain: Bool,
+        tint: GlassLabTintDescriptor,
+        tintColor: NSColor?,
+        appearance: GlassLabTestAppearance,
+        backdrop: GlassLabBackdropMode,
+        glassSize: CGSize = CGSize(width: 480, height: 200)
+    ) async throws -> GlassLabMaterializeCapture {
+        materializeRequestedMain = requestedMain
+        materializeRequestedAppearance = appearance
+        materializeRequestedBackdrop = backdrop
+        requestMaterializeCaptureContext(
+            usage: usage,
+            requestedMain: requestedMain,
+            tintColor: tintColor,
+            appearance: appearance,
+            backdrop: backdrop,
+            glassSize: glassSize
+        )
+        guard try await waitForMaterializeCaptureContext() else {
+            throw TintStudyError.contextRejected(
+                "Panel · Main \(requestedMain ? "On" : "Off") · Key Off"
+            )
+        }
+
+        materializeCaptureStatus =
+            "Settling \(direction.rawValue.lowercased()) start endpoint…"
+        let initialPresented = direction.initialPresentedState
+        materializePresented = initialPresented
+        state.testWindow.configureSemanticTransitionProbe(
+            enabled: true,
+            presented: initialPresented
+        )
+        try await Task.sleep(for: .milliseconds(240))
+        try Task.checkCancellation()
+        try await requireMaterializeContext()
+
+        guard let preflight = captureCurrentMaterializeSnapshot() else {
+            throw TintStudyError.missingSemanticSnapshot
+        }
+        var samples = [
+            GlassLabMaterializeSample(
+                phase: "preflight",
+                requestedProgress: 0,
+                elapsed: 0,
+                snapshot: preflight
+            ),
+        ]
+
+        materializeCaptureStatus =
+            "Triggered \(direction.rawValue.lowercased()); discovering attached animations…"
+        let start = Date()
+        let targetPresented = direction.targetPresentedState
+        materializePresented = targetPresented
+        state.testWindow.setSemanticTransitionPresented(
+            targetPresented,
+            animationMode: animationMode,
+            linearDuration: linearDuration
+        )
+        await Task.yield()
+        try await Task.sleep(for: .milliseconds(16))
+        try Task.checkCancellation()
+        try await requireMaterializeContext()
+
+        guard let trigger = captureCurrentMaterializeSnapshot() else {
+            throw TintStudyError.missingSemanticSnapshot
+        }
+        samples.append(
+            GlassLabMaterializeSample(
+                phase: "trigger",
+                requestedProgress: 0,
+                elapsed: Date().timeIntervalSince(start),
+                snapshot: trigger
+            )
+        )
+
+        let triggerDuration = candidateMaterializeDuration(in: trigger)
+        let samplingDuration: Double
+        switch animationMode {
+        case .linear:
+            samplingDuration = linearDuration
+        case .systemDefault:
+            // A CA animation inventory is preferred. The fallback only
+            // controls observation timestamps and is never reported as an
+            // observed system duration.
+            samplingDuration = triggerDuration > 0 ? triggerDuration : 0.8
+        }
+
+        for progress in [0.125, 0.25, 0.5, 0.75, 0.875, 1.0] {
+            let targetElapsed = samplingDuration * progress
+            let remaining = targetElapsed - Date().timeIntervalSince(start)
+            if remaining > 0 {
+                try await Task.sleep(for: .seconds(remaining))
+            }
+            try Task.checkCancellation()
+            materializeCaptureStatus = "Sampling \(Int(progress * 100))%…"
+            try await requireMaterializeContext()
+            guard let snapshot = captureCurrentMaterializeSnapshot() else {
+                throw TintStudyError.missingSemanticSnapshot
+            }
+            samples.append(
+                GlassLabMaterializeSample(
+                    phase: progress == 1 ? "endpoint" : "sample",
+                    requestedProgress: progress,
+                    elapsed: Date().timeIntervalSince(start),
+                    snapshot: snapshot
+                )
+            )
+        }
+
+        try await Task.sleep(for: .milliseconds(100))
+        try Task.checkCancellation()
+        try await requireMaterializeContext()
+        guard let settled = captureCurrentMaterializeSnapshot() else {
+            throw TintStudyError.missingSemanticSnapshot
+        }
+        samples.append(
+            GlassLabMaterializeSample(
+                phase: "settled",
+                requestedProgress: 1,
+                elapsed: Date().timeIntervalSince(start),
+                snapshot: settled
+            )
+        )
+
+        let maximumAttachedAnimationDuration = samples
+            .map { candidateMaterializeDuration(in: $0.snapshot) }
+            .max() ?? 0
+        let context = GlassLabMaterializeCaptureContext(
+            hostType: state.windowHostType.rawValue,
+            requestedMain: requestedMain,
+            actualMain: state.testWindow.isActuallyMain,
+            actualKey: state.testWindow.isActuallyKey,
+            requestedAppearance: appearance,
+            effectiveAppearance:
+                state.testWindow.effectiveAppearanceName ?? "unknown",
+            backdrop: backdrop,
+            glassWidth: state.glassWidth,
+            glassHeight: state.glassHeight,
+            cornerRadius: state.cornerRadius,
+            windowMargin: state.windowPadding,
+            tint: tint
+        )
+        return GlassLabMaterializeCapture(
+            formatVersion: 3,
+            capturedAt: ISO8601DateFormatter().string(from: Date()),
+            operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
+            roleTag: usage.rawValue,
+            usage: usage.displayName,
+            direction: direction,
+            animationMode: animationMode,
+            requestedDuration: animationMode == .linear
+                ? linearDuration
+                : nil,
+            maximumAttachedAnimationDuration:
+                maximumAttachedAnimationDuration,
+            samplingDuration: samplingDuration,
+            context: context,
+            samples: samples
+        )
+    }
+
+    @MainActor
+    private func requireMaterializeContext() async throws {
+        try await waitUntilApplicationIsActive(
+            progress: "Materialize capture paused while the app is inactive."
+        )
+        if !materializeProbeContextIsReady {
+            state.testWindow.sync(with: state)
+            configureSemanticTransitionProbe()
+            try await Task.sleep(for: .milliseconds(120))
+        }
+        guard materializeProbeContextIsReady else {
+            throw TintStudyError.transitionContextChanged
+        }
+    }
+
+    @MainActor
+    private func captureCurrentMaterializeSnapshot()
+        -> GlassLabSemanticTransitionSnapshot? {
+        state.testWindow.liveWindow?.contentView?.layoutSubtreeIfNeeded()
+        state.testWindow.liveWindow?.contentView?.displayIfNeeded()
+        return GlassLabSemanticTransitionSnapshot.capture(
+            from: state.testWindow.liveSemanticLayerRoot
+        )
+    }
+
+    private func candidateMaterializeDuration(
+        in snapshot: GlassLabSemanticTransitionSnapshot
+    ) -> Double {
+        snapshot.animations
+            .filter {
+                $0.repeatCount == 0
+                    && $0.duration > 0
+                    && $0.duration <= 8
+            }
+            .map(\.duration)
+            .max() ?? 0
+    }
+
+    private func copyMaterializeCaptureReport() {
+        guard let capture = materializeCapture else { return }
+        state.reportOutput = capture.report
+        copyToPasteboard(capture.report)
+    }
+
+    private func exportMaterializeCapture() {
+        guard let capture = materializeCapture else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        let mode = capture.animationMode == .linear ? "linear" : "default"
+        panel.nameFieldStringValue = "materialize-"
+            + capture.usage.lowercased()
+            + "-\(capture.direction.rawValue.lowercased())"
+            + "-\(mode).json"
+        guard panel.runModal() == .OK, let destinationURL = panel.url else {
+            return
+        }
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(capture).write(
+                to: destinationURL,
+                options: .atomic
+            )
+            materializeCaptureStatus = "Exported capture to \(destinationURL.path)"
+        } catch {
+            materializeCaptureStatus = "Export failed: \(error.localizedDescription)"
+        }
     }
 
     private var tintBinding: Binding<Color> {

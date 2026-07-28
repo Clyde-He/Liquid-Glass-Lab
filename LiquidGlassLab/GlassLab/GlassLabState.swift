@@ -25,6 +25,79 @@ enum GlassLabWindowHostType: String, CaseIterable, Identifiable {
     }
 }
 
+/// Explicit AppKit appearance applied only to the independently hosted test
+/// window. `system` inherits the app appearance; Light/Dark are controlled
+/// P1 inputs and are intentionally separate from NSGlass's private
+/// `_adaptiveAppearance` recipe field.
+enum GlassLabTestAppearance: String, CaseIterable, Identifiable, Codable {
+    case system = "System"
+    case light = "Light"
+    case dark = "Dark"
+
+    var id: Self { self }
+
+    static let controlledCases: [Self] = [.light, .dark]
+
+    var nsAppearance: NSAppearance? {
+        switch self {
+        case .system:
+            nil
+        case .light:
+            NSAppearance(named: .aqua)
+        case .dark:
+            NSAppearance(named: .darkAqua)
+        }
+    }
+
+    func matches(_ appearance: NSAppearance?) -> Bool {
+        guard self != .system, let appearance else { return self == .system }
+        let match = appearance.bestMatch(from: [.aqua, .darkAqua])
+        switch self {
+        case .system:
+            return true
+        case .light:
+            return match == .aqua
+        case .dark:
+            return match == .darkAqua
+        }
+    }
+}
+
+/// Backdrop drawn inside the test window below the Glass surface. Ambient
+/// preserves the original transparent-Panel/colorful-Window behavior; Light
+/// and Dark use fixed sRGB neutral fills so render-server backdrop adaptation
+/// can be tested independently of NSAppearance.
+enum GlassLabBackdropMode: String, CaseIterable, Identifiable, Codable {
+    case ambient = "Ambient"
+    case light = "Light"
+    case dark = "Dark"
+
+    var id: Self { self }
+
+    static let controlledCases: [Self] = [.light, .dark]
+
+    var controlledColor: NSColor? {
+        switch self {
+        case .ambient:
+            return nil
+        case .light:
+            return NSColor(
+                srgbRed: 0.92,
+                green: 0.92,
+                blue: 0.92,
+                alpha: 1
+            )
+        case .dark:
+            return NSColor(
+                srgbRed: 0.08,
+                green: 0.08,
+                blue: 0.08,
+                alpha: 1
+            )
+        }
+    }
+}
+
 @Observable
 @MainActor
 final class GlassLabState {
@@ -100,6 +173,12 @@ final class GlassLabState {
 
     var isTestWindowVisible = true
     var windowHostType: GlassLabWindowHostType = .panel
+    /// Public environment appearance for both AppKit and SwiftUI renderers.
+    /// This does not write NSGlass's private `_adaptiveAppearance`.
+    var testAppearance: GlassLabTestAppearance = .system
+    /// Controlled content below the Glass. P1 captures use Light/Dark rather
+    /// than sampling an uncontrolled desktop behind a transparent Panel.
+    var testBackdrop: GlassLabBackdropMode = .ambient
     /// Off guarantees neither-key-nor-main. On makes the test surface
     /// main-only and selects the active branch while the control window remains
     /// key. A titled Window briefly becomes key while AppKit establishes main

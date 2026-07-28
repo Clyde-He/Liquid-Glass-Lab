@@ -52,7 +52,19 @@ The current macOS 26 baseline contains:
 - `recipe-matrix.json`: the accepted 1,008-row representative-height Recipe
   product;
 - `recursive-pass-audit.json`: the accepted 336-row fixed-geometry recursive
-  Layer/Pass/property inventory.
+  Layer/Pass/property inventory;
+- `materialize-environment-matrix.json`: the 64-run / 576-sample SwiftUI
+  Materialize transition sweep across Material, participation, appearance,
+  backdrop, Tint, and direction. Unlike the two fixtures above, which sample
+  static state, this one samples the transition over time;
+- `materialize-geometry-sweep.json`: the 12-run / 108-sample `shortSide`
+  48/200/400 sweep that measured the transition's geometry inflation.
+
+The two Materialize fixtures are the evidence behind P1's baseline-driven
+curve. They are not a superset of the static fixtures and cannot replace them:
+they cover only Variants 1 and 2 with a nil subvariant, in exchange for
+appearance, backdrop, Tint, direction, and progress axes the static sweeps do
+not have.
 
 ## Comparing an OS capture
 
@@ -142,6 +154,32 @@ Run the comparator integration coverage with:
 ```sh
 node --test Golden/compare.test.mjs
 ```
+
+## Tint study analyzer
+
+The Playground's Recipe `Tint` page exports one cross-renderer study containing
+28 AppKit static rows, 20 SwiftUI static rows, and 40 Materialize runs / 360
+samples. The raw document is intentionally kept as a local research artifact
+until its schema and OS-repeat stability are promoted to a Golden fixture.
+
+Analyze an export with:
+
+```sh
+node Golden/analyze-tint-study.mjs /path/to/glass-tint-study.json
+```
+
+The report verifies count/context coverage and calculates:
+
+- nil/nonnil AppKit topology and pass counts;
+- public `tintColor` getter round-trip and AppKit/SwiftUI matrix parity;
+- settled Tint-alpha coefficient routing and Main-Off hue suppression;
+- Reduced Tint setter/getter capability rather than assuming a guarded no-op
+  was an accepted material state;
+- attached-animation count, Tint branch lifecycle, non-alpha coefficient
+  stability, the `sourceAlpha × g²` fit, and Tint SDF-bounds residuals.
+
+The accepted interpretation and current NSGlass transplant boundary live in
+[`SwiftUIGlassReverseEngineering.md`](../Documentation/SwiftUIGlassReverseEngineering.md).
 
 ## Core Recipe exporter
 

@@ -591,8 +591,11 @@ groups; each was individually observed to be necessary:
 1. All populated numeric `glassBackground` inputs (66 on this build), the
    three fill colors, and `inputShadowOffset`. The source-layer string is
    diagnostic/read-only.
-2. Both structurally distinct `vibrantColorMatrix` filters: three optional
-   Boolean inputs and the complete 4 × 5 Float matrix for each slot.
+2. Both structurally distinct untinted `vibrantColorMatrix` filters: three
+   optional Boolean inputs and the complete 4 × 5 Float matrix for each slot.
+   A nonnil public `tintColor` inserts a third, Tint-owned matrix branch rather
+   than changing either of these two; transplant it by setting `tintColor`
+   unless a controlled transition specifically needs matrix-level replay.
 3. Layer geometry: `CABackdropLayer.marginWidth` and both
    `CASDFOutputEffect.minimum` / `maximum`. Without them the transplanted outer passes
    hard-clip at the outline — the "clipped ring" artifact.
@@ -606,6 +609,33 @@ groups; each was individually observed to be necessary:
 Because the size-scaled inputs follow the measured `shortSide` formulas,
 transplant values can either be captured from a live donor with matching
 `shortSide` or computed directly from the formulas.
+
+## Public Tint routing
+
+A fixed Regular/Clear × Main Off/On study shows that `tintColor` is topology,
+not a field inside `glassBackground` or the two untinted matrix slots. Nonnil
+Tint inserts `CASDFGradientEffect`, a same-layer `vibrantColorMatrix`, a
+`destIn` mask, and `CASDFFillEffect`, taking the common AppKit tree from five
+to nine passes. Matrix coefficient 18 stores requested Tint alpha exactly.
+Main Off suppresses tested Coral/Cyan hues into one neutral matrix; Main On
+resolves hue-specific coefficients. Regular and Clear use the same Tint
+matrix under the same participation context.
+
+The public AppKit endpoint is coefficient-for-coefficient identical to
+SwiftUI `Glass.tint(_:)` across all 16 comparable nonnil rows, so static
+transplant should use the public `tintColor` setter. During SwiftUI
+Materialize, only coefficient 18 changes, following
+`sourceAlpha × glassBackground.inputFaceOpacity²`; SwiftUI also changes the
+Tint SDF bounds and branch lifecycle, so that scalar alone is not a complete
+transition transplant. The AppKit Materialize probe nevertheless accepts that
+single coefficient with model readback: Coral-50 produced `0.5`, `0.125`, and
+approximately zero at Regular Main-Off `g = 1`, `0.5`, and `0`, and the
+Regular Main-On plus Clear Off/On endpoints also accepted `0.5`. Full capture
+details and residuals are recorded in `SwiftUIGlassReverseEngineering.md`.
+
+The proposed `_tintOpacityReduced` private knob is unavailable on the measured
+macOS 26.6 runtime. Neither the guarded setter nor getter selector exists; the
+Playground disables the UI instead of presenting a silent no-op.
 
 ## Adjacent observations
 

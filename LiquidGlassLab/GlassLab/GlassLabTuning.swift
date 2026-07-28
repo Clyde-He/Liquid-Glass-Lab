@@ -83,6 +83,15 @@ enum GlassLabTuning {
         applyOverrides(from: state, to: glass)
     }
 
+    @MainActor
+    static func supportsReducedTintOpacitySetter(
+        on glass: NSGlassEffectView
+    ) -> Bool {
+        (glass as NSObject).responds(
+            to: NSSelectorFromString("set_tintOpacityReduced:")
+        )
+    }
+
     /// Stamps only the captured payload. Recipe setters can resolve a new
     /// CAFilter/effect tree asynchronously after `applyRecipe` returns, so the
     /// Inspector settling pass calls this again without bouncing Variant,
@@ -153,6 +162,490 @@ enum GlassLabTuning {
         for layer in highlightLayers(under: glass) {
             applyHighlightValues([key: value], to: layer)
         }
+    }
+
+    // MARK: - Materialize normalized curve
+
+    /// Normalized progress shapes measured from the accepted 64-cell
+    /// Materialize matrix (Regular/Clear × Main × Aqua/DarkAqua × Light/Dark
+    /// backdrop × Tint × direction, 576 samples) and the 12-run geometry sweep
+    /// at `shortSide` 48/200/400. Every shape satisfies `shape(0) = 0` and
+    /// `shape(1) = 1`, so a channel resolves as
+    /// `start + (endpoint - start) * shape(g)`.
+    ///
+    /// Shapes are invariant across appearance, backdrop, Tint, and direction.
+    /// They are *not* invariant across size: Materialize inflates the SDF
+    /// element geometry and retracts it with `g`, so channels tracking that
+    /// geometry carry a size-dependent quadratic term. See
+    /// `MaterializeBaseline.geometryInflation`.
+    enum MaterializeShape {
+        /// `g`. The majority of channels.
+        case linear
+        /// `0.2g + 0.8g²`. Blur opacity 1/2 without Main participation.
+        case quadraticFlat
+        /// `0.4g + 0.6g²`. Blur opacity 1/2 under Main, and 3/4 always.
+        case quadratic
+        /// `g + c·g(1 - g)`, where `c` is the geometry inflation ratio. The
+        /// shadow-height family tracks the inflating SDF element, so `c` is
+        /// `16/200 = 0.08` at the baseline geometry but `0.2` at
+        /// `shortSide = 48`.
+        case height
+        /// `(0.34g + 0.036g²) / 0.376`. Clear's `inputClamp`.
+        case clamp
+
+        func value(at progress: Double, geometryInflation: Double) -> Double {
+            let g = progress
+            switch self {
+            case .linear: return g
+            case .quadraticFlat: return 0.2 * g + 0.8 * g * g
+            case .quadratic: return 0.4 * g + 0.6 * g * g
+            case .height: return g + geometryInflation * g * (1 - g)
+            case .clamp: return (0.34 * g + 0.036 * g * g) / 0.376
+            }
+        }
+    }
+
+    struct MaterializeChannel {
+        /// The resolved value at `g = 0`, measured as exactly 0 or 1 for every
+        /// sampled channel.
+        let start: Double
+        let shape: MaterializeShape
+    }
+
+    /// The system-resolved endpoints of one live Recipe. Reading these instead
+    /// of hard-coding them is what lets the curve follow size, appearance,
+    /// Variant, participation, and OS build without a per-axis table: `g = 1`
+    /// reproduces the captured Recipe by construction.
+    struct MaterializeBaseline: Equatable {
+        let numeric: [String: Double]
+        let colors: [String: NSColor]
+        let rimOpacity: Double?
+        /// `min(width, height)` of the glass this baseline was captured from.
+        let shortSide: Double
+
+        /// A baseline is only meaningful on an unmutated tree. The transplant
+        /// always drives `inputFaceOpacity` below 1 for `g < 1`, so a settled
+        /// value of 1 is a reliable pristine sentinel.
+        var isPristine: Bool {
+            (numeric["inputFaceOpacity"] ?? 0) >= 0.999
+        }
+
+        /// Materialize inflates the SDF element's short side by
+        /// `min(0.2 · shortSide, 16)` points and retracts it linearly with `g`.
+        /// Measured directly on `CASDFElementLayer` at `shortSide` 48, 200, and
+        /// 400, matching within 0.05 pt at every sampled progress.
+        ///
+        /// As a fraction of the resting short side this is
+        /// `min(0.2, 16 / shortSide)`, which is the quadratic coefficient any
+        /// geometry-tracking channel inherits.
+        var geometryInflation: Double {
+            shortSide > 0 ? min(0.2, 16 / shortSide) : 0
+        }
+    }
+
+    /// Channels whose `(start, shape)` never depends on context.
+    private static let materializeSharedChannels: [String: MaterializeChannel] = {
+        var table: [String: MaterializeChannel] = [:]
+        for key in [
+            "inputBleedColorMatrixBlack", "inputBleedDistance0",
+            "inputBleedOpacity", "inputBlurDistance1", "inputBlurOpacity0",
+            "inputBlurRadius", "inputFaceColorMatrixBlack", "inputFaceOpacity",
+            "inputInnerRefractionAmount", "inputInnerRefractionHeight",
+            "inputRefractionDistance0", "inputRefractionDistance1",
+            "inputRefractionOpacity", "inputSDRGradientDistance0",
+            "inputSDRGradientDistance1", "inputSDRShadowOpacity",
+            "inputShadowAmount", "inputShadowBlurRadius", "inputShadowOpacity",
+            "inputShadowRadius", "inputShadowVibrancyContribution",
+        ] {
+            table[key] = MaterializeChannel(start: 0, shape: .linear)
+        }
+        for key in [
+            "inputBleedColorMatrixSaturation", "inputBleedColorMatrixWhite",
+            "inputFaceColorMatrixSaturation", "inputFaceColorMatrixWhite",
+            "inputMaxHeadroom", "inputSDRHoldingToneWhite",
+            "inputShadowColorMatrixSaturation", "inputShadowColorMatrixWhite",
+        ] {
+            table[key] = MaterializeChannel(start: 1, shape: .linear)
+        }
+        for key in [
+            "inputBleedAmount", "inputBleedBlurRadius", "inputBleedHeight",
+            "inputBlurDistance0", "inputBlurDistance4",
+            "inputOuterRefractionAmount", "inputOuterRefractionHeight",
+            "inputShadowHeight",
+        ] {
+            table[key] = MaterializeChannel(start: 0, shape: .height)
+        }
+        table["inputBlurOpacity3"] = MaterializeChannel(start: 0, shape: .quadratic)
+        table["inputBlurOpacity4"] = MaterializeChannel(start: 0, shape: .quadratic)
+        return table
+    }()
+
+    /// The two channels whose shape, not merely endpoint, depends on context.
+    private static func materializeChannels(
+        variant: Int,
+        requestedMain: Bool
+    ) -> [String: MaterializeChannel] {
+        var table = materializeSharedChannels
+        let blurShape: MaterializeShape =
+            requestedMain ? .quadratic : .quadraticFlat
+        table["inputBlurOpacity1"] = MaterializeChannel(start: 0, shape: blurShape)
+        table["inputBlurOpacity2"] = MaterializeChannel(start: 0, shape: blurShape)
+        table["inputClamp"] = MaterializeChannel(
+            start: 1,
+            shape: variant == 2 ? .clamp : .linear
+        )
+        return table
+    }
+
+    /// Fill colors interpolate alpha on the `linear` shape and keep the
+    /// system-resolved RGB, so the Aqua-white / DarkAqua-black split resolves
+    /// itself instead of needing an appearance branch.
+    private static let materializeColorKeys = [
+        "inputFaceColorMatrixFillColor",
+        "inputShadowColorMatrixFillColor",
+    ]
+
+    /// Captures the endpoints the system already resolved for the current
+    /// size, appearance, Variant, and participation. Must run on a pristine
+    /// tree; see `MaterializeBaseline.isPristine`.
+    @MainActor
+    static func captureMaterializeBaseline(
+        from glass: NSGlassEffectView
+    ) -> MaterializeBaseline? {
+        guard let backdrop = backdropLayer(under: glass),
+              glassBackgroundFilter(on: backdrop) != nil else { return nil }
+        let numeric = captureShaderInputs(from: glass)
+        guard !numeric.isEmpty else { return nil }
+        let rimOpacity = highlightLayers(under: glass)
+            .compactMap { highlightValue(forKey: "layerOpacity", on: $0) }
+            .max()
+        return MaterializeBaseline(
+            numeric: numeric,
+            colors: captureShaderColors(from: glass),
+            rimOpacity: rimOpacity,
+            shortSide: min(glass.bounds.width, glass.bounds.height)
+        )
+    }
+
+    // MARK: - Materialize background transplant probe
+
+    /// Readback from the deliberately bounded P1 experiment that transplants
+    /// only Materialize channels already present in a Regular/Clear
+    /// NSGlassEffectView. Temporary SwiftUI-only gaussianBlur and
+    /// glassForeground passes are not manufactured here.
+    struct MaterializeBackgroundTransplantResult: Equatable {
+        let variant: Int
+        let progress: Double
+        let requestedMain: Bool
+        let requestedKeys: [String]
+        let missingKeys: [String]
+        let mismatchedKeys: [String]
+        let requestedRimKeys: [String]
+        let missingRimKeys: [String]
+        let mismatchedRimKeys: [String]
+        let requestedTintAlpha: Double?
+        let expectedTintMatrixAlpha: Double?
+        let actualTintMatrixAlpha: Double?
+        let tintMatrixFound: Bool
+        let tintMatrixMatched: Bool
+        let includesViewEnvelope: Bool
+
+        var acceptedKeyCount: Int {
+            requestedKeys.count - missingKeys.count
+        }
+
+        var acceptedRimKeyCount: Int {
+            requestedRimKeys.count - missingRimKeys.count
+        }
+
+        var isAccepted: Bool {
+            missingKeys.isEmpty
+                && mismatchedKeys.isEmpty
+                && missingRimKeys.isEmpty
+                && mismatchedRimKeys.isEmpty
+                && (requestedTintAlpha == nil
+                    || (tintMatrixFound && tintMatrixMatched))
+        }
+    }
+
+    /// Interpolates an existing NSGlass Regular/Clear tree between its captured
+    /// Recipe (`g = 1`) and a fully dematerialized surface (`g = 0`).
+    ///
+    /// Endpoints come from `baseline`, not from constants, so size, appearance,
+    /// Variant, participation, and OS build are all absorbed by the capture.
+    /// What stays authored here is only the dimensionless shape per channel
+    /// plus the two measured discrete edges:
+    ///
+    /// - `inputBleedDarkenBlend` steps at `g = 0.5` for Clear in DarkAqua and
+    ///   holds its captured value everywhere else;
+    /// - the Rim owner gate is discrete: 0 at `g = 0`, its captured opacity
+    ///   above;
+    /// - when public Tint is present, only its distinct matrix coefficient 18
+    ///   receives the measured `sourceAlpha × g²` mapping;
+    /// - untinted Content/Rim matrices and SDF output remain untouched because
+    ///   the captured transition never moves them;
+    /// - temporary gaussianBlur/glassForeground passes remain absent;
+    /// - whole-view opacity/scale is opt-in so pass reuse can be judged
+    ///   separately from final compositing opacity.
+    @MainActor
+    static func applyMaterializeBackgroundTransplant(
+        progress requestedProgress: Double,
+        variant: Int,
+        requestedMain: Bool,
+        tintColor: NSColor?,
+        includesViewEnvelope: Bool,
+        baseline: MaterializeBaseline,
+        to glass: NSGlassEffectView
+    ) -> MaterializeBackgroundTransplantResult? {
+        guard variant == 1 || variant == 2,
+              let backdrop = backdropLayer(under: glass),
+              let filter = glassBackgroundFilter(on: backdrop) else {
+            return nil
+        }
+
+        let progress = min(max(requestedProgress, 0), 1)
+        let inputKeys = Set(filterInputKeys(filter))
+        let isLightAppearance =
+            glass.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])
+                == .aqua
+
+        var numericValues: [String: Double] = [:]
+        for (key, channel) in materializeChannels(
+            variant: variant,
+            requestedMain: requestedMain
+        ) {
+            guard let endpoint = baseline.numeric[key] else { continue }
+            numericValues[key] = channel.start
+                + (endpoint - channel.start) * channel.shape.value(
+                    at: progress,
+                    geometryInflation: baseline.geometryInflation
+                )
+        }
+
+        // The one measured discrete edge. Clear in DarkAqua flips at the
+        // midpoint; every other context holds the captured value, which is
+        // already 0 or 1.
+        if let bleedDarkenBlend = baseline.numeric["inputBleedDarkenBlend"] {
+            numericValues["inputBleedDarkenBlend"] =
+                (variant == 2 && !isLightAppearance)
+                    ? (progress < 0.5 ? 0 : bleedDarkenBlend)
+                    : bleedDarkenBlend
+        }
+
+        var colorValues: [String: NSColor] = [:]
+        for key in materializeColorKeys {
+            guard let endpoint = baseline.colors[key] else { continue }
+            let base = endpoint.usingColorSpace(.deviceRGB) ?? endpoint
+            colorValues[key] = base.withAlphaComponent(
+                base.alphaComponent * CGFloat(progress)
+            )
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (key, value) in numericValues where inputKeys.contains(key) {
+            setShaderObjectValue(value, forKey: key, on: backdrop)
+        }
+        for (key, value) in colorValues where inputKeys.contains(key) {
+            setShaderObjectValue(value.cgColor, forKey: key, on: backdrop)
+        }
+        if let layer = glass.layer {
+            layer.removeAnimation(forKey: "opacity")
+            layer.removeAnimation(forKey: "transform")
+            if includesViewEnvelope {
+                layer.opacity = Float(progress)
+                layer.transform = CATransform3DMakeScale(
+                    1 + (1 - progress) / 30,
+                    1 + 0.08 * (1 - progress),
+                    1
+                )
+            } else {
+                layer.opacity = 1
+                layer.transform = CATransform3DIdentity
+            }
+        }
+        CATransaction.commit()
+
+        let requestedRimKeys = requestedMain ? ["layerOpacity"] : []
+        let rimLayers = highlightLayers(under: glass)
+        // Measured as a discrete gate rather than a continuous channel: it
+        // opens to its captured opacity on the first active frame and stays
+        // there.
+        let expectedRimOpacity = progress > 0 ? (baseline.rimOpacity ?? 1) : 0
+        if requestedMain {
+            for layer in rimLayers {
+                applyHighlightValues(
+                    ["layerOpacity": expectedRimOpacity],
+                    to: layer
+                )
+            }
+        }
+
+        let requestedTintAlpha = tintColor.flatMap {
+            $0.usingColorSpace(.deviceRGB)
+        }.map { Double($0.alphaComponent) }
+        let expectedTintMatrixAlpha = requestedTintAlpha.map {
+            $0 * progress * progress
+        }
+        let tintWrite = expectedTintMatrixAlpha.map {
+            applyMaterializeTintMatrixAlpha(
+                $0,
+                to: glass
+            )
+        }
+
+        let requestedKeys = (Array(numericValues.keys) + Array(colorValues.keys))
+            .sorted()
+        let missingKeys = requestedKeys.filter { !inputKeys.contains($0) }
+        let numericReadback = captureShaderInputs(from: glass)
+        let colorReadback = captureShaderColors(from: glass)
+        var mismatchedKeys = numericValues.compactMap { key, expected -> String? in
+            guard inputKeys.contains(key) else { return nil }
+            guard let actual = numericReadback[key] else { return key }
+            let tolerance = max(0.001, abs(expected) * 0.001)
+            return abs(actual - expected) <= tolerance ? nil : key
+        }
+        mismatchedKeys += colorValues.compactMap { key, expected -> String? in
+            guard inputKeys.contains(key) else { return nil }
+            guard let actual = colorReadback[key] else { return key }
+            return materializeColorsMatch(actual, expected) ? nil : key
+        }
+        let missingRimKeys =
+            requestedMain && rimLayers.isEmpty ? ["layerOpacity"] : []
+        let mismatchedRimKeys: [String]
+        if requestedMain,
+           !rimLayers.isEmpty,
+           rimLayers.contains(where: {
+               abs(
+                   (highlightValue(forKey: "layerOpacity", on: $0)
+                       ?? -Double.infinity)
+                       - expectedRimOpacity
+               ) > 0.001
+           }) {
+            mismatchedRimKeys = ["layerOpacity"]
+        } else {
+            mismatchedRimKeys = []
+        }
+
+        return MaterializeBackgroundTransplantResult(
+            variant: variant,
+            progress: progress,
+            requestedMain: requestedMain,
+            requestedKeys: requestedKeys,
+            missingKeys: missingKeys,
+            mismatchedKeys: mismatchedKeys.sorted(),
+            requestedRimKeys: requestedRimKeys,
+            missingRimKeys: missingRimKeys,
+            mismatchedRimKeys: mismatchedRimKeys,
+            requestedTintAlpha: requestedTintAlpha,
+            expectedTintMatrixAlpha: expectedTintMatrixAlpha,
+            actualTintMatrixAlpha: tintWrite?.actualAlpha,
+            tintMatrixFound: tintWrite?.found ?? false,
+            tintMatrixMatched: tintWrite?.matched ?? false,
+            includesViewEnvelope: includesViewEnvelope
+        )
+    }
+
+    @MainActor
+    static func hasTintColorMatrix(on glass: NSGlassEffectView) -> Bool {
+        materializeTintMatrixTarget(on: glass) != nil
+    }
+
+    private struct MaterializeTintMatrixWrite {
+        let found: Bool
+        let actualAlpha: Double?
+        let matched: Bool
+    }
+
+    @MainActor
+    private static func applyMaterializeTintMatrixAlpha(
+        _ expectedAlpha: Double,
+        to glass: NSGlassEffectView
+    ) -> MaterializeTintMatrixWrite {
+        guard let target = materializeTintMatrixTarget(on: glass),
+              let name = filterName(target.filter),
+              var matrix = colorMatrixPayload(
+                  target.filter.value(forKey: "inputColorMatrix")
+              ),
+              matrix.bytes.count == 80 else {
+            return MaterializeTintMatrixWrite(
+                found: false,
+                actualAlpha: nil,
+                matched: false
+            )
+        }
+
+        var alpha = Float(expectedAlpha)
+        let offset = 18 * MemoryLayout<Float>.size
+        withUnsafeBytes(of: &alpha) { source in
+            matrix.bytes.replaceSubrange(
+                offset..<(offset + MemoryLayout<Float>.size),
+                with: source
+            )
+        }
+        guard let value = matrix.nsValue() else {
+            return MaterializeTintMatrixWrite(
+                found: true,
+                actualAlpha: nil,
+                matched: false
+            )
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        target.layer.setValue(
+            value,
+            forKeyPath: "\(target.channel).\(name).inputColorMatrix"
+        )
+        CATransaction.commit()
+
+        let actual = materializeTintMatrixTarget(on: glass).flatMap {
+            colorMatrixPayload(
+                $0.filter.value(forKey: "inputColorMatrix")
+            )?.coefficients?[18]
+        }
+        return MaterializeTintMatrixWrite(
+            found: true,
+            actualAlpha: actual,
+            matched: actual.map { abs($0 - expectedAlpha) <= 0.0001 } ?? false
+        )
+    }
+
+    @MainActor
+    private static func materializeTintMatrixTarget(
+        on glass: NSGlassEffectView
+    ) -> LiveCAFilterPassTarget? {
+        guard let capture = captureLivePassAudit(from: glass) else {
+            return nil
+        }
+        let gradientPaths = Set(
+            capture.snapshot.passes.values.compactMap { pass in
+                pass.objectClass == "CASDFGradientEffect"
+                    ? pass.layerPath : nil
+            }
+        )
+        guard let tintPass = capture.snapshot.passes.values.first(where: {
+            $0.name == "vibrantColorMatrix"
+                && gradientPaths.contains($0.layerPath)
+        }) else {
+            return nil
+        }
+        return liveCAFilterPassTarget(for: tintPass, under: glass)
+    }
+
+    private static func materializeColorsMatch(
+        _ lhs: NSColor,
+        _ rhs: NSColor
+    ) -> Bool {
+        guard let left = lhs.usingColorSpace(.deviceRGB),
+              let right = rhs.usingColorSpace(.deviceRGB) else {
+            return false
+        }
+        let tolerance: CGFloat = 0.002
+        return abs(left.redComponent - right.redComponent) <= tolerance
+            && abs(left.greenComponent - right.greenComponent) <= tolerance
+            && abs(left.blueComponent - right.blueComponent) <= tolerance
+            && abs(left.alphaComponent - right.alphaComponent) <= tolerance
     }
 
     /// Re-resolves the private material after the host window genuinely
@@ -1853,6 +2346,21 @@ enum GlassLabTuning {
         )
     }
 
+    /// Stable, lossless-enough description for Core Animation's private 4×5
+    /// Float color matrix. `NSValue.description` elides the middle bytes, which
+    /// made tint hue/alpha routing impossible to distinguish in exported
+    /// evidence even though the live matrix was different.
+    static func colorMatrixDescription(_ value: Any?) -> String? {
+        guard let payload = colorMatrixPayload(value),
+              let coefficients = payload.coefficients else {
+            return nil
+        }
+        let values = coefficients.map {
+            String(format: "%.9g", $0)
+        }.joined(separator: ",")
+        return "ColorMatrix4x5([\(values)];sha256=\(payload.digest))"
+    }
+
     /// Captures both live matrix slots as a typed Override baseline. This is
     /// intentionally limited to the validated `vibrantColorMatrix` family.
     @MainActor
@@ -2138,6 +2646,18 @@ enum GlassLabTuning {
         captureLivePassAudit(from: glass)?.snapshot
     }
 
+    /// Presentation-layer companion used by narrow transition/appearance
+    /// studies. The canonical Recursive Pass Audit still enters through the
+    /// NSGlassEffectView overload so its existing fixture contract is
+    /// unchanged.
+    @MainActor
+    static func capturePassAuditSnapshot(
+        from root: CALayer?
+    ) -> PassAuditSnapshot? {
+        guard let root else { return nil }
+        return captureLivePassAudit(from: root).snapshot
+    }
+
     /// Captures the deterministic recursive snapshot plus non-owning identity
     /// tokens keyed by structural pass slot for view-lifetime replacement
     /// tracking across Recipe edits.
@@ -2146,6 +2666,13 @@ enum GlassLabTuning {
         from glass: NSGlassEffectView
     ) -> LivePassAuditCapture? {
         guard let root = glass.layer else { return nil }
+        return captureLivePassAudit(from: root)
+    }
+
+    @MainActor
+    private static func captureLivePassAudit(
+        from root: CALayer
+    ) -> LivePassAuditCapture {
         var layers: [String: PassAuditLayerRecord] = [:]
         var passes: [String: PassAuditPassRecord] = [:]
         var objectIdentityBySlot: [String: ObjectIdentifier] = [:]
@@ -2347,7 +2874,12 @@ enum GlassLabTuning {
                 key,
                 PassAuditPropertyRecord(
                     state: value == nil ? "nil" : "value",
-                    value: value.map { stableDescription($0) },
+                    value: value.map {
+                        key == "inputColorMatrix"
+                            ? colorMatrixDescription($0)
+                                ?? stableDescription($0)
+                            : stableDescription($0)
+                    },
                     attributes: attributes
                 )
             )
@@ -2670,7 +3202,7 @@ enum GlassLabTuning {
     }
 
     @MainActor
-    private static func settledPassAuditSnapshot(
+    static func settledPassAuditSnapshot(
         from glass: NSGlassEffectView
     ) async throws -> PassAuditSnapshot {
         var previous: PassAuditSnapshot?

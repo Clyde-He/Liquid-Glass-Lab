@@ -36,6 +36,31 @@ enum GlassLabRendererMode: String, CaseIterable, Identifiable {
     }
 }
 
+enum GlassLabMaterializeAnimationMode: String, CaseIterable, Identifiable, Codable {
+    case systemDefault = "System Default"
+    case linear = "Linear"
+
+    var id: Self { self }
+}
+
+enum GlassLabMaterializeDirection: String, CaseIterable, Identifiable, Codable {
+    case insertion = "Insertion"
+    case removal = "Removal"
+
+    var id: Self { self }
+
+    var initialPresentedState: Bool {
+        switch self {
+        case .insertion: false
+        case .removal: true
+        }
+    }
+
+    var targetPresentedState: Bool {
+        !initialPresentedState
+    }
+}
+
 /// SwiftUI `_Glass.Variant.Role` tags observed on macOS 27. This is a separate
 /// ordinal space from both AppKit's raw `_variant` and DesignLibrary's
 /// `GlassMaterialProvider.Variant` enum used by electron-liquid-glass.
@@ -347,20 +372,79 @@ final class GlassLabSemanticModel: ObservableObject {
     @Published var cornerRadius: Double = 16
     @Published var isAvailable = true
     @Published var status = "Available on this runtime"
+    @Published var isTransitionProbeEnabled = false
+    @Published var isTransitionPresented = true
+    @Published private(set) var previewRevision = 0
     private var resolvedUsage: GlassLabSemanticUsage?
+    private var resolvedBaseGlass: Glass?
+    private var resolvedTintColor: NSColor?
 
-    func update(usage: GlassLabSemanticUsage, cornerRadius: Double) {
+    func update(
+        usage: GlassLabSemanticUsage,
+        cornerRadius: Double,
+        tintColor: NSColor?
+    ) {
         if self.cornerRadius != cornerRadius {
             self.cornerRadius = cornerRadius
         }
-        guard usage != resolvedUsage else { return }
-        let resolution = GlassLabSemanticRuntime.shared.resolve(usage)
-        resolvedUsage = usage
-        displayName = usage.displayName
-        status = resolution.message
-        isAvailable = resolution.isAvailable
-        if let glass = resolution.glass {
-            self.glass = glass
+        let usageChanged = usage != resolvedUsage
+        let tintChanged = !Self.colorsEqual(resolvedTintColor, tintColor)
+        guard usageChanged || tintChanged else { return }
+
+        if usageChanged {
+            let resolution = GlassLabSemanticRuntime.shared.resolve(usage)
+            resolvedUsage = usage
+            displayName = usage.displayName
+            status = resolution.message
+            isAvailable = resolution.isAvailable
+            resolvedBaseGlass = resolution.glass
+        }
+        if tintChanged {
+            resolvedTintColor = tintColor?.copy() as? NSColor
+        }
+        if let resolvedBaseGlass {
+            glass = resolvedBaseGlass.tint(resolvedTintColor.map(Color.init))
+        }
+    }
+
+    private static func colorsEqual(_ lhs: NSColor?, _ rhs: NSColor?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil): true
+        case let (lhs?, rhs?): lhs.isEqual(rhs)
+        default: false
+        }
+    }
+
+    func configureTransitionProbe(enabled: Bool, presented: Bool) {
+        let previewModeChanged = enabled != isTransitionProbeEnabled
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            isTransitionProbeEnabled = enabled
+            isTransitionPresented = enabled ? presented : true
+            if previewModeChanged {
+                previewRevision &+= 1
+            }
+        }
+    }
+
+    func setTransitionPresented(
+        _ presented: Bool,
+        animationMode: GlassLabMaterializeAnimationMode,
+        linearDuration: Double
+    ) {
+        guard isTransitionProbeEnabled, presented != isTransitionPresented else {
+            return
+        }
+        switch animationMode {
+        case .systemDefault:
+            withAnimation(.default) {
+                isTransitionPresented = presented
+            }
+        case .linear:
+            withAnimation(.linear(duration: linearDuration)) {
+                isTransitionPresented = presented
+            }
         }
     }
 }
@@ -370,37 +454,479 @@ struct GlassLabSemanticSurfaceView: View {
 
     var body: some View {
         Group {
-            if model.isAvailable {
-                ZStack {
-                    Color.white.opacity(0.001)
-                    Text(model.displayName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.82))
-                        .padding(12)
+            if model.isTransitionProbeEnabled {
+                GlassEffectContainer(spacing: 0) {
+                    if model.isTransitionPresented {
+                        resolvedSurface
+                            .glassEffectTransition(.materialize)
+                    }
                 }
-                .glassEffect(
-                    model.glass,
-                    in: .rect(cornerRadius: model.cornerRadius)
-                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ZStack {
-                    Color.red.opacity(0.12)
-                    Text(model.status)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(16)
-                }
-                .clipShape(.rect(cornerRadius: model.cornerRadius))
-                .overlay {
-                    RoundedRectangle(cornerRadius: model.cornerRadius)
-                        .stroke(.red.opacity(0.35), style: StrokeStyle(dash: [5, 4]))
+                resolvedSurface
+                    .transaction { transaction in
+                        transaction.animation = nil
+                    }
+            }
+        }
+        .id(model.previewRevision)
+    }
+
+    @ViewBuilder
+    private var resolvedSurface: some View {
+        if model.isAvailable {
+            ZStack {
+                Color.white.opacity(0.001)
+                Text(model.displayName)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .padding(12)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .glassEffect(
+                model.glass,
+                in: .rect(cornerRadius: model.cornerRadius)
+            )
+        } else {
+            ZStack {
+                Color.red.opacity(0.12)
+                Text(model.status)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(16)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipShape(.rect(cornerRadius: model.cornerRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: model.cornerRadius)
+                    .stroke(.red.opacity(0.35), style: StrokeStyle(dash: [5, 4]))
+            }
+        }
+    }
+}
+
+// MARK: - Materialize transition probe
+
+struct GlassLabSemanticTransitionLayerRecord: Codable, Equatable, Identifiable {
+    let path: String
+    let layerClass: String
+    let name: String?
+    let frameX: Double
+    let frameY: Double
+    let frameWidth: Double
+    let frameHeight: Double
+    let boundsX: Double
+    let boundsY: Double
+    let boundsWidth: Double
+    let boundsHeight: Double
+    let positionX: Double
+    let positionY: Double
+    let anchorX: Double
+    let anchorY: Double
+    let zPosition: Double
+    let opacity: Double
+    let isHidden: Bool
+    let masksToBounds: Bool
+    let cornerRadius: Double
+    let contentsScale: Double
+    let backgroundColor: String?
+    let borderColor: String?
+    let shadowColor: String?
+    /// Row-major CATransform3D values m11...m44.
+    let transform: [Double]
+    /// Row-major CATransform3D values m11...m44.
+    let sublayerTransform: [Double]
+    /// CGAffineTransform values a, b, c, d, tx, ty.
+    let affineTransform: [Double]
+
+    var id: String { path }
+}
+
+struct GlassLabSemanticAnimationRecord: Codable, Equatable, Identifiable {
+    let layerPath: String
+    let registrationKey: String
+    let componentPath: String
+    let animationClass: String
+    let keyPath: String?
+    let beginTime: Double
+    let duration: Double
+    let speed: Float
+    let timeOffset: Double
+    let repeatCount: Float
+    let autoreverses: Bool
+    let fillMode: String
+    let isRemovedOnCompletion: Bool
+    let timingFunction: String?
+    let details: [String: String]
+
+    var id: String {
+        "\(layerPath).\(registrationKey).\(componentPath)"
+    }
+}
+
+struct GlassLabSemanticTransitionSnapshot: Codable, Equatable {
+    let model: GlassLabSemanticSnapshot
+    let presentation: GlassLabSemanticSnapshot?
+    let modelLayers: [GlassLabSemanticTransitionLayerRecord]
+    let presentationLayers: [GlassLabSemanticTransitionLayerRecord]?
+    let animations: [GlassLabSemanticAnimationRecord]
+
+    @MainActor
+    static func capture(from root: CALayer?) -> GlassLabSemanticTransitionSnapshot? {
+        guard let root,
+              let model = GlassLabSemanticSnapshot.capture(
+                from: root,
+                includesMasks: true
+              ) else {
+            return nil
+        }
+        let presentationRoot = root.presentation()
+        return GlassLabSemanticTransitionSnapshot(
+            model: model,
+            presentation: GlassLabSemanticSnapshot.capture(
+                from: presentationRoot,
+                includesMasks: true
+            ),
+            modelLayers: captureLayers(from: root),
+            presentationLayers: presentationRoot.map(captureLayers),
+            animations: captureAnimations(from: root)
+        )
+    }
+
+    @MainActor
+    private static func captureLayers(
+        from root: CALayer
+    ) -> [GlassLabSemanticTransitionLayerRecord] {
+        var records: [GlassLabSemanticTransitionLayerRecord] = []
+
+        func visit(_ layer: CALayer, path: String) {
+            let frame = layer.frame
+            let bounds = layer.bounds
+            let position = layer.position
+            let anchor = layer.anchorPoint
+            let affine = layer.affineTransform()
+            records.append(
+                GlassLabSemanticTransitionLayerRecord(
+                    path: path,
+                    layerClass: String(describing: type(of: layer)),
+                    name: layer.name,
+                    frameX: Double(frame.origin.x),
+                    frameY: Double(frame.origin.y),
+                    frameWidth: Double(frame.width),
+                    frameHeight: Double(frame.height),
+                    boundsX: Double(bounds.origin.x),
+                    boundsY: Double(bounds.origin.y),
+                    boundsWidth: Double(bounds.width),
+                    boundsHeight: Double(bounds.height),
+                    positionX: Double(position.x),
+                    positionY: Double(position.y),
+                    anchorX: Double(anchor.x),
+                    anchorY: Double(anchor.y),
+                    zPosition: Double(layer.zPosition),
+                    opacity: Double(layer.opacity),
+                    isHidden: layer.isHidden,
+                    masksToBounds: layer.masksToBounds,
+                    cornerRadius: Double(layer.cornerRadius),
+                    contentsScale: Double(layer.contentsScale),
+                    backgroundColor: stableColorDescription(
+                        layer.backgroundColor
+                    ),
+                    borderColor: stableColorDescription(layer.borderColor),
+                    shadowColor: stableColorDescription(layer.shadowColor),
+                    transform: transformValues(layer.transform),
+                    sublayerTransform: transformValues(
+                        layer.sublayerTransform
+                    ),
+                    affineTransform: [
+                        Double(affine.a),
+                        Double(affine.b),
+                        Double(affine.c),
+                        Double(affine.d),
+                        Double(affine.tx),
+                        Double(affine.ty),
+                    ]
+                )
+            )
+            for (index, child) in (layer.sublayers ?? []).enumerated() {
+                visit(
+                    child,
+                    path: "\(path).\(index):\(String(describing: type(of: child)))"
+                )
+            }
+            if let mask = layer.mask {
+                visit(
+                    mask,
+                    path: "\(path).mask:\(String(describing: type(of: mask)))"
+                )
+            }
+        }
+
+        visit(root, path: String(describing: type(of: root)))
+        return records
+    }
+
+    nonisolated private static func transformValues(
+        _ transform: CATransform3D
+    ) -> [Double] {
+        [
+            Double(transform.m11), Double(transform.m12),
+            Double(transform.m13), Double(transform.m14),
+            Double(transform.m21), Double(transform.m22),
+            Double(transform.m23), Double(transform.m24),
+            Double(transform.m31), Double(transform.m32),
+            Double(transform.m33), Double(transform.m34),
+            Double(transform.m41), Double(transform.m42),
+            Double(transform.m43), Double(transform.m44),
+        ]
+    }
+
+    nonisolated private static func stableColorDescription(
+        _ color: CGColor?
+    ) -> String? {
+        guard let color else { return nil }
+        let components = (color.components ?? []).map {
+            String(format: "%.9g", Double($0))
+        }.joined(separator: ",")
+        let colorSpace = color.colorSpace?.name as String? ?? "unknown"
+        return "\(colorSpace)[\(components)]"
+    }
+
+    @MainActor
+    private static func captureAnimations(
+        from root: CALayer
+    ) -> [GlassLabSemanticAnimationRecord] {
+        var records: [GlassLabSemanticAnimationRecord] = []
+
+        func capture(
+            _ animation: CAAnimation,
+            registrationKey: String,
+            componentPath: String,
+            layerPath: String
+        ) {
+            var details: [String: String] = [:]
+            if let basic = animation as? CABasicAnimation {
+                details["fromValue"] = describe(basic.fromValue)
+                details["toValue"] = describe(basic.toValue)
+                details["byValue"] = describe(basic.byValue)
+            }
+            if let keyframe = animation as? CAKeyframeAnimation {
+                details["calculationMode"] = keyframe.calculationMode.rawValue
+                details["keyTimes"] = keyframe.keyTimes?
+                    .map { String(format: "%.6g", $0.doubleValue) }
+                    .joined(separator: ", ")
+                details["values"] = keyframe.values?
+                    .map { describe($0) ?? "nil" }
+                    .joined(separator: " | ")
+            }
+            if let spring = animation as? CASpringAnimation {
+                details["mass"] = String(format: "%.6g", spring.mass)
+                details["stiffness"] = String(format: "%.6g", spring.stiffness)
+                details["damping"] = String(format: "%.6g", spring.damping)
+                details["initialVelocity"] = String(
+                    format: "%.6g",
+                    spring.initialVelocity
+                )
+                details["settlingDuration"] = String(
+                    format: "%.6g",
+                    spring.settlingDuration
+                )
+            }
+
+            records.append(
+                GlassLabSemanticAnimationRecord(
+                    layerPath: layerPath,
+                    registrationKey: registrationKey,
+                    componentPath: componentPath,
+                    animationClass: String(describing: type(of: animation)),
+                    keyPath: (animation as? CAPropertyAnimation)?.keyPath,
+                    beginTime: animation.beginTime,
+                    duration: animation.duration,
+                    speed: animation.speed,
+                    timeOffset: animation.timeOffset,
+                    repeatCount: animation.repeatCount,
+                    autoreverses: animation.autoreverses,
+                    fillMode: animation.fillMode.rawValue,
+                    isRemovedOnCompletion: animation.isRemovedOnCompletion,
+                    timingFunction: animation.timingFunction.map {
+                        String(describing: $0)
+                    },
+                    details: details.compactMapValues { $0 }
+                )
+            )
+
+            if let group = animation as? CAAnimationGroup {
+                for (index, child) in (group.animations ?? []).enumerated() {
+                    capture(
+                        child,
+                        registrationKey: registrationKey,
+                        componentPath: "\(componentPath).\(index)",
+                        layerPath: layerPath
+                    )
                 }
             }
         }
-        .transaction { transaction in
-            transaction.animation = nil
+
+        func visit(_ layer: CALayer, path: String) {
+            for key in layer.animationKeys() ?? [] {
+                guard let animation = layer.animation(forKey: key) else {
+                    continue
+                }
+                capture(
+                    animation,
+                    registrationKey: key,
+                    componentPath: "root",
+                    layerPath: path
+                )
+            }
+            for (index, child) in (layer.sublayers ?? []).enumerated() {
+                visit(
+                    child,
+                    path: "\(path).\(index):\(String(describing: type(of: child)))"
+                )
+            }
+            if let mask = layer.mask {
+                visit(
+                    mask,
+                    path: "\(path).mask:\(String(describing: type(of: mask)))"
+                )
+            }
         }
+
+        visit(root, path: String(describing: type(of: root)))
+        return records.sorted {
+            if $0.layerPath != $1.layerPath {
+                return $0.layerPath < $1.layerPath
+            }
+            if $0.registrationKey != $1.registrationKey {
+                return $0.registrationKey < $1.registrationKey
+            }
+            return $0.componentPath < $1.componentPath
+        }
+    }
+
+    private static func describe(_ value: Any?) -> String? {
+        guard let value else { return nil }
+        if let number = value as? NSNumber {
+            return String(format: "%.6g", number.doubleValue)
+        }
+        if let string = value as? String {
+            return string
+        }
+        let cfValue = value as CFTypeRef
+        if CFGetTypeID(cfValue) == CGColor.typeID {
+            let color = unsafeBitCast(cfValue, to: CGColor.self)
+            let components = (color.components ?? [])
+                .map { String(format: "%.6g", Double($0)) }
+                .joined(separator: ", ")
+            return "CGColor([\(components)])"
+        }
+        if let array = value as? [Any] {
+            return "["
+                + array.map { describe($0) ?? "nil" }
+                    .joined(separator: ", ")
+                + "]"
+        }
+        if let matrix = GlassLabTuning.colorMatrixDescription(value) {
+            return matrix
+        }
+        return String(describing: value)
+    }
+}
+
+struct GlassLabMaterializeSample: Codable, Equatable, Identifiable {
+    let phase: String
+    let requestedProgress: Double
+    let elapsed: Double
+    let snapshot: GlassLabSemanticTransitionSnapshot
+
+    var id: String {
+        "\(phase).\(requestedProgress).\(elapsed)"
+    }
+}
+
+struct GlassLabMaterializeCaptureContext: Codable, Equatable {
+    let hostType: String
+    let requestedMain: Bool
+    let actualMain: Bool
+    let actualKey: Bool
+    let requestedAppearance: GlassLabTestAppearance
+    let effectiveAppearance: String
+    let backdrop: GlassLabBackdropMode
+    let glassWidth: Double
+    let glassHeight: Double
+    let cornerRadius: Double
+    let windowMargin: Double
+    let tint: GlassLabTintDescriptor
+}
+
+struct GlassLabMaterializeCapture: Codable, Equatable {
+    let formatVersion: Int
+    let capturedAt: String
+    let operatingSystem: String
+    let roleTag: Int
+    let usage: String
+    let direction: GlassLabMaterializeDirection
+    let animationMode: GlassLabMaterializeAnimationMode
+    let requestedDuration: Double?
+    let maximumAttachedAnimationDuration: Double
+    let samplingDuration: Double
+    let context: GlassLabMaterializeCaptureContext
+    let samples: [GlassLabMaterializeSample]
+
+    var report: String {
+        let requestedDurationText = requestedDuration.map(Self.format)
+            ?? "system"
+        let attachedDurationText = Self.format(
+            maximumAttachedAnimationDuration
+        )
+        let samplingDurationText = Self.format(samplingDuration)
+        let geometry = Self.format(context.glassWidth)
+            + "×\(Self.format(context.glassHeight))"
+            + "@\(Self.format(context.cornerRadius))"
+            + " margin=\(Self.format(context.windowMargin))"
+        var lines = [
+            "== SwiftUI Materialize Transition ==",
+            "usage=\(usage) roleTag=\(roleTag)",
+            "direction=\(direction.rawValue) animation=\(animationMode.rawValue)",
+            "requestedDuration=\(requestedDurationText)",
+            "maximumAttachedAnimationDuration=\(attachedDurationText)",
+            "samplingDuration=\(samplingDurationText)",
+            "host=\(context.hostType) requestedMain=\(context.requestedMain)"
+                + " actualMain=\(context.actualMain) actualKey=\(context.actualKey)",
+            "appearance=\(context.requestedAppearance.rawValue)"
+                + " effective=\(context.effectiveAppearance)"
+                + " backdrop=\(context.backdrop.rawValue)",
+            "geometry=\(geometry)",
+            "tint=\(context.tint.label) components="
+                + "\(context.tint.components?.description ?? "nil")",
+            "",
+            "Samples",
+            "-------",
+        ]
+        for sample in samples {
+            let presentation = sample.snapshot.presentation
+            var sampleLine = sample.phase
+            sampleLine += " p=\(Self.format(sample.requestedProgress))"
+            sampleLine += " elapsed=\(Self.format(sample.elapsed))"
+            sampleLine += " modelLayers=\(sample.snapshot.model.layerLines.count)"
+            sampleLine += " presentationLayers=\(presentation?.layerLines.count ?? 0)"
+            sampleLine += " animations=\(sample.snapshot.animations.count)"
+            lines.append(sampleLine)
+            for animation in sample.snapshot.animations {
+                var animationLine = "  \(animation.layerPath)"
+                animationLine += " · \(animation.registrationKey)"
+                animationLine += " · \(animation.animationClass)"
+                animationLine += " keyPath=\(animation.keyPath ?? "<group>")"
+                animationLine += " duration=\(Self.format(animation.duration))"
+                lines.append(animationLine)
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    nonisolated private static func format(_ value: Double) -> String {
+        String(format: "%.6g", value)
     }
 }
 
@@ -471,7 +997,10 @@ struct GlassLabSemanticSnapshot: Codable, Equatable {
     }
 
     @MainActor
-    static func capture(from root: CALayer?) -> GlassLabSemanticSnapshot? {
+    static func capture(
+        from root: CALayer?,
+        includesMasks: Bool = false
+    ) -> GlassLabSemanticSnapshot? {
         guard let root else { return nil }
         var layerLines: [String] = []
         var filters: [GlassLabSemanticFilterRecord] = []
@@ -519,7 +1048,9 @@ struct GlassLabSemanticSnapshot: Codable, Equatable {
                     "keyAmount", "keyHeight", "keySpread", "keyAngle",
                     "fillAmount", "fillHeight", "fillSpread", "fillAngle",
                     "curvature", "diffuseAmountScale", "diffuseHeightScale",
-                    "diffuseSpreadScale", "global",
+                    "diffuseSpreadScale", "global", "minimum", "maximum",
+                    "keyColor", "fillColor", "color", "colors", "distances",
+                    "interpolations", "premultiplied",
                 ]
                 let inputs = keys.compactMap { key -> GlassLabSemanticInputRecord? in
                     guard let value = guardedValue(key, on: effect) else { return nil }
@@ -540,6 +1071,13 @@ struct GlassLabSemanticSnapshot: Codable, Equatable {
                 visit(
                     child,
                     path: "\(path).\(index):\(String(describing: type(of: child)))",
+                    depth: depth + 1
+                )
+            }
+            if includesMasks, let mask = layer.mask {
+                visit(
+                    mask,
+                    path: "\(path).mask:\(String(describing: type(of: mask)))",
                     depth: depth + 1
                 )
             }
@@ -633,8 +1171,14 @@ struct GlassLabSemanticSnapshot: Codable, Equatable {
             let color = unsafeBitCast(cfValue, to: CGColor.self)
             return describe(color)
         }
+        if let array = value as? [Any] {
+            return "["
+                + array.map { describe($0) }.joined(separator: ", ")
+                + "]"
+        }
         if let value = value as? NSValue {
-            return value.description
+            return GlassLabTuning.colorMatrixDescription(value)
+                ?? value.description
         }
         return String(describing: value)
     }

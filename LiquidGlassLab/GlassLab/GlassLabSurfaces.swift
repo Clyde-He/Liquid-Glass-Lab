@@ -33,8 +33,17 @@ private final class GlassLabManagedEffectView: NSGlassEffectView {
 /// real desktop/content behind it. In every case the glass keeps its exact
 /// requested size instead of being clamped by an in-window preview.
 final class GlassLabGlassHost: NSView {
+    private struct MaterializeProbeState {
+        let progress: Double
+        let variant: Int
+        let requestedMain: Bool
+        let tintColor: NSColor?
+        let includesViewEnvelope: Bool
+    }
+
     private(set) var glass: NSGlassEffectView
     private let gradient = CAGradientLayer()
+    private let showsCanvasBackdrop: Bool
     private let label = NSTextField(wrappingLabelWithString: Array(
         repeating: "Liquid Glass Lab 0123456789 ●▲■◆ AppKit Glass",
         count: 16
@@ -43,8 +52,14 @@ final class GlassLabGlassHost: NSView {
     private var glassPadding: CGFloat = 40
     private weak var state: GlassLabState?
     private var isRestampingAfterLayout = false
+    private var materializeProbeState: MaterializeProbeState?
+    /// System-resolved Materialize endpoints for the current tree. Recaptured
+    /// whenever AppKit hands back a pristine Recipe so a size, appearance, or
+    /// Variant change moves the endpoints without any authored table.
+    private var materializeBaseline: GlassLabTuning.MaterializeBaseline?
 
     init(showsCanvasBackdrop: Bool) {
+        self.showsCanvasBackdrop = showsCanvasBackdrop
         glass = GlassLabManagedEffectView()
         super.init(frame: .zero)
         wantsLayer = true
@@ -74,6 +89,7 @@ final class GlassLabGlassHost: NSView {
 
     func update(with state: GlassLabState) {
         self.state = state
+        updateBackdrop(state.testBackdrop)
         let size = NSSize(width: state.glassWidth, height: state.glassHeight)
         let padding = CGFloat(state.windowPadding)
         if size != glassSize || padding != glassPadding {
@@ -84,7 +100,29 @@ final class GlassLabGlassHost: NSView {
         glass.cornerRadius = state.cornerRadius
         if !state.isCapturingRecipeMatrix {
             GlassLabTuning.applyRecipe(from: state, to: glass)
+            restampMaterializeProbeIfNeeded(on: glass)
         }
+    }
+
+    private func updateBackdrop(_ backdrop: GlassLabBackdropMode) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if let color = backdrop.controlledColor {
+            gradient.colors = [color.cgColor, color.cgColor]
+            gradient.isHidden = false
+            label.textColor = backdrop == .light ? .black : .white
+            label.isHidden = false
+        } else {
+            gradient.colors = [
+                NSColor.systemBlue.cgColor,
+                NSColor.systemPurple.cgColor,
+                NSColor.systemOrange.cgColor,
+            ]
+            gradient.isHidden = !showsCanvasBackdrop
+            label.textColor = .white
+            label.isHidden = !showsCanvasBackdrop
+        }
+        CATransaction.commit()
     }
 
     /// Discards private filter mutations without changing the host window or
@@ -106,6 +144,43 @@ final class GlassLabGlassHost: NSView {
         }
     }
 
+    @discardableResult
+    func applyMaterializeBackgroundProbe(
+        progress: Double,
+        variant: Int,
+        requestedMain: Bool,
+        tintColor: NSColor?,
+        includesViewEnvelope: Bool
+    ) -> GlassLabTuning.MaterializeBackgroundTransplantResult? {
+        refreshMaterializeBaselineIfPristine(on: glass)
+        materializeProbeState = MaterializeProbeState(
+            progress: progress,
+            variant: variant,
+            requestedMain: requestedMain,
+            tintColor: tintColor,
+            includesViewEnvelope: includesViewEnvelope
+        )
+        return restampMaterializeProbeIfNeeded(on: glass)
+    }
+
+    func clearMaterializeBackgroundProbe() {
+        materializeProbeState = nil
+        materializeBaseline = nil
+    }
+
+    /// A pristine tree is either the first one we ever saw or a replacement
+    /// AppKit just resolved, and in both cases its values are the endpoints for
+    /// the current context. A tree we already wrote to reports `g < 1` and is
+    /// skipped, so scrubbing never captures its own output.
+    private func refreshMaterializeBaselineIfPristine(
+        on glass: NSGlassEffectView
+    ) {
+        guard let candidate = GlassLabTuning.captureMaterializeBaseline(
+            from: glass
+        ), candidate.isPristine else { return }
+        materializeBaseline = candidate
+    }
+
     private func installLayoutRestamp(on glass: NSGlassEffectView) {
         guard let managedGlass = glass as? GlassLabManagedEffectView else { return }
         managedGlass.didFinishLayout = { [weak self] glass in
@@ -122,10 +197,38 @@ final class GlassLabGlassHost: NSView {
               let state,
               !state.isCapturingRecipeMatrix,
               !isRestampingAfterLayout,
-              state.hasActiveOverrides else { return }
+              state.hasActiveOverrides || materializeProbeState != nil else {
+            return
+        }
         isRestampingAfterLayout = true
         defer { isRestampingAfterLayout = false }
         GlassLabTuning.applyOverrides(from: state, to: candidate)
+        restampMaterializeProbeIfNeeded(on: candidate)
+    }
+
+    @discardableResult
+    private func restampMaterializeProbeIfNeeded(
+        on candidate: NSGlassEffectView
+    ) -> GlassLabTuning.MaterializeBackgroundTransplantResult? {
+        guard candidate === glass,
+              let probe = materializeProbeState,
+              state?.variant == probe.variant,
+              state?.isTestWindowMain == probe.requestedMain else {
+            return nil
+        }
+        // A replacement tree arrives pristine, so this is where a resize or
+        // appearance change refreshes the endpoints before they are scaled.
+        refreshMaterializeBaselineIfPristine(on: candidate)
+        guard let baseline = materializeBaseline else { return nil }
+        return GlassLabTuning.applyMaterializeBackgroundTransplant(
+            progress: probe.progress,
+            variant: probe.variant,
+            requestedMain: probe.requestedMain,
+            tintColor: probe.tintColor,
+            includesViewEnvelope: probe.includesViewEnvelope,
+            baseline: baseline,
+            to: candidate
+        )
     }
 
     override func layout() {
@@ -150,6 +253,7 @@ final class GlassLabGlassHost: NSView {
 /// Recipe surface while preserving the same window backdrop and geometry.
 final class GlassLabSemanticHost: NSView {
     private let gradient = CAGradientLayer()
+    private let showsCanvasBackdrop: Bool
     private let label = NSTextField(wrappingLabelWithString: Array(
         repeating: "Liquid Glass Lab 0123456789 ●▲■◆ SwiftUI Glass",
         count: 16
@@ -163,6 +267,7 @@ final class GlassLabSemanticHost: NSView {
     var renderStatus: String { model.status }
 
     init(showsCanvasBackdrop: Bool) {
+        self.showsCanvasBackdrop = showsCanvasBackdrop
         semanticView = NSHostingView(
             rootView: GlassLabSemanticSurfaceView(model: model)
         )
@@ -194,6 +299,7 @@ final class GlassLabSemanticHost: NSView {
     }
 
     func update(with state: GlassLabState) {
+        updateBackdrop(state.testBackdrop)
         let size = NSSize(width: state.glassWidth, height: state.glassHeight)
         let padding = CGFloat(state.windowPadding)
         if size != semanticSize || padding != semanticPadding {
@@ -203,7 +309,49 @@ final class GlassLabSemanticHost: NSView {
         }
         model.update(
             usage: state.semanticUsage,
-            cornerRadius: state.cornerRadius
+            cornerRadius: state.cornerRadius,
+            tintColor: state.tintColor
+        )
+    }
+
+    private func updateBackdrop(_ backdrop: GlassLabBackdropMode) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if let color = backdrop.controlledColor {
+            gradient.colors = [color.cgColor, color.cgColor]
+            gradient.isHidden = false
+            label.textColor = backdrop == .light ? .black : .white
+            label.isHidden = false
+        } else {
+            gradient.colors = [
+                NSColor.systemBlue.cgColor,
+                NSColor.systemPurple.cgColor,
+                NSColor.systemOrange.cgColor,
+            ]
+            gradient.isHidden = !showsCanvasBackdrop
+            label.textColor = .white
+            label.isHidden = !showsCanvasBackdrop
+        }
+        CATransaction.commit()
+    }
+
+    func configureTransitionProbe(enabled: Bool, presented: Bool) {
+        model.configureTransitionProbe(
+            enabled: enabled,
+            presented: presented
+        )
+        semanticView.layoutSubtreeIfNeeded()
+    }
+
+    func setTransitionPresented(
+        _ presented: Bool,
+        animationMode: GlassLabMaterializeAnimationMode,
+        linearDuration: Double
+    ) {
+        model.setTransitionPresented(
+            presented,
+            animationMode: animationMode,
+            linearDuration: linearDuration
         )
     }
 
@@ -348,6 +496,9 @@ final class GlassLabTestWindowController {
     var liveSemanticLayerRoot: CALayer? { semanticHost?.inspectionRootLayer }
     var semanticRenderStatus: String? { semanticHost?.renderStatus }
     var liveWindow: NSWindow? { window }
+    var effectiveAppearanceName: String? {
+        window?.effectiveAppearance.name.rawValue
+    }
 
     var isActuallyKey: Bool { window.map { NSApp.keyWindow === $0 } ?? false }
     var isActuallyMain: Bool { window.map { NSApp.mainWindow === $0 } ?? false }
@@ -396,6 +547,7 @@ final class GlassLabTestWindowController {
             replaceSurfaceHost(for: state)
         }
         guard let window, let host = surfaceHost else { return }
+        window.appearance = state.testAppearance.nsAppearance
         resize(window, host: host, for: state)
         // sync also runs for continuous context streams (the geometry
         // sliders). Replaying the ordering dance while participation already
@@ -410,6 +562,52 @@ final class GlassLabTestWindowController {
 
     func rebuildGlass(with state: GlassLabState) {
         glassHost?.rebuildGlass(with: state)
+    }
+
+    @discardableResult
+    func applyAppKitMaterializeBackgroundProbe(
+        progress: Double,
+        variant: Int,
+        requestedMain: Bool,
+        tintColor: NSColor?,
+        includesViewEnvelope: Bool
+    ) -> GlassLabTuning.MaterializeBackgroundTransplantResult? {
+        glassHost?.applyMaterializeBackgroundProbe(
+            progress: progress,
+            variant: variant,
+            requestedMain: requestedMain,
+            tintColor: tintColor,
+            includesViewEnvelope: includesViewEnvelope
+        )
+    }
+
+    func clearAppKitMaterializeBackgroundProbe(rebuild: Bool) {
+        glassHost?.clearMaterializeBackgroundProbe()
+        if rebuild, let state {
+            glassHost?.rebuildGlass(with: state)
+        }
+    }
+
+    func configureSemanticTransitionProbe(
+        enabled: Bool,
+        presented: Bool
+    ) {
+        semanticHost?.configureTransitionProbe(
+            enabled: enabled,
+            presented: presented
+        )
+    }
+
+    func setSemanticTransitionPresented(
+        _ presented: Bool,
+        animationMode: GlassLabMaterializeAnimationMode,
+        linearDuration: Double
+    ) {
+        semanticHost?.setTransitionPresented(
+            presented,
+            animationMode: animationMode,
+            linearDuration: linearDuration
+        )
     }
 
     /// AppKit clears main-window participation while the application is
@@ -474,6 +672,7 @@ final class GlassLabTestWindowController {
         }
 
         newWindow.isReleasedWhenClosed = false
+        newWindow.appearance = state.testAppearance.nsAppearance
         let host = makeSurfaceHost(for: state)
         newWindow.contentView = host
         if let previousOrigin {

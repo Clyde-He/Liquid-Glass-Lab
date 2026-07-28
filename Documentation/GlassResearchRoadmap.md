@@ -36,7 +36,7 @@ work, not an optional refinement.
 | Priority | Track | Current state |
 |---|---|---|
 | P0 | AppKit observed-pass completeness and control | Regular/Clear target topology closed: all five passes have accepted controls; V14/V19 outlier-family audits remain separate |
-| P1 | Material Strength and system preset-curve research | Ready to start against the closed Regular/Clear target topology |
+| P1 | Material Strength and system preset-curve research | Regular/Clear curve closed numerically across the sampled environment matrix and rebuilt as a baseline-driven scalar; visual/perceptual validation remains |
 | P2 | Recipe-axis closure | Fixed macOS 26/27 products captured; targeted axes remain |
 | P3 | Pass injection/transplant | Deferred, high risk, not required for Override |
 | P4 | Broader SwiftUI private authoring | Role inventory and fixed-context trees complete |
@@ -367,6 +367,229 @@ named `scale`, `maxPointScale`, and `blurRadius`, plus `reduceMotion(_:)`.
 This is evidence for a coordinated preset endpoint/vector. It is not yet proof
 of a role-specific timing curve or of interpolation across Shader/SDF knobs.
 
+#### Initial contract findings — 2026-07-27
+
+The public/SDK inventory phase is complete:
+
+- the same `.materialize` value is the public transition for both insertion and
+  removal; there is no public `.dissolve` case;
+- Apple documents a content fade plus a Glass-material animation in or out,
+  with no geometry matching to another Glass effect;
+- Apple describes the material behavior as gradually introducing/removing
+  light bending and lensing, not merely fading the completed Glass surface;
+- local reflection finds a fixed private `materialize` kind with no reflected
+  caller payload; the public API exposes no duration, curve, blur, scale, or
+  per-channel controls;
+- the existing Semantic surface disables transaction animation, and its
+  snapshot captures model layers only. It cannot be used as the transition
+  recorder without a dedicated animated path and presentation-layer capture.
+
+These findings establish the API boundary, not the actual interpolation. In
+particular, they do not prove that outer transaction progress maps linearly to
+material progress, that removal reverses insertion, or that Regular and Clear
+share one preset.
+
+#### First runtime findings — 2026-07-27
+
+The dedicated Transition probe is implemented and fixed-context captures are
+complete for:
+
+- Main Off Regular and Clear: system-default insertion/removal and four-second
+  linear insertion/removal;
+- Main On Regular and Clear: four-second linear insertion/removal.
+
+The harness treats the selected Semantic page as Preview ownership rather than
+requiring a separate preparation step. Entering Transition mounts a fresh
+Presented Materialize surface; automated capture normalizes Panel,
+480×200@16, Margin 40, and the selected Main participation, then waits for the
+actual non-key Main state before sampling. Manual In/Out remains available in
+the current Preview context for qualitative inspection.
+
+The initial evidence changes the working model:
+
+1. Materialize is not an ordinary CAAnimation inventory. No attached
+   `CAAnimation` was present; SwiftUI updates model layer/filter values each
+   frame.
+2. A four-second linear outer transaction produces a scalar `g` that tracks
+   normalized transaction progress. Content opacity and
+   `glassBackground.inputFaceOpacity` equal `g`.
+3. The transition maps `g` across coordinated channels: nonuniform content
+   scale, temporary content Gaussian blur, base-background material values,
+   and a temporary foreground aberration/refraction pass.
+4. The normalized content and temporary-foreground mapping matches between
+   Regular and Clear, but the base-background endpoint is role-specific
+   (including Regular blur 4 plus bleed versus Clear blur 10 with no bleed).
+5. Topology changes during the transition: temporary `gaussianBlur` and
+   `glassForeground` filters exist only while materializing. The stable
+   endpoint retains `glassBackground` and `vibrantColorMatrix`.
+6. Explicit-linear removal drives the same vector from `g = 1` to `0`.
+   Against insertion samples indexed by observed `g`, the worst normalized
+   continuous-filter residual is approximately `0.11%` for Regular and `0.29%`
+   for Clear. Clear `inputBleedDarkenBlend` is a discrete Boolean edge.
+7. Existing NSGlass Regular/Clear `glassBackground` passes accept the shared
+   vector directly: Regular applies and reads back all 22 changing fields;
+   Clear applies and reads back all 23. Stable NSGlass lacks the temporary
+   content `gaussianBlur` and `glassForeground` passes.
+8. Main On preserves the same pass topology and still attaches no
+   `CAAnimation`, but it changes the endpoint rather than merely multiplying
+   the Main-Off vector. The changing `glassBackground` surface expands from
+   22 to 38 fields for Regular and from 23 to 33 for Clear. The key-fill Rim
+   owner gate also changes discretely from opacity 0 to 1 at the first active
+   frame and stays open; it is not driven continuously by `g`.
+
+This is direct evidence for a multi-channel material curve with role- and
+participation-specific endpoints, discrete context gates, and temporary passes.
+Hypothesis 1 is partially accepted for the outer timing-to-`g` relationship;
+hypothesis 2 is partially accepted for Regular/Clear's normalized mapping;
+hypothesis 3 is confirmed for endpoint vectors and participation gates;
+hypothesis 4 is accepted for uninterrupted Regular/Clear transitions in both
+measured participation states. Hypothesis 5 has no supporting evidence in
+these public roles. Reduced Motion research is intentionally omitted.
+
+#### Tint routing addendum — 2026-07-27
+
+The fixed-context Full Tint Study is complete for public Regular/Clear:
+28 AppKit static rows, 20 SwiftUI static rows, and 40 Materialize runs / 360
+samples across Main Off/On, nil, Coral 25/50/100%, Cyan 50%, and both
+directions.
+
+The result corrects the earlier assumption that Tint must modify one of the two
+common untinted matrices:
+
+1. Nonnil Tint inserts its own four-pass
+   `CASDFGradientEffect → vibrantColorMatrix → destIn → CASDFFillEffect`
+   branch. Nil and nonnil AppKit trees have five and nine passes respectively.
+2. The Tint matrix is identical between AppKit `tintColor` and SwiftUI public
+   `Glass.tint(_:)` for all 16 comparable nonnil endpoint rows. Regular and
+   Clear also share it under the same participation context.
+3. At settled endpoints, coefficient 18 equals requested alpha exactly. Main
+   Off suppresses Coral/Cyan hue into the same neutral matrix; Main On
+   resolves distinct hue coefficients.
+4. During explicit-linear Materialize, with
+   `g = glassBackground.inputFaceOpacity` and source alpha `a`,
+   `tintMatrix[18] = a × g²`. Across 256 tinted samples, maximum residual is
+   `9.50e-5` and RMS residual `2.13e-5`; a linear model misses by up to
+   `0.24979`.
+5. Non-alpha Tint coefficients remain at the static endpoint within
+   `7.45e-5`. The Tint `CASDFElementLayer` bounds follow
+   `480 + 16(1-g)` by `200 + 16(1-g)` within `8.0e-4` points.
+6. SwiftUI still uses model mutation rather than attached `CAAnimation`.
+   The Tint model branch follows insertion/removal lifecycle, while the
+   presentation branch appears only at settled insertion and preflight
+   removal.
+7. The proposed AppKit `_tintOpacityReduced` control is unavailable on this
+   runtime: neither guarded setter nor getter selector exists. Reduced-attempt
+   rows match their baselines because no write occurred, not because an
+   accepted flag was proven visually inert.
+
+Static Tint transplantation is therefore closed: set
+`NSGlassEffectView.tintColor`. The non-injecting AppKit Materialize probe now
+preserves that public Tint branch and applies `a × g²` only to matrix
+coefficient 18. Coral-50 readback matched at Regular Main Off `g = 1`, `0.5`,
+and approximately `0`, and at the `g = 1` endpoints for Regular Main On plus
+Clear Main Off/On. Complete equivalence still requires SwiftUI's branch
+lifecycle and changing SDF geometry.
+
+#### Full environment matrix and baseline-driven curve — 2026-07-27
+
+The 64-run fixed-geometry matrix (`Regular/Clear × Main Off/On × Aqua/DarkAqua
+× Light/Dark backdrop × nil/Coral-50 Tint × insertion/removal`, 576 samples on
+build `25G5065a`) captured every cell with no missing, duplicate, or
+context-rejected rows. It resolves the remaining environment questions:
+
+1. Backdrop luminance changes no model-side value at all: 32 compared pairs,
+   0 differing channels, maximum difference exactly 0. Backdrop is therefore
+   not an input to the curve. This is consistent with backdrop adaptation
+   living in the render server's `inputBackdropAware` matrix, which never
+   appears in model state. Only two controlled flat colors were sampled;
+   real desktop content and HDR extremes remain untested.
+2. Appearance does change endpoints: all 32 pairs differ across 20–23
+   channels, up to 1.482. The largest deltas are the Content/Rim
+   `vibrantColorMatrix` coefficients, which the Recipe resolves differently
+   per appearance rather than animating; the transition itself never moves
+   them.
+3. Normalized channel shapes agree across appearance within 5.1%, and every
+   one of the 40 worst channels falls in a single cell with a batch of purely
+   linear channels sharing an identical 0.0357 deviation — the signature of a
+   two-to-three frame sampling offset in a one-second transaction, not a
+   shape difference.
+4. Topology is identical across all 16 comparison groups.
+
+Endpoint parity with AppKit is exact: comparing the Tint Study's static
+NSGlass rows against Materialize at `g = 1` matched 56 of 56 fields across
+all four Regular/Clear × Main contexts, including `inputBleedAmount` 70,
+`inputBlurDistance0` −100, and `inputBleedBlurRadius` 140.
+
+That parity is what allows the probe to stop hard-coding endpoints. Each
+channel now resolves as `start + (endpoint − start) × shape(g)`, where the
+endpoint is captured from the live Recipe and `start` is the measured 0 or 1.
+Because the system already resolves endpoints for the current `shortSide`,
+appearance, Variant, and participation, those axes need no authored table.
+Fitting the 576 samples leaves only five dimensionless shapes:
+
+```text
+linear         g
+quadraticFlat  0.2g + 0.8g²          blur opacity 1/2, Main Off
+quadratic      0.4g + 0.6g²          blur opacity 1/2 Main On, and 3/4
+height         g + 0.08g(1 - g)      the shadow-height family
+clamp          (0.34g + 0.036g²) / 0.376   Clear's inputClamp
+```
+
+plus three context branches: the blur-opacity shape by participation, the
+`inputClamp` shape by Variant, and the `inputBleedDarkenBlend` step at
+`g = 0.5` for Clear in DarkAqua. Replaying the baseline form against all
+samples puts 41 of 42 channels within 0.1% (worst `inputClamp` at 0.104%)
+with zero `inputBleedDarkenBlend` mismatches — roughly a tenfold improvement
+over the hard-coded vector, which also carried a real defect: `inputMaxHeadroom`
+starts at 1, not 0, and the previous `9999g` form missed it by up to 1.66%.
+
+#### Geometry spot check — shapes are not size-invariant
+
+A 12-run sweep (`shortSide` 48/200/400 × Regular/Clear × Main Off/On, Aqua,
+Light backdrop, nil Tint, insertion) refutes the expectation that the shapes
+are size-invariant. Fitting `value(g) = endpoint · (g + c·g(1-g))` per channel
+per size returns a `c` that moves systematically:
+
+| shortSide | fitted `c` | `min(0.2 · S, 16)` |
+|---:|---:|---:|
+| 48 | 0.200 | 9.6 |
+| 200 | 0.080 | 16 |
+| 400 | 0.040 | 16 |
+
+The cause is directly observable rather than inferred. Materialize inflates the
+`CASDFElementLayer` short side by `min(0.2 · shortSide, 16)` points and retracts
+it linearly with `g`. Measured against that model the layer matches within
+0.05 pt at every sampled progress across all three sizes. As a fraction of the
+resting side the inflation is `min(0.2, 16 / shortSide)`, which is exactly the
+fitted `c`. The previously authored `height` constant `0.08` was never a shape
+constant — it is `16/200`, this effect projected onto the baseline geometry.
+
+Endpoints still need no authored table: they are read, and the sweep confirms
+the system resolves them correctly per size (`inputBleedAmount` 16.8/70/140 =
+`0.35 · shortSide`; `inputShadowHeight` 19.2/80/160 = `0.4 ·`). The sweep also
+surfaced endpoint behavior that the previous hard-coded form got wrong outright:
+`inputBlurRadius` is not a per-Variant constant but caps out, resolving 2/4/4
+for Regular Main Off and 5/10/10 for Clear Main Off.
+
+Making `height` take the inflation ratio drops the worst residual at
+`shortSide = 400` from 2.00% to 1.00% and reduces channels above 0.5% from 8 to
+1; at 48 the count falls from 12 to 5. The baseline geometry is unchanged at
+0.096%.
+
+The residual is a second-order consequence of the same effect: a channel that
+is capped tracks the cap instead of the inflating geometry, so it reads as
+linear, and which channels are capped depends on size. At `shortSide = 400`
+`inputBleedBlurRadius` caps at 160 and goes linear while the rest of its family
+stays quadratic; at 48 `inputShadowAmount` and both inner-refraction channels
+leave their caps and become quadratic. Resolving this exactly would require
+authoring a ratio and cap per channel — the table baseline capture was adopted
+to avoid — so it is deliberately left as a bounded error.
+
+All shapes remain strictly monotonic with exact 0 and 1 endpoints at every
+size (minimum slope 0.2), so the scalar stays well-behaved as a product control
+regardless of surface size. The known error is a mid-transition rate
+difference, never an endpoint or ordering error.
+
 Test these distinct hypotheses:
 
 1. Materialize is a fixed appearance endpoint and the surrounding SwiftUI
@@ -378,34 +601,85 @@ Test these distinct hypotheses:
 4. Removal is the exact reverse of insertion.
 5. Dissolve/removal uses a direction-specific sequence or different timing.
 6. Reduced Motion selects another preset rather than merely shortening the
-   animation.
+   animation. This hypothesis is intentionally out of the current product
+   scope.
 
 #### Capture protocol
 
 For a controlled SwiftUI host and fixed Shape, size, backdrop, appearance, and
 real window participation:
 
-1. Insert and remove one Glass child inside `GlassEffectContainer` using
+1. Use a dedicated transition probe. Keep the current static Semantic host's
+   animation suppression and snapshot contract unchanged.
+2. Insert and remove one Glass child inside `GlassEffectContainer` using
    `.materialize`.
-2. Capture the system-default transaction, then repeat with an explicit linear
+3. Capture the system-default transaction, then repeat with an explicit linear
    transaction to separate transition mapping from outer animation timing.
-3. Sample at normalized progress `0`, `0.125`, `0.25`, `0.5`, `0.75`, `0.875`,
+4. Sample at normalized progress `0`, `0.125`, `0.25`, `0.5`, `0.75`, `0.875`,
    and `1`, with additional samples around any pass pop-in or inflection.
-4. Record model and presentation layer trees, pass topology, every resolved
+5. Record model and presentation layer trees, pass topology, every resolved
    filter/effect value, layer gates, transforms, blur, attached CAAnimation
    key paths, duration, timing functions, and keyframes.
-5. Run insertion and removal independently; do not infer Dissolve by reversing
+6. Run insertion and removal independently; do not infer Dissolve by reversing
    Materialize samples.
-6. Repeat with Reduce Motion enabled and with interrupted/reversed transitions.
-7. Start with public Regular and Clear, then representative private roles whose
+7. Repeat with interrupted/reversed transitions if lifecycle behavior becomes
+   relevant; Reduced Motion is not required for this lane.
+8. Start with public Regular and Clear, then representative private roles whose
    resolved topologies differ: Regular, Menu, Camera, Siri, and a simple
    control/text role.
-8. Normalize each changing channel and classify it as global, role-specific,
+9. Normalize each changing channel and classify it as global, role-specific,
    direction-specific, gated, discrete, or unrelated to material strength.
 
 The output should distinguish an endpoint preset, a timing function, and a
 multi-channel material curve. Only the last category is a direct candidate for
 reuse; endpoint and timing evidence can still seed an AppKit curve.
+
+The sampled domain is Regular and Clear only, at a single fixed geometry, with
+both participation states, both appearances, both controlled backdrops, and
+insertion and removal captured separately. Explicit-linear direction symmetry
+is accepted for these two roles: continuous Main-On background channels reverse
+within approximately 1% sampling/interpolation residual, excluding Boolean
+edges and the endpoint-only Rim spread cleanup.
+
+The numeric side of this lane is now closed for that domain, and the geometry
+spot check above extends it to `shortSide` 48–400 with a bounded, documented
+residual. The next useful work is visual isolation across representative
+backdrops — no acceptance so far rests on anything but model readback, so the
+exit criteria covering perceived monotonicity and zero-endpoint residue are
+still entirely unevidenced. Interrupted reversal, non-Panel hosts, and private
+semantic roles remain deferred.
+
+#### NSGlass transplant boundary — 2026-07-27
+
+The Recipe `Materialize` page is a non-injecting compatibility probe. It
+automatically prepares its selected Main Off/On endpoint in the same
+Panel/480×200@16/Margin-40 context on entry and exposes a scrubbable `g` plus
+four-second Linear In/Out replay only after actual Main/Key participation
+settles. Main-On preparation pauses while the application is inactive and
+continues after activation, so inactive AppKit state cannot be mistaken for an
+accepted Main-Off endpoint.
+
+| SwiftUI Materialize contributor | NSGlass Regular/Clear status |
+|---|---|
+| `glassBackground` changing vector | Existing pass; every channel present in the captured baseline is scaled and read back. Main Off resolves 22 Regular / 23 Clear changing fields, Main On 38 / 33; these counts are now an observation about which endpoints differ from their start, not an authored per-context vector |
+| Whole-content opacity and X/Y scale | Available as an opt-in comparison envelope; excluded from material-only judgment by default |
+| Temporary content `gaussianBlur` | Absent; not injected |
+| Temporary `glassForeground` | Absent; not injected |
+| Untinted Content/Rim `vibrantColorMatrix` | Present but unchanged by the Tint-nil captured sequence; untouched |
+| Tint-owned `vibrantColorMatrix` | Static endpoint parity exact; AppKit replay writes coefficient 18 as `a × g²` with accepted model readback in Regular/Clear Main Off/On |
+| SDF Output and Main-Off Rim | Present but unchanged/gated; untouched |
+| Rim owner gate | Discrete: 0 at `g = 0`, the captured opacity above |
+
+This proves that the shared background portion can seed an AppKit Material
+Strength curve without topology changes. It does not prove complete visual
+equivalence to SwiftUI Materialize: the missing temporary blur/foreground
+passes account for appearance that cannot be reproduced by background knobs
+alone. Pass injection remains P3 rather than being smuggled into P1.
+
+Main Off and Main On no longer need separate authored paths. Participation
+selects the blur-opacity shape and opens the Rim gate, while every endpoint
+difference between the two — including the fields that only move under Main —
+arrives through the captured baseline.
 
 ### P1.2 — Required baselines
 

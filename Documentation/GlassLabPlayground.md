@@ -19,7 +19,8 @@ For prioritized unknowns and future experiments across both renderers, see
 | [GlassLabState.swift](../LiquidGlassLab/GlassLab/GlassLabState.swift) | Observable renderer, Recipe/Usage, geometry, participation, and Override state |
 | [GlassLabSurfaces.swift](../LiquidGlassLab/GlassLab/GlassLabSurfaces.swift) | AppKit Recipe and SwiftUI Semantic hosts, key/main transitions, lifecycle reconciliation |
 | [GlassLabTuning.swift](../LiquidGlassLab/GlassLab/GlassLabTuning.swift) | Guarded private access, capture/write paths, knob metadata and grouping |
-| [GlassLabSemantic.swift](../LiquidGlassLab/GlassLab/GlassLabSemantic.swift) | Runtime-gated SwiftUI `_Glass` Usage construction and read-only CA layer inspector |
+| [GlassLabSemantic.swift](../LiquidGlassLab/GlassLab/GlassLabSemantic.swift) | Runtime-gated SwiftUI `_Glass` Usage construction, static CA inspector, and Materialize time-series records |
+| [GlassLabTintStudy.swift](../LiquidGlassLab/GlassLab/GlassLabTintStudy.swift) | Deterministic Tint presets plus cross-renderer static and Materialize export models |
 | [GlassLabView.swift](../LiquidGlassLab/GlassLab/GlassLabView.swift) | Renderer/page controls, Inspectors, refresh scheduling, diagnostics and export |
 
 ## Two renderer spaces
@@ -202,17 +203,18 @@ The control window first selects `NSGlass` or `SwiftUI` in Navigation, then
 presents renderer-specific page controls so only the current task's controls
 are mounted:
 
-- Recipe: `General` and `Passes`;
-- Semantic Usage: `General` and `Layer Inspector`.
+- Recipe: `General`, `Passes`, `Materialize`, and `Tint`;
+- Semantic Usage: `General`, `Layer Inspector`, and `Transition`.
 
 Recipe General contains geometry, Recipe selectors, test-window context, and
 matrix export. Passes reuses the Recursive exporter traversal and mounts one
 selected live pass instance at a time without assuming a first Shader or Rim
-instance. `glassBackground`, both `vibrantColorMatrix` slots, key-fill
-highlight, and Output effects reuse their accepted editors inline; every other
-filter, compositing filter, or object-backed effect states its read-only
-contract inline until its mutation contract is accepted. The page is a single
-scroll with one selector: a two-row header
+instance. Recipe Materialize is the non-injecting SwiftUI-to-NSGlass shared-pass
+probe described below. `glassBackground`, both `vibrantColorMatrix` slots,
+key-fill highlight, and Output effects reuse their accepted editors inline;
+every other filter, compositing filter, or object-backed effect states its
+read-only contract inline until its mutation contract is accepted. The Passes
+page is a single scroll with one selector: a two-row header
 (the Pass Instance Picker with its live state, and one global Override
 toggle/Reset — identity rides in the row's hover help), then a `Controls`
 header above every accepted Glass, Matrix, Rim, or Output semantic group, each its
@@ -229,7 +231,10 @@ counts, signatures, report copying, and the raw recursive layer tree).
 Semantic General contains the named Usage, its runtime tag and availability,
 shared geometry, and the same controlled window context. Its Layer Inspector
 flattens the live SwiftUI/Core Animation composition and shows layer paths,
-CAFilter inputs, and object-backed SDF effect values.
+CAFilter inputs, and object-backed SDF effect values. Transition is a separate
+Regular/Clear Materialize probe; leaving it returns the host to the static,
+animation-suppressed contract. Recipe Tint owns the cross-renderer static and
+Materialize capture described below.
 
 The recursive Pass snapshot is sampled only while Passes is mounted so normal
 Slider and Override refreshes do not repeatedly read the complete property
@@ -449,6 +454,197 @@ The accepted macOS 27 fixture lives beside the Recipe baseline under
 `Golden/macOS-27`. The shared comparator identifies Semantic rows by
 their fixed environment plus `roleTag × requestedMain`, and expands nested
 arrays into individual layer/filter/effect fields for actionable OS diffs.
+
+### Semantic Materialize Transition probe
+
+The Semantic `Transition` page inserts or removes one Regular/Clear Glass child
+inside `GlassEffectContainer` using `.materialize`. It is intentionally
+separate from the Layer Inspector. `Semantic Page` is also the Preview's source
+of truth: General and Layer Inspector mount the static, animation-suppressed
+surface, while Transition mounts the dedicated Materialize surface. Switching
+between those page families replaces the Preview subtree, and entering
+Transition starts from the Presented endpoint instead of retaining a stale
+Transition view.
+
+Manual `Materialize In` / `Materialize Out` buttons compare the system-default
+outer transaction with a configurable long linear transaction in the current
+Preview context; they never rewrite Host, geometry, or Main participation.
+Automated Insertion and Removal captures own their reproducibility setup.
+`Capture Participation` selects Main Off or Main On, and starting a capture
+normalizes the target to Panel, 480×200@16, Margin 40, preserves the selected
+public material, and waits for requested and actual Main to match with actual
+Key false before sampling. A separate Prepare action is therefore unnecessary;
+capture buttons are unavailable only while another capture is running.
+
+Each capture contains nine samples: settled preflight, first post-trigger
+frame, normalized `0.125/0.25/0.5/0.75/0.875/1.0`, and a final settled
+endpoint. Every sample stores:
+
+- model and presentation layer/filter/effect snapshots;
+- structured geometry, opacity, transform, sublayer transform, masks, and
+  visibility for each layer;
+- recursively attached Core Animation metadata, including groups and property
+  animations.
+
+`Copy Capture Report` provides a compact topology/timing inventory.
+`Export Capture JSON` writes the complete reproducible payload. The current
+runtime exposes no attached `CAAnimation` during Materialize; the changing
+model payload is therefore part of the primary evidence, not merely an
+endpoint reference.
+
+### Full Tint study
+
+The Recipe `Tint` page runs one controlled document across both renderers
+instead of asking the operator to join unrelated exports:
+
+```text
+28 AppKit static rows
+20 SwiftUI static rows
+40 SwiftUI Materialize runs / 360 samples
+```
+
+The fixed context is Panel, 480×200@16, Margin 40, Adaptive Appearance 2,
+Subvariant nil, Subdued/Scrim/Override Off, actual Key false, and requested
+Main Off/On validated before every row. Static cases use nil, sRGB Coral at
+25/50/100%, and sRGB Cyan at 50%. The AppKit lane also records nil and
+Coral-50 Reduced capability attempts. The Materialize lane uses explicit
+Linear one-second insertion/removal for both public roles, both Main states,
+and the five non-Reduced tint cases.
+
+`Capture Full Tint Study` owns the complete context setup and restores the
+previous Recipe/Semantic page, window, material, Tint, and transition state.
+It pauses while the app is inactive; there is no separate Prepare action. The
+status must finish at 28/20/40/360 before `Export Study JSON` is treated as
+accepted evidence.
+
+Every AppKit row stores:
+
+- requested Tint plus public `tintColor` getter readback;
+- Reduced setter/getter selector availability and optional getter readback;
+- complete model and presentation recursive pass trees;
+- layer opacity, background, border, shadow, and readable private color state.
+
+Every SwiftUI row/sample stores the complete filter/effect tree and structured
+layer geometry. Color matrices are serialized as all 20 float coefficients
+plus SHA-256, not the abbreviated `NSValue.description`; this is required to
+identify the Tint-owned coefficient independently from the Content and Rim
+matrices.
+
+The export can be checked without loading its multi-megabyte tree manually:
+
+```sh
+node Golden/analyze-tint-study.mjs /path/to/glass-tint-study.json
+```
+
+The analyzer validates coverage, static AppKit/SwiftUI parity, Tint alpha
+routing, Main-Off hue behavior, Reduced capability/equality, attached
+animations, the Materialize `a × g²` fit, branch lifecycle, and Tint SDF bounds.
+The measured interpretation belongs in
+`SwiftUIGlassReverseEngineering.md`; this page documents the reproducible
+instrument contract.
+
+### Full P1 Materialize environment matrix
+
+The Semantic `Transition` page also owns `Capture Full P1 Matrix (64 Runs)`,
+which sweeps `Regular/Clear × Main Off/On × Aqua/DarkAqua × Light/Dark backdrop
+× nil/Coral-50 Tint × insertion/removal` with a one-second linear transaction.
+Like the Tint study it owns its own context setup and restores the previous
+page, window, material, Tint, and transition state afterwards. Every run keeps
+the test window non-key and verifies both its requested Main participation and
+its effective appearance before sampling, so an unsettled context is rejected
+rather than recorded.
+
+The status must reach 64 transitions / 576 samples before `Export Study JSON`
+counts as evidence. Analyze the export with:
+
+```sh
+node Golden/analyze-materialize-environment-study.mjs /path/to/glass-materialize-p1-matrix.json
+```
+
+The analyzer validates dimensional coverage (missing, duplicate, and
+context-rejected cells), then reports topology stability, model-endpoint
+sensitivity separated by appearance and backdrop axis, normalized
+interpolation agreement per channel, and the Tint `a × g²` residual per
+environment. It exits nonzero on any coverage failure.
+
+### Materialize geometry spot check
+
+The geometry sweep is the one study without a button, because it is the only
+one that needs to change the surface size mid-run. It sweeps `shortSide`
+48/200/400 against Regular/Clear and both participation states, holding
+appearance, backdrop, Tint, and direction fixed, and runs unattended:
+
+```sh
+LiquidGlassLab.app/Contents/MacOS/LiquidGlassLab \
+  --capture-size-study /path/to/glass-materialize-size-study.json
+```
+
+The app still needs a real login session and comes to the foreground, because
+Main-On participation is genuine AppKit window state; the flag only removes the
+button press and the save panel. Since the app is sandboxed, an arbitrary
+destination usually fails, and the capture falls back to the container's
+temporary directory — the resolved path is printed on stderr. Window padding
+stays at the baseline 40 instead of tracking `0.35 · shortSide`, which
+under-insets the largest surface visually but leaves model values, the only
+thing this study reads, unaffected.
+
+### NSGlass Materialize background transplant
+
+The Recipe `Materialize` page answers a narrower question than the Semantic
+capture: which already-present NSGlass fields can accept the measured SwiftUI
+curve without injecting another pass?
+
+`Participation` selects a distinct Main Off or Main On transplant.
+Entering Recipe Materialize—or changing its Regular/Clear endpoint or
+Participation—automatically establishes Variant 1 or 2 in the matching Panel,
+480×200@16, Margin-40 context with actual Key Off and no Subvariant, Subdued,
+Scrim, Reduced Tint, or Override while preserving the selected public Tint.
+Controls remain unavailable until requested and actual Main match and, for a
+nonnil Tint, its branch has resolved. A Main-On preparation remains pending
+while the application is inactive and resumes automatically on activation
+instead of accepting a false Main-Off context. The `Materialize g` slider and
+four-second Linear In/Out buttons then stamp the observed vector onto the
+existing `glassBackground` filter. `Tint Endpoint`, `Coral 50%`, and
+`Clear Tint` expose the separate Tint lane. Every write is followed by model
+readback:
+
+- Main Off Regular requests 22 fields and reads back `22/22`;
+- Main Off Clear requests 23 fields and reads back `23/23`;
+- Main On Regular requests 38 fields plus the Rim gate and reads back
+  `38/38 + 1/1`;
+- Main On Clear requests 33 fields plus the Rim gate and reads back
+  `33/33 + 1/1`;
+- when Tint is nonnil, the probe locates the `vibrantColorMatrix` sharing the
+  `CASDFGradientEffect` owner path, writes only coefficient 18 as
+  `sourceAlpha × g²`, and reads it back.
+
+Those field counts describe how many endpoints actually differ from their
+start in each context; they are no longer an authored per-context vector. The
+probe captures the live Recipe's endpoints on a pristine tree and resolves each
+channel as `start + (endpoint − start) × shape(g)`, so size, appearance,
+Variant, and participation all arrive through the capture. Only five
+dimensionless shapes and three context branches remain authored — see the P1.1
+matrix section of the research roadmap. The baseline is recaptured whenever
+AppKit hands back a pristine tree, which is what lets a resize or appearance
+change move the endpoints without leaving the page.
+
+The optional `Include View Envelope` switch also applies the observed opacity
+and nonuniform X/Y scale. It defaults Off because final whole-view opacity is
+not evidence that an underlying material pass was reproduced.
+
+The page makes the topology boundary explicit. Stable Regular/Clear NSGlass
+does not contain the temporary content `gaussianBlur` or `glassForeground`
+filters used by SwiftUI Materialize, so the probe does not invent them.
+The untinted Content/Rim matrices and SDF Output remain untouched. The Tint
+matrix exists only after public `tintColor` creates its branch; its alpha
+coefficient is accepted for Regular/Clear Main Off/On. Main-Off Rim remains
+system-gated; Main-On stamps only its measured discrete owner opacity:
+`0` at `g = 0`, then `1` for every active `g > 0`. The key/fill spread
+endpoint cleanup remains outside the transplant because it is not a continuous
+material-strength channel and the AppKit effect owns a different stable
+baseline.
+Leaving the page or changing the endpoint clears the probe and reconstructs a
+fresh Recipe tree.
 
 ### Export Recipe Matrix
 
