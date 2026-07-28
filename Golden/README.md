@@ -63,20 +63,21 @@ static sweeps may not record appearance, and the SwiftUI Materialize sweep has
 no Subdued concept. Recording those as null is what makes a learning that needs
 them skip loudly instead of passing by luck.
 
-The sections currently committed under `macOS-26/` are a direct
-**canonical** capture from the Lab exporter. The `macOS-27/` sections remain
-**derived**, transcoded from the per-study fixtures by
+The sections committed under **both** `macOS-26/` and `macOS-27/` are now direct
+**canonical** captures from the Lab exporter — 744 static-scalar rows, 378
+static-tree rows, and 104 dynamic runs each. `unify.mjs` remains in the tree
+because it is how a per-study fixture set is bridged into the unified contract
+on a system the exporter has not yet run on:
 
 ```sh
-node Golden/tools/unify.mjs macOS-27
-node Golden/tools/unify.mjs macOS-27 --dry-run
+node Golden/tools/unify.mjs <os-directory> --dry-run
+node Golden/tools/unify.mjs <os-directory>
 ```
 
-Regenerate the macOS 27 bridge whenever a source fixture changes;
-`verify.mjs` fails on a stale checksum. Unified sections are committed so a
-fresh clone can verify without a build step. The direct exporter writes the
-same compact contract without the presentation tree, structured layer
-dictionaries, or animation branch, none of which any accepted learning reads.
+Nothing in the archive is transcoded today. Unified sections are committed so a
+fresh clone can verify without a build step. The exporter writes the compact
+contract without the presentation tree, structured layer dictionaries, or
+animation branch, none of which any accepted learning reads.
 
 Every OS directory contains a `manifest.json` describing the default OS build
 and capture date, capture conditions, fixture schemas, entry counts, and
@@ -90,6 +91,14 @@ Two manifest fields carry weight:
   recursive-pass-audit fixtures captured on `26A5388g` and the rest on
   `26A5378n`. `verify.mjs` fails when a fixture's embedded OS string disagrees
   with the entry filing it, so this cannot drift silently again.
+- **`unifiedPlatform`** declares the build the `unified/` sections must carry,
+  separately from `platform`, because a direct capture legitimately comes from a
+  newer build than the source fixtures filed beside it — `macOS-27/` holds
+  `26A5378n` fixtures under a `26A5388g` unified capture. `verify.mjs` fails when
+  `unified/meta.json` disagrees, and the learnings are labelled with *this*
+  build, since they read the unified sections and nothing else. Without it a
+  unified archive dropped in from the wrong build verified fully green: the
+  section checksums only prove each file matches its own meta entry.
 - **`role`** separates `canonical` evidence from a `control` (a repeat or
   contrast kept as provenance) and from `derived` output computed off other
   fixtures. Only canonical fixtures should be cited as a result.

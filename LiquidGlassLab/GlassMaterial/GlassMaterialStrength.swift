@@ -36,7 +36,16 @@ import AppKit
 ///
 /// Mid-transition accuracy degrades away from a ~200pt short side, bounded by
 /// `min(5%, 4 / shortSide)` for every channel at or above 200pt on both systems.
-/// Endpoints stay exact and the curve stays strictly monotonic at every size.
+/// Endpoints stay exact at every size.
+///
+/// Every channel is monotonic in `value` on macOS 26. On macOS 27 one is not, by
+/// measurement rather than by choice: `inputBlurOpacity0` resolves to
+/// `g · (1 - (1 - endpoint)g)`, whose derivative vanishes at
+/// `g = 1 / (2(1 - endpoint))`, so it rises and falls inside `0...1` for any
+/// endpoint below 0.5 — including the flat zero Regular resolves below a 64pt
+/// short side. This reproduces what the system does; suppressing it would trade
+/// a measured behaviour for a tidier invariant. The visible result is a brief
+/// backdrop blur on a small glass part-way through, which is what AppKit shows.
 ///
 /// One measured exception remains, and it is **macOS 26 only**. Below 200pt the
 /// bound holds for everything except two face color-grade channels while fading

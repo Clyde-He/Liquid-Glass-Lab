@@ -8,7 +8,7 @@
 // They receive every loaded OS archive at once, keyed by directory name, and
 // pair rows by the unified cell coordinate.
 
-import { ALL_CHANNELS, numeric } from "../tools/lib/golden.mjs";
+import { ALL_CHANNELS, glassBackground, numeric } from "../tools/lib/golden.mjs";
 import { cellKey } from "../tools/lib/cell.mjs";
 
 /** Ordered OS directories that have the given section. */
@@ -127,10 +127,12 @@ export default [
     kind: "cross-version",
     claim:
       "No channel the table classifies has disappeared, so the abstraction "
-      + "still resolves on the newer OS. It is not complete, though: macOS 27 "
-      + "exposes 22 glassBackground inputs macOS 26 has no name for, none of "
-      + "them classified. Whether that is a hole depends on whether any of them "
-      + "animates, which needs a dynamic capture on 27",
+      + "still resolves on the newer OS. macOS 27 exposes 22 glassBackground "
+      + "inputs macOS 26 has no name for; 17 animate and are classified. The "
+      + "remainder splits two ways, and the split matters: an input observed "
+      + "holding one value through every transition is verified static, while "
+      + "one the dynamic section never resolves at all is simply untested. "
+      + "Reporting both as 'unclassified' would hide the second behind the first",
     source: "GlassResearchRoadmap.md — P1.2 macOS 27 bring-up",
     verify({ archives, expect }) {
       const versions = versionsWith(archives, "static-tree");
@@ -158,8 +160,8 @@ export default [
       expect.ok(
         true,
         `inputs new on ${newest.name} versus ${oldest.name}`,
-        `${added.length} added, ${unclassified.length} unclassified: `
-          + `${unclassified.slice(0, 6).join(", ")}${unclassified.length > 6 ? ", …" : ""}`
+        `${added.length} added, ${added.length - unclassified.length} classified, `
+          + `${unclassified.length} not`
       );
 
       const dynamicVersions = versionsWith(archives, "dynamic").map((v) => v.name);
@@ -170,6 +172,55 @@ export default [
           + `either confirms they are static or names the channels to classify`
         );
       }
+
+      // With a dynamic section present, every unclassified input falls into one
+      // of two buckets, and conflating them is how an untested input passes for
+      // a verified-static one.
+      const dynamic = archives.get(newest.name).dynamic;
+      const observed = new Map();
+      for (const run of dynamic.runs ?? []) {
+        for (const sample of run.samples ?? []) {
+          const inputs = glassBackground(sample)?.inputs ?? {};
+          for (const key of unclassified) {
+            const value = numeric(inputs[key]);
+            if (value === null) continue;
+            if (!observed.has(key)) observed.set(key, new Set());
+            observed.get(key).add(value.toFixed(6));
+          }
+        }
+      }
+      const observedStatic = unclassified.filter((key) => observed.has(key));
+      const neverExercised = unclassified.filter((key) => !observed.has(key));
+
+      // An input the dynamic section does resolve must hold exactly one value
+      // for "static" to mean anything. If one starts moving, this fails here
+      // rather than being absorbed into a report.
+      const moving = observedStatic.filter((key) => observed.get(key).size > 1);
+      expect.equal(
+        moving.join(",") || "none",
+        "none",
+        "unclassified inputs that move during a transition"
+      );
+      expect.ok(
+        true,
+        "unclassified but observed static through every transition",
+        observedStatic.length === 0
+          ? "none"
+          : observedStatic
+            .map((key) => `${key}=${[...observed.get(key)][0]}`)
+            .join(", ")
+      );
+
+      // The honest gap. These resolve no value anywhere in the dynamic section,
+      // so nothing has exercised them — they are untested, not static. The
+      // dynamic section covers Regular and Clear at nil subvariant, which is the
+      // whole public SwiftUI surface, so reaching these needs a different
+      // capture rather than a wider sweep of the existing one.
+      expect.ok(
+        true,
+        "unclassified and never resolved by any transition — untested, not static",
+        neverExercised.length === 0 ? "none" : neverExercised.join(", ")
+      );
     },
   },
 

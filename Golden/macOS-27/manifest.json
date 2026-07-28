@@ -7,6 +7,12 @@
     "build": "26A5378n",
     "architecture": "arm64"
   },
+  "unifiedPlatform": {
+    "product": "macOS",
+    "version": "27.0",
+    "build": "26A5388g",
+    "architecture": "arm64"
+  },
   "capturedAt": "2026-07-20",
   "fixtures": [
     {
@@ -52,7 +58,7 @@
         "overridesEnabled": false
       },
       "notes": [
-        "Canonical active-session Main \u00d7 Subdued \u00d7 Variant \u00d7 Subvariant \u00d7 representative-Height sweep.",
+        "Canonical active-session Main × Subdued × Variant × Subvariant × representative-Height sweep.",
         "Validated as 1,008 unique rows: every row appActive=true and actual key=false; requested and actual Main match in all rows.",
         "inputMaxHeadroom is retained raw but classified as display/runtime-volatile by compare.mjs after same-build captures changed from the 9999 sentinel to 1.2 while every other comparable Shader, Rim, and geometry value remained stable."
       ],

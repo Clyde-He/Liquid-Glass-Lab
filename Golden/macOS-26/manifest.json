@@ -7,6 +7,12 @@
     "build": "25G5065a",
     "architecture": "arm64"
   },
+  "unifiedPlatform": {
+    "product": "macOS",
+    "version": "26.6",
+    "build": "25G5065a",
+    "architecture": "arm64"
+  },
   "capturedAt": "2026-07-21",
   "fixtures": [
     {
@@ -53,7 +59,7 @@
         "overridesEnabled": false
       },
       "notes": [
-        "Canonical active-session Main \u00d7 Subdued \u00d7 Variant \u00d7 Subvariant \u00d7 representative-Height sweep.",
+        "Canonical active-session Main × Subdued × Variant × Subvariant × representative-Height sweep.",
         "Captured at 2026-07-21T07:59:51Z and validated as 1,008 unique rows.",
         "Every row is appActive=true and actual key=false; requested and actual Main match.",
         "inputMaxHeadroom is retained raw and classified as display/runtime-volatile by compare.mjs."
@@ -131,7 +137,7 @@
         ],
         "tint": [
           "None",
-          "Coral \u00b7 50%"
+          "Coral · 50%"
         ],
         "direction": [
           "Insertion",

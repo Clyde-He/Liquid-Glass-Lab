@@ -36,7 +36,7 @@ work, not an optional refinement.
 | Priority | Track | Current state |
 |---|---|---|
 | P0 | AppKit observed-pass completeness and control | Regular/Clear target topology closed: all five passes have accepted controls; V14/V19 outlier-family audits remain separate |
-| P1 | Material Strength and system preset-curve research | Regular/Clear curve closed on macOS 26: baseline-driven scalar, environment and geometry matrices accepted, author visual acceptance and resize reconstruction passed. P1.4 cost and the reduced macOS 27 set remain |
+| P1 | Material Strength and system preset-curve research | Regular/Clear curve closed on **macOS 26 and 27** from one table with no version branch: baseline-driven scalar, environment and geometry matrices accepted on both, author visual acceptance and resize reconstruction passed. macOS 27's 22 new inputs are classified — 17 animate, all linear in face progress. P1.4 cost is the only open exit criterion |
 | P2 | Recipe-axis closure | Fixed macOS 26/27 products captured; targeted axes remain |
 | P3 | Pass injection/transplant | Deferred, high risk, not required for Override |
 | P4 | Broader SwiftUI private authoring | Role inventory and fixed-context trees complete |
@@ -599,6 +599,12 @@ grades, so a single read baseline cannot reproduce those two channels. At
 bound, and the scalar remains monotonic; exact compact removal requires a
 future dual-endpoint face-grade model.
 
+**This is macOS 26 only.** The direct macOS 27 capture resolves one endpoint at
+48, 200, and 400pt, so no dual-endpoint model is needed there. macOS 27 does
+break monotonicity on one channel, for an unrelated and fully modelled reason:
+its size-gated `inputBlurOpacity0` resolves `g · (1 - (1 - endpoint)g)`, which
+turns inside `0...1` whenever the endpoint is below 0.5.
+
 Test these distinct hypotheses:
 
 1. Materialize is a fixed appearance endpoint and the surrounding SwiftUI
@@ -726,6 +732,43 @@ names exactly that. When the capture lands it either confirms all 22 are static
 or names the channels to classify — which is the whole reduced set, expressed as
 a test rather than a note.
 
+#### Settled by the direct macOS 27 capture — 2026-07-28
+
+The capture landed and **17 of the 22 animate**, so the omission was real: left
+untracked, a glass held at `G = 0.3` would have rendered with a full-strength
+ring shadow and blur fill. All 17 are now in the table.
+
+Classifying them was cheaper than expected. Every one is linear in face
+progress — normalized against its own start, each traces the `inputFaceOpacity`
+profile to within 1e-3 across 52 insertion runs — so no new shape was needed,
+only new start values, three of which are neither 0 nor 1 (`0.4`, `-0.25`,
+`1.309`). An earlier reading that `clamp` fit better on mean error was wrong: the
+systematic offset it captured is the sampling lag every channel shares.
+
+macOS 27's one genuine non-linearity is elsewhere, on a channel that already
+existed. `inputBlurOpacity0` is gated off below a 64pt short side and ramps to
+0.8 by 160pt, and mid-transition it overshoots its gated endpoint by exactly the
+amount that endpoint falls short of full opacity:
+
+```text
+value(g) = endpoint·g + (1 - endpoint)·g(1 - g)
+```
+
+The coefficient on the deficit is 1 — nothing fitted. Worst absolute error
+0.00008 over 448 samples, against 0.24980 for a plain linear ramp. The term is
+self-cancelling where it should be: Clear resolves an endpoint of 1 on both
+systems, as does Regular at every size on macOS 26, so `(1 - endpoint)` is zero
+and it reduces to the ramp measured there. One table, both systems, no version
+branch and no variant branch.
+
+One residual is accepted rather than modelled: `inputBlurOpacity1` humps in the
+same basis but needs a coefficient per participation whose derivation is not
+understood, and at 48pt under Main its endpoint is zero, so the controller emits
+a flat zero while the system reaches 0.05. That is the largest remaining
+deviation on macOS 27. It carries an explicit ceiling in
+`gated-blur-overshoots-by-its-saturation-deficit` — reporting the number without
+bounding it would have let a future regression from 0.05 to 0.5 print green.
+
 ### P1.3 — Curve construction
 
 Sample at minimum `0`, `0.125`, `0.25`, `0.5`, `0.75`, and `1`. For every point:
@@ -747,6 +790,10 @@ and against whole-view `alphaValue`, and accepted both:
 
 - perceived strength is monotonic, with no pass pop-in, hue shift, or
   intermediate discontinuity;
+  - this was reviewed on **macOS 26**, where every raw channel is monotonic too.
+    macOS 27's size-gated `inputBlurOpacity0` is not, by measurement, so the
+    perceived-monotonicity acceptance does not carry over to a small glass on 27
+    and needs a fresh review there;
 - `g = 0` leaves no residual tint, blur, refraction, shadow, or halo;
 - intermediate values stay recognizably Glass rather than reading as a faded
   composite, which is the behavior `alphaValue` cannot produce.
@@ -845,9 +892,11 @@ Two follow-ups came out of it, both now specified in
   subtree first. The harness implements that lifecycle and takes the removal
   preflight from the same animation-endpoint-plus-100-ms observation as an
   insertion run; it deliberately does not run the later long-lived Recipe
-  stability wait. The checked-in archive still predates that harness change, so
-  its divergence figures continue to describe the long-lived path until the
-  dynamic section is recaptured. A dedicated 48pt regression now compares the
+  stability wait. **Both archives have since been recaptured under that
+  lifecycle**, so the committed dynamic sections record real removal starts and
+  the divergence figures above describe the current harness. macOS 26 still shows
+  the three-channel 48pt divergence; macOS 27 shows none at any captured size.
+  A dedicated 48pt regression now compares the
   insertion endpoint, the directly-presented endpoint, and the removal
   preflight for Regular/Clear × Main Off/On. Two consecutive macOS 26.6 runs
   passed all four cells. They also exposed small terminal jitter between

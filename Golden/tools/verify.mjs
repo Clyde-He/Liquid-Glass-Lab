@@ -90,6 +90,33 @@ async function checkIntegrity(osDirectory) {
     const meta = JSON.parse(
       await readFile(path.join(unifiedDirectory, "meta.json"), "utf8")
     );
+
+    // The learnings read the unified sections, not the source fixtures, so the
+    // build that matters for every reported result is this one. It is declared
+    // separately from `platform` because a direct capture legitimately comes
+    // from a newer build than the per-study fixtures filed beside it — macOS 27
+    // holds 26A5378n source fixtures under a 26A5388g unified capture. Without
+    // this check a unified archive dropped in from the wrong build verifies
+    // fully green, since the section checksums only prove the files match their
+    // own meta entry.
+    const unifiedBuild = buildOf(meta);
+    const declaredUnified = manifest.unifiedPlatform?.build ?? null;
+    if (declaredUnified === null) {
+      problems.push(
+        "manifest.json: no unifiedPlatform.build — declare the build the "
+        + "unified sections must carry"
+      );
+    } else if (unifiedBuild === null) {
+      problems.push(
+        "unified/meta.json: no parseable operatingSystem build — recapture"
+      );
+    } else if (unifiedBuild !== declaredUnified) {
+      problems.push(
+        `unified/meta.json: captured on build ${unifiedBuild} but the manifest `
+        + `declares ${declaredUnified} — recapture or correct the manifest`
+      );
+    }
+
     for (const [name, entry] of Object.entries(meta.sections ?? {})) {
       unifiedCount += 1;
       try {
@@ -216,10 +243,13 @@ console.log(`\n${paint(DIM, "Learnings")}`);
 
 for (const osDirectory of targets) {
   const manifest = manifests.get(osDirectory);
-  const platform = manifest.platform ?? {};
+  // Label the results with the build the learnings actually read. They run on
+  // the unified sections, which can come from a newer build than the source
+  // fixtures `platform` describes.
+  const platform = manifest.unifiedPlatform ?? manifest.platform ?? {};
   console.log(
     `\n  ${osDirectory} `
-    + paint(DIM, `(${platform.version ?? "?"} / ${platform.build ?? "?"})`)
+    + paint(DIM, `(${platform.version ?? "?"} / ${platform.build ?? "?"} unified)`)
   );
   const sections = archives.get(osDirectory);
 

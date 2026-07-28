@@ -10,7 +10,7 @@
 
 import {
   ALL_CHANNELS, channelTable, endpointSample, geometryInflation, glassBackground,
-  numeric, progressOf, resolveChannel, tintComponents,
+  numeric, progressOf, resolveChannel, SHAPES, tintComponents,
 } from "../tools/lib/golden.mjs";
 import { CELL_FIELDS, cellKey, isClearCell } from "../tools/lib/cell.mjs";
 
@@ -442,23 +442,42 @@ export default [
         );
       }
 
-      // Reported, not asserted. An inert channel is excluded from the bound
-      // above; naming it and its worst excursion is what keeps that exclusion
-      // from behaving like the `ok(true, "not present here")` escape hatches
-      // this suite was built to remove.
-      const transients = [...inertTransients]
-        .filter(([, item]) => item.amplitude > 1e-6)
-        .sort((a, b) => b[1].amplitude - a[1].amplitude);
+      // An inert channel is excluded from the bound above, so its excursion has
+      // to be bounded here or the exclusion becomes the `ok(true, "not present
+      // here")` escape hatch this suite was built to remove. Reporting the
+      // amplitude is not enough: a residual that grows from 0.05 to 0.5 would
+      // still print green.
+      //
+      // Measured across both systems, every inert channel sits at *exactly* its
+      // constant — 40 of them on macOS 27 — with one exception. Asserting exact
+      // zero rather than pooling them under one loose ceiling is what keeps a
+      // second channel from quietly starting to move.
+      const OWNED_ELSEWHERE = new Set([
+        // inputBlurOpacity1 humps to 0.05 at shortSide 48 under Main on macOS
+        // 27, off a zero endpoint. Bounded by
+        // `gated-blur-overshoots-by-its-saturation-deficit`, which owns the
+        // whole channel rather than only its inert cells.
+        "inputBlurOpacity1",
+      ]);
+      const strict = [...inertTransients]
+        .filter(([key]) => !OWNED_ELSEWHERE.has(key))
+        .map(([key, item]) => ({ key, ...item }));
+      if (strict.length > 0) {
+        expect.maxBelow(
+          strict,
+          (item) => item.amplitude,
+          1e-6,
+          "worst excursion of an inert channel off its constant"
+        );
+      }
+      const delegated = [...inertTransients]
+        .filter(([key]) => OWNED_ELSEWHERE.has(key))
+        .map(([key, item]) => `${key} lifts ${item.amplitude.toFixed(4)} off `
+          + `${item.start} at shortSide ${item.short}`);
       expect.ok(
         true,
-        "inert channels excluded (endpoint equals start)",
-        transients.length === 0
-          ? `${inertTransients.size} inert, none with a transient`
-          : transients
-            .map(([key, item]) =>
-              `${key} lifts ${item.amplitude.toFixed(4)} off ${item.start} `
-              + `at shortSide ${item.short}`)
-            .join("; ")
+        "inert channels bounded elsewhere",
+        delegated.length === 0 ? "none" : delegated.join("; ")
       );
     },
   },
@@ -702,15 +721,40 @@ export default [
           : `worst ${worstOf(saturated).toExponential(2)} over ${saturated.length} samples`
       );
 
-      // Reported, not asserted. inputBlurOpacity1 carries a hump in the same
-      // basis, but its coefficient is 0.2 without Main and 1/15 with it — two
-      // fitted constants whose derivation is not understood, against a worst
-      // error of 0.05 that already sits inside the replay bound. Named here so
-      // it is on the record rather than rediscovered.
-      expect.ok(
-        true,
-        "a smaller unmodelled hump on inputBlurOpacity1",
-        "coefficient 0.2 without Main, 1/15 with it; worst 0.05, left linear"
+      // inputBlurOpacity1 carries a hump in the same basis, and it is left
+      // unmodelled: its amplitude needs a coefficient per participation whose
+      // derivation is not understood, and it does not collapse onto the
+      // saturation deficit the way inputBlurOpacity0 does. Leaving it linear is
+      // a decision; leaving it unbounded would not be. At shortSide 48 under
+      // Main its endpoint is zero, so the controller emits a flat zero while the
+      // system humps to 0.05 — the single largest residual on macOS 27, and the
+      // reason `curve-replays-from-read-endpoints` delegates the channel here
+      // instead of pooling it with the genuinely motionless inert channels.
+      const secondary = [];
+      for (const run of runs) {
+        if (run.cell.tint !== "None") continue;
+        const end = numeric(endpointInputs(run)?.inputBlurOpacity1);
+        if (end === null) continue;
+        const main = run.cell.main === true;
+        const shape = main ? SHAPES.quadratic : SHAPES.quadraticFlat;
+        for (const sample of run.samples ?? []) {
+          const value = numeric(glassBackground(sample)?.inputs?.inputBlurOpacity1);
+          const g = progressOf(sample);
+          if (value === null || g === null) continue;
+          secondary.push({
+            residual: Math.abs(value - end * shape(g)),
+            g: Number(g.toFixed(2)),
+            end,
+            short: run.cell.shortSide,
+          });
+        }
+      }
+      expect.requireSamples(secondary.length, 100, "inputBlurOpacity1 samples");
+      expect.maxBelow(
+        secondary,
+        (item) => item.residual,
+        0.06,
+        "accepted residual on the unmodelled inputBlurOpacity1 hump"
       );
     },
   },
