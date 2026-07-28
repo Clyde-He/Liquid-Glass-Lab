@@ -19,17 +19,27 @@ version:
 
 ```text
 Golden/
+  learnings/    executable assertions, one file per fixture family
+  tools/        verifier, comparator, and per-study analyzers
   macOS-26/
   macOS-27/
 ```
 
-Every directory contains a `manifest.json` describing the default OS build and
-capture date, capture conditions, fixture schemas, entry counts, and SHA-256
-checksums. Fixture-level `platform` and `capturedAt` fields override those
-defaults when a later seed is captured without relabelling older fixtures in
-the same major-version directory. A new capture should replace a Golden only
-after its focus/activation conditions and Cartesian-product coverage have been
-accepted.
+Every OS directory contains a `manifest.json` describing the default OS build
+and capture date, capture conditions, fixture schemas, entry counts, and
+SHA-256 checksums. A new capture should replace a Golden only after its
+focus/activation conditions and Cartesian-product coverage have been accepted.
+
+Two manifest fields carry weight:
+
+- **`platform`** may be set per fixture, overriding the directory default. This
+  is not cosmetic — `macOS-27/` genuinely holds two builds, with the three
+  recursive-pass-audit fixtures captured on `26A5388g` and the rest on
+  `26A5378n`. `verify.mjs` fails when a fixture's embedded OS string disagrees
+  with the entry filing it, so this cannot drift silently again.
+- **`role`** separates `canonical` evidence from a `control` (a repeat or
+  contrast kept as provenance) and from `derived` output computed off other
+  fixtures. Only canonical fixtures should be cited as a result.
 
 The current macOS 27 directory contains:
 
@@ -66,12 +76,41 @@ they cover only Variants 1 and 2 with a nil subvariant, in exchange for
 appearance, backdrop, Tint, direction, and progress axes the static sweeps do
 not have.
 
+## Verifying the archive
+
+One command checks file integrity and then re-derives every accepted learning
+from the fixtures:
+
+```sh
+node Golden/tools/verify.mjs
+```
+
+Integrity covers checksums, unregistered files, and fixtures whose embedded OS
+build disagrees with the manifest entry filing them. Learnings live in
+`Golden/learnings/` — each one is a finding from `Documentation/` written as an
+executable assertion, naming the claim it encodes and the document it came from.
+
+A learning is **skipped**, not failed, when an OS directory lacks the fixture it
+needs. That is the intended workflow for bringing up a new OS: capture fixtures
+until the skips turn into passes, and the run tells you which are left.
+
+```sh
+node Golden/tools/verify.mjs --os macOS-27   # one directory
+node Golden/tools/verify.mjs --verbose       # show each assertion
+```
+
+Learnings assert **structure, not per-version values**. `inputInnerRefractionAmount`
+is proportional-below-a-cap on both macOS 26 and 27, but the ratio differs
+(-0.8·S versus -0.5·S), so the learning asserts the shape and records the values
+in its claim. A learning that hard-codes a measured constant will fail on the
+next OS for no useful reason.
+
 ## Comparing an OS capture
 
 Place the matching fixture in another OS directory and run:
 
 ```sh
-node Golden/compare.mjs \
+node Golden/tools/compare.mjs \
   Golden/macOS-27 \
   Golden/macOS-26
 ```
@@ -90,7 +129,7 @@ unbounded sentinel and display-derived `1.2` while all other comparable Shader,
 Rim, and geometry values remained stable.
 
 ```sh
-node Golden/compare.mjs \
+node Golden/tools/compare.mjs \
   Golden/macOS-27 \
   Golden/macOS-26 \
   --tolerance=0.000001 --limit=200
@@ -100,7 +139,7 @@ Pass `--include-volatile` when an investigation intentionally wants
 `inputMaxHeadroom` included in the ordinary changed-value totals:
 
 ```sh
-node Golden/compare.mjs \
+node Golden/tools/compare.mjs \
   Golden/macOS-27 \
   Golden/macOS-26 \
   --include-volatile
@@ -109,7 +148,7 @@ node Golden/compare.mjs \
 Compare the Semantic Usage fixture explicitly with:
 
 ```sh
-node Golden/compare.mjs \
+node Golden/tools/compare.mjs \
   Golden/macOS-27 \
   Golden/macOS-26 \
   --fixture=semantic-usage-trees.json
@@ -118,7 +157,7 @@ node Golden/compare.mjs \
 Compare independently captured Recursive Pass Audits with:
 
 ```sh
-node Golden/compare.mjs \
+node Golden/tools/compare.mjs \
   Golden/macOS-26 \
   Golden/macOS-27 \
   --fixture=recursive-pass-audit.json
@@ -136,7 +175,7 @@ The semantic mode intentionally excludes raw Layer fields, structural IDs, and
 whole-tree paths. Those remain available for exact same-build diagnostics:
 
 ```sh
-node Golden/compare.mjs \
+node Golden/tools/compare.mjs \
   Golden/macOS-26 \
   Golden/macOS-27 \
   --fixture=recursive-pass-audit.json \
@@ -152,7 +191,7 @@ and value-signature counts plus raw changed-row totals.
 Run the comparator integration coverage with:
 
 ```sh
-node --test Golden/compare.test.mjs
+node --test Golden/tools/compare.test.mjs
 ```
 
 ## Tint study analyzer
@@ -165,7 +204,7 @@ until its schema and OS-repeat stability are promoted to a Golden fixture.
 Analyze an export with:
 
 ```sh
-node Golden/analyze-tint-study.mjs /path/to/glass-tint-study.json
+node Golden/tools/analyze-tint-study.mjs /path/to/glass-tint-study.json
 ```
 
 The report verifies count/context coverage and calculates:

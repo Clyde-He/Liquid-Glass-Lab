@@ -52,10 +52,11 @@
         "overridesEnabled": false
       },
       "notes": [
-        "Canonical active-session Main × Subdued × Variant × Subvariant × representative-Height sweep.",
+        "Canonical active-session Main \u00d7 Subdued \u00d7 Variant \u00d7 Subvariant \u00d7 representative-Height sweep.",
         "Validated as 1,008 unique rows: every row appActive=true and actual key=false; requested and actual Main match in all rows.",
         "inputMaxHeadroom is retained raw but classified as display/runtime-volatile by compare.mjs after same-build captures changed from the 9999 sentinel to 1.2 while every other comparable Shader, Rim, and geometry value remained stable."
-      ]
+      ],
+      "role": "canonical"
     },
     {
       "id": "recursive-pass-audit",
@@ -121,7 +122,8 @@
         "The same-context repeat has identical rows, topology/value signatures, layer payloads, pass inventories, and nonvolatile pass values; only the document capturedAt field differs.",
         "The earlier display-context contrast retains the same rows, topology, layer payloads, and pass inventory but changes three resolved property fields across 268 rows: CASDFOutputEffect.maximum and DLCAFilter glassBackground inputKeyFillHighlightEffectOffset/inputKeyFillHighlightHeight.",
         "The accepted pair was captured in one active display session; the contrast capture is retained as provenance and is not canonical."
-      ]
+      ],
+      "role": "canonical"
     },
     {
       "id": "semantic-usage-trees",
@@ -147,7 +149,8 @@
         "Canonical SwiftUI Semantic Usage layer/filter/effect inventory across real Main Off/On participation.",
         "Validated as 48 unique rows: all 24 runtime roles are available, every row has a snapshot and actual key=false, and requested/actual Main match in all rows.",
         "CGColor values are canonical model/component strings without process-local object addresses; inputColorMatrix retains its runtime NSValue byte description because those bytes are material data rather than pointer identity."
-      ]
+      ],
+      "role": "canonical"
     },
     {
       "id": "formula-analysis",
@@ -157,7 +160,8 @@
       "notes": [
         "Derived from the accepted application-active formula sweep.",
         "Contains observed ranges, size formulas, and context differences."
-      ]
+      ],
+      "role": "derived"
     },
     {
       "id": "window-context-matrix",
@@ -167,6 +171,45 @@
       "notes": [
         "Signed app-bundle audit of Window/Panel class, style, key eligibility, transparency, shadow, level, and spoofing.",
         "Used to rule out host construction as a direct Recipe selector once real participation is controlled."
+      ],
+      "role": "canonical"
+    },
+    {
+      "id": "recursive-pass-audit-stability-repeat",
+      "file": "recursive-pass-audit-stability-repeat.json",
+      "sha256": "70d07ea0c3ac565f42457a52fe5ca0b3df5fe74ffa3d6e26e3facd594c00c5a3",
+      "formatVersion": 1,
+      "entryCount": 336,
+      "role": "control",
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "notes": [
+        "Same-display-session immediate repeat of recursive-pass-audit.json, used to validate it.",
+        "Reproduced every row, signature, layer payload, pass inventory, and nonvolatile property value; only the capture timestamp changed.",
+        "Kept as provenance for the canonical fixture, not as an independent result."
+      ]
+    },
+    {
+      "id": "recursive-pass-audit-display-context-a",
+      "file": "recursive-pass-audit-display-context-a.json",
+      "sha256": "881d1c730d99e962e2995b26d994f596600455c1392151ce1dd52a8a00754362",
+      "formatVersion": 1,
+      "entryCount": 336,
+      "role": "control",
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "notes": [
+        "Earlier capture taken around a display-context transition.",
+        "Same topology, layers, and pass inventory as the canonical fixture, but three resolved fields differ across 268 rows: CASDFOutputEffect.maximum, glassBackground.inputKeyFillHighlightEffectOffset, and inputKeyFillHighlightHeight.",
+        "Retained as the evidence that those three values are display/runtime sensitive."
       ]
     }
   ]

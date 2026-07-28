@@ -57,7 +57,8 @@
         "Captured at 2026-07-21T07:59:51Z and validated as 1,008 unique rows.",
         "Every row is appActive=true and actual key=false; requested and actual Main match.",
         "inputMaxHeadroom is retained raw and classified as display/runtime-volatile by compare.mjs."
-      ]
+      ],
+      "role": "canonical"
     },
     {
       "id": "recursive-pass-audit",
@@ -100,7 +101,8 @@
         "Every row is appActive=true and actual key=false; requested and actual Main match; every row has a non-empty layer tree.",
         "Contains nine topology signatures and 63 resolved-value signatures.",
         "All 48 string-backed compositing filters retain their plusD, plusL, or screenBlendMode value."
-      ]
+      ],
+      "role": "canonical"
     },
     {
       "id": "materialize-environment-matrix",
@@ -152,7 +154,8 @@
         "Appearance changes endpoints in all 32 pairs across 20-23 channels, up to 1.482.",
         "Establishes the baseline-driven curve: endpoints are read from the Recipe, leaving five dimensionless shapes and three context branches.",
         "Analyze with Golden/analyze-materialize-environment-study.mjs."
-      ]
+      ],
+      "role": "canonical"
     },
     {
       "id": "materialize-geometry-sweep",
@@ -196,7 +199,8 @@
         "Endpoints remain correct per size and are read, not computed: inputBleedAmount 16.8/70/140 = 0.35 * shortSide.",
         "Residual worst case is bounded by c/4 = min(5%, 4/shortSide) and is a mid-transition rate error only; all shapes stay strictly monotonic with exact 0 and 1 endpoints.",
         "Captured unattended via LiquidGlassLab --capture-size-study."
-      ]
+      ],
+      "role": "canonical"
     }
   ]
 }

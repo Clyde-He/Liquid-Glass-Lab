@@ -6,8 +6,9 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const goldenDirectory = path.dirname(fileURLToPath(import.meta.url));
-const compareScript = path.join(goldenDirectory, "compare.mjs");
+const toolsDirectory = path.dirname(fileURLToPath(import.meta.url));
+const goldenDirectory = path.dirname(toolsDirectory);
+const compareScript = path.join(toolsDirectory, "compare.mjs");
 
 function runComparison(baselineFile, candidateFile, ...options) {
   const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "glass-compare-"));
