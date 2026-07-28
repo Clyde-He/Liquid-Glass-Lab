@@ -42,6 +42,7 @@ public final class GlassMaterialStrength {
     private weak var glass: NSGlassEffectView?
     private var baseline: GlassMaterialBaseline?
     private var appliedValue: Double = 1
+    private var lastWrittenFilterIdentity: ObjectIdentifier?
 
     /// Material strength, clamped to `0...1`. Defaults to `1`, which leaves the
     /// system Recipe untouched until the first change.
@@ -74,14 +75,37 @@ public final class GlassMaterialStrength {
     ///
     /// AppKit hands back a freshly resolved tree after a resize, appearance
     /// change, or Recipe rebuild. Catching it here is what moves the endpoints
-    /// to the new context. A tree this controller already wrote to reports
-    /// `value < 1` and is skipped, so it never captures its own output.
+    /// to the new context. Filter identity plus the last applied face opacity
+    /// distinguish a fresh endpoint from this controller's own near-1 write.
     public func refresh() {
         guard let glass else { return }
-        if let candidate = Self.captureBaseline(from: glass), candidate.isPristine {
+        guard let target = GlassMaterialAccess.glassBackgroundTarget(
+            under: glass
+        ) else {
+            baseline = nil
+            lastWrittenFilterIdentity = nil
+            return
+        }
+
+        guard let candidate = Self.captureBaseline(
+            from: glass,
+            target: target
+        ) else {
+            baseline = nil
+            lastWrittenFilterIdentity = nil
+            return
+        }
+        let observedFace = candidate.numeric["inputFaceOpacity"]
+        let looksLikeOurCurrentWrite =
+            appliedValue < 1
+            && lastWrittenFilterIdentity == target.identity
+            && observedFace.map {
+                abs($0 - appliedValue) <= 0.000_001
+            } == true
+        if candidate.isPristine, !looksLikeOurCurrentWrite {
             baseline = candidate
         }
-        apply()
+        apply(to: target)
     }
 
     /// Stops tracking and returns the controller to a neutral state.
@@ -91,6 +115,7 @@ public final class GlassMaterialStrength {
     /// and recreate the `NSGlassEffectView` for a true restore.
     public func invalidate() {
         baseline = nil
+        lastWrittenFilterIdentity = nil
     }
 
     // MARK: Internals
@@ -98,15 +123,22 @@ public final class GlassMaterialStrength {
     static func captureBaseline(
         from glass: NSGlassEffectView
     ) -> GlassMaterialBaseline? {
-        guard let backdrop = GlassMaterialAccess.backdropLayer(under: glass),
-              GlassMaterialAccess.glassBackgroundFilter(on: backdrop) != nil
-        else { return nil }
-        let numeric = GlassMaterialAccess.readNumbers(from: glass)
+        guard let target = GlassMaterialAccess.glassBackgroundTarget(
+            under: glass
+        ) else { return nil }
+        return captureBaseline(from: glass, target: target)
+    }
+
+    private static func captureBaseline(
+        from glass: NSGlassEffectView,
+        target: GlassMaterialAccess.GlassBackgroundTarget
+    ) -> GlassMaterialBaseline? {
+        let numeric = GlassMaterialAccess.readNumbers(from: target)
         guard !numeric.isEmpty else { return nil }
         return GlassMaterialBaseline(
             numeric: numeric,
             colors: GlassMaterialAccess.readColors(
-                from: glass,
+                from: target,
                 keys: GlassMaterialCurve.colorKeys
             ),
             rimOpacity: GlassMaterialAccess.rimLayers(under: glass)
@@ -116,10 +148,13 @@ public final class GlassMaterialStrength {
         )
     }
 
-    private func apply() {
+    private func apply(
+        to suppliedTarget: GlassMaterialAccess.GlassBackgroundTarget? = nil
+    ) {
         guard let glass,
               let baseline,
-              let backdrop = GlassMaterialAccess.backdropLayer(under: glass)
+              let target = suppliedTarget
+                ?? GlassMaterialAccess.glassBackgroundTarget(under: glass)
         else { return }
 
         let isClear = Self.isClear(glass)
@@ -139,10 +174,10 @@ public final class GlassMaterialStrength {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (key, number) in numbers {
-            GlassMaterialAccess.write(number, forKey: key, on: backdrop)
+            GlassMaterialAccess.write(number, forKey: key, to: target)
         }
         for (key, color) in colors {
-            GlassMaterialAccess.write(color.cgColor, forKey: key, on: backdrop)
+            GlassMaterialAccess.write(color.cgColor, forKey: key, to: target)
         }
         CATransaction.commit()
 
@@ -167,6 +202,12 @@ public final class GlassMaterialStrength {
         }
 
         appliedValue = value
+        // Owning-layer writes replace the immutable CAFilter object. Record
+        // the identity after the final write, not the target captured before
+        // the frame, or the next layout would mistake our own near-1 output
+        // for a newly resolved Recipe.
+        lastWrittenFilterIdentity =
+            GlassMaterialAccess.glassBackgroundFilterIdentity(on: target.layer)
     }
 
     /// Reads the resolved Recipe index. Regular is 1 and Clear is 2; anything

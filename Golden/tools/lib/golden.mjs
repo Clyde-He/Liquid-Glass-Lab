@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CELL_FIELDS, axisValues, sweptAxes } from "./cell.mjs";
 
 // .../Golden/tools/lib/golden.mjs -> .../Golden
 export const goldenDirectory = path.dirname(
@@ -49,14 +50,35 @@ export async function loadUnified(osDirectory) {
   const sections = {};
   for (const name of SECTIONS) {
     try {
-      sections[name] = JSON.parse(
+      sections[name] = normalizeUnifiedDocument(JSON.parse(
         await readFile(path.join(directory, `${name}.json`), "utf8")
-      );
+      ));
     } catch {
       sections[name] = null;
     }
   }
   return sections;
+}
+
+/**
+ * Direct captures do not duplicate their cell axes into every section. Derive
+ * them at read time from the authoritative rows while retaining any declared
+ * values written by the historical unifier.
+ */
+export function normalizeUnifiedDocument(document) {
+  const rows = document?.rows ?? document?.runs ?? [];
+  const cells = rows.map((row) => row.cell ?? {});
+  const derivedValues = Object.fromEntries(
+    CELL_FIELDS.map((field) => [field, axisValues(cells, field)])
+  );
+  const declaredValues = document?.axes?.values ?? {};
+  return {
+    ...document,
+    axes: {
+      values: { ...derivedValues, ...declaredValues },
+      swept: document?.axes?.swept ?? sweptAxes(cells),
+    },
+  };
 }
 
 export function sha256(bytes) {
@@ -172,6 +194,10 @@ export function endpointSample(run) {
 
 export const endpointInputs = (run) =>
   glassBackground(endpointSample(run))?.inputs ?? null;
+
+/** Supports both transcoded legacy runs and direct-capture runs. */
+export const tintComponents = (run) =>
+  run?.tintComponents ?? run?.tint?.components ?? null;
 
 // MARK: - The measured curve, mirrored from LiquidGlassLab/GlassMaterial
 

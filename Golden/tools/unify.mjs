@@ -42,6 +42,7 @@ function unifyStaticScalar(source) {
       variant: entry.variant,
       subvariant: entry.subvariant ?? null,
       main: entry.requestedMain,
+      key: entry.isActualKeyWindow ?? null,
       subdued: entry.subdued,
       // The Recipe sweep does not control appearance: it captures whatever the
       // machine was in and records only `adaptiveAppearance` at the document
@@ -94,6 +95,7 @@ function unifyStaticTree(source) {
       variant: entry.variant,
       subvariant: entry.subvariant ?? null,
       main: entry.requestedMain,
+      key: entry.isActualKeyWindow ?? null,
       subdued: entry.subdued,
       appearance: null,
       backdrop: null,
@@ -165,6 +167,7 @@ function unifyDynamic(sources) {
           variant: variantFromUsage(transition.usage),
           subvariant: null,
           main: context.requestedMain,
+          key: context.actualKey ?? null,
           // SwiftUI Materialize exposes no subdued axis, so this is genuinely
           // uncontrolled rather than false.
           subdued: null,

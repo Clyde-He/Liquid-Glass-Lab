@@ -52,6 +52,17 @@ That is why size, appearance, Regular/Clear, window participation, and
 subvariant all follow automatically: the system already resolved the right
 endpoint for the current context, and `g = 1` reproduces it by construction.
 
+`refresh()` distinguishes a replacement filter from the controller's own
+near-1 write using the filter identity and last authored face opacity. If the
+current Variant has no `glassBackground`, it clears the cached baseline and
+reports `isAvailable == false` instead of carrying an endpoint over from the
+previous Variant.
+
+One update resolves the filter name and `inputKeys` capability set once, then
+reuses that target for every channel. Tint matrix writes are capability-guarded
+and disable implicit Core Animation actions just like background and Rim
+writes.
+
 What remains authored is only five dimensionless shapes:
 
 ```text

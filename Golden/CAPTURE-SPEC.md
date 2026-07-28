@@ -46,7 +46,8 @@ cell. No trees.
 
 ```text
 21 variants × 4 subvariants × Main{off,on} × Subdued{off,on}
-at 480 × 200, cornerRadius 16, Panel, no tint, no overrides
+at 480 × 200, cornerRadius 16, Panel, Light appearance/backdrop,
+no tint, no overrides
 ```
 
 Fixes the whole variant vocabulary at one reference geometry.
@@ -94,8 +95,8 @@ repeat    21 rows   variants × nil subvariant × Main on, captured a second tim
                     in the same display session
 ```
 
-The repeat is the only cross-session stability evidence for the static tree.
-It lands as additional rows on cells that already exist; the archive treats a
+The repeat is the direct capture's stability evidence for the static tree. It
+lands as additional rows on cells that already exist; the archive treats a
 repeated cell as evidence and never deduplicates.
 
 **Total: 357 rows, ≈ 7 MB.**
@@ -113,6 +114,9 @@ core   2 materials × Main{off,on} × appearance{Light,Dark}
 
 backdrop slice   backdrop = Dark, at 200pt / Light appearance / no tint
                  / insertion, 2 materials × Main{off,on}            =  4 runs
+
+repeat slice     re-capture the 200pt / Light appearance+backdrop /
+                 no tint / insertion cells, 2 materials × Main      =  4 runs
 ```
 
 Nine samples per run spanning `g = 0` to `g = 1`.
@@ -122,7 +126,7 @@ model state — but the axis has to survive so the proof can be re-derived on th
 next OS. Deleting an axis whose finding is "this axis does nothing" destroys the
 finding.
 
-**Total: 100 runs, 900 samples, ≈ 5 MB.**
+**Total: 104 runs, 936 samples, ≈ 5 MB.**
 
 ## What each sample records
 
@@ -146,21 +150,17 @@ Kept, because something reads it:
 `tint`, `width`, `height`, `cornerRadius`, `host`, `direction`. `shortSide` is
 derived.
 
-`key` is new. It is `false` on every row the current harness produces and
-`true` only on the key slice, so adding it changes no existing comparison.
+`key` is `false` on ordinary rows and `true` only on the static key slice.
 
 A field is **null when the capture did not control that axis**. Adding a field
 later is backward compatible: rows written before it read as null, meaning
 uncontrolled, and every assertion keeps working. This is why the schema does not
 need to anticipate future axes.
 
-Two axes are currently null everywhere in the static sections and should be
-recorded going forward, because their absence is what stops a settled `g = 1`
-dynamic sample from being compared against its static Recipe row:
-
-- **appearance** — the static sweeps capture whatever the machine was in;
-- **subdued** on dynamic rows — SwiftUI exposes no such concept, so it stays
-  null there, and the comparison must treat null as compatible.
+The direct static sections explicitly record their fixed Light appearance and
+Light backdrop. **Subdued** stays null on dynamic rows because SwiftUI exposes
+no such concept, and cross-section comparison must treat that null as
+compatible rather than false.
 
 ## Totals
 
@@ -168,7 +168,7 @@ dynamic sample from being compared against its static Recipe row:
 | --- | ---: | ---: |
 | `static-scalar` | 408 | ≈ 1 MB |
 | `static-tree` | 357 | ≈ 7 MB |
-| `dynamic` | 100 runs / 900 samples | ≈ 5 MB |
+| `dynamic` | 104 runs / 936 samples | ≈ 5 MB |
 | **per OS** | | **≈ 13 MB, 4 files** |
 
 Two OS directories: **8 files, ≈ 26 MB**, against today's 11 source files and

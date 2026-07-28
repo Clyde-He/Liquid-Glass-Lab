@@ -61,7 +61,8 @@ never recorded appearance, and the SwiftUI Materialize sweep has no Subdued
 concept. Recording those as null is what makes a learning that needs them skip
 loudly instead of passing by luck.
 
-The sections are **derived**. They are transcoded from the per-study fixtures by
+The sections currently committed under `macOS-26/` and `macOS-27/` are
+**derived**. They are transcoded from the per-study fixtures by
 
 ```sh
 node Golden/tools/unify.mjs            # both OS directories
@@ -73,8 +74,9 @@ checksum. They are committed rather than generated on demand so a fresh clone
 can verify without a build step. They are also five times smaller than their
 sources — 12 MB against 63 MB on macOS 26 — because they drop the presentation
 tree, the structured layer dictionaries, and the animation branch, none of which
-any accepted learning reads. Once the exporter emits this shape directly the
-per-study fixtures can be retired and the archive shrinks.
+any accepted learning reads. The Lab now has a direct exporter for the same
+contract. After one of its captures is accepted, the per-study fixtures and
+this bridge can be retired.
 
 Every OS directory contains a `manifest.json` describing the default OS build
 and capture date, capture conditions, fixture schemas, entry counts, and
@@ -133,7 +135,9 @@ and progress axes the static sweeps do not have.
 Their coverage overlaps on four cells, captured in separate sessions. The
 unifier keeps both copies rather than deduplicating: they are the only
 cross-session repeatability evidence the dynamic archive has, and a learning
-asserts that their settled endpoints agree on every channel.
+asserts that their settled endpoints agree on every channel. The direct
+exporter preserves the same check with an explicit four-run repeat slice at the
+end of its capture.
 
 ## Verifying the archive
 
@@ -279,8 +283,12 @@ and value-signature counts plus raw changed-row totals.
 Run the comparator integration coverage with:
 
 ```sh
-node --test Golden/tools/compare.test.mjs
+node --test Golden/tools/compare.test.mjs Golden/tools/unified-contract.test.mjs
 ```
+
+The contract tests exercise the direct-capture shape rather than the committed
+derived fixtures: key identity, inferred axes, both Tint encodings, static-tree
+repeat rows, and dynamic repeat provenance.
 
 ## Tint study analyzer
 

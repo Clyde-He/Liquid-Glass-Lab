@@ -15,8 +15,8 @@
       "file": "static-scalar.json",
       "rows": 1008,
       "repeatedCells": 0,
-      "bytes": 2952620,
-      "sha256": "00846393fbbbb4efcfe83ea9a7ee134391bec8ddeb1ce0d4db502fe677c35bfc",
+      "bytes": 2964730,
+      "sha256": "86cd767e2447034901c18e4ea58caf5cff01f427e11fa2a31b280011369aacba",
       "sourceFixtures": [
         "recipe-matrix"
       ],
@@ -32,8 +32,8 @@
       "file": "static-tree.json",
       "rows": 336,
       "repeatedCells": 0,
-      "bytes": 7935746,
-      "sha256": "333dbf6b7878a06ee2a83febaa9614756fcfd490737b9f5ea2342d19072df6a7",
+      "bytes": 7939792,
+      "sha256": "0f17b7e1b8d2db63feed919eaa6781c5391a56bf13f8ab1669a94d6f2471f251",
       "sourceFixtures": [
         "recursive-pass-audit"
       ],

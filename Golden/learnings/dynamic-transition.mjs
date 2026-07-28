@@ -10,7 +10,7 @@
 
 import {
   ALL_CHANNELS, channelTable, endpointSample, geometryInflation, glassBackground,
-  numeric, progressOf, resolveChannel,
+  numeric, progressOf, resolveChannel, tintComponents,
 } from "../tools/lib/golden.mjs";
 import { CELL_FIELDS, cellKey, isClearCell } from "../tools/lib/cell.mjs";
 
@@ -101,13 +101,11 @@ export default [
   },
 
   {
-    id: "repeated-cells-agree-across-capture-sessions",
+    id: "repeated-cells-agree-across-sweeps",
     claim:
-      "Four cells were captured twice, in separate sessions, by the two sweeps "
-      + "that the dynamic section merges. Their settled endpoints agree on "
-      + "every channel — the only cross-session repeatability evidence the "
-      + "dynamic archive has, which is why the overlap is kept rather than "
-      + "deduplicated",
+      "Four cells are captured twice by separate sweeps. Their settled "
+      + "endpoints agree on every channel, so repeated evidence is retained "
+      + "rather than deduplicated",
     source: "GlassResearchRoadmap.md — P1.1",
     sections: [SECTION],
     verify({ sections, expect }) {
@@ -123,10 +121,11 @@ export default [
 
       const differing = [];
       for (const members of repeated) {
+        const sources = members.map((run) => run.source ?? run.slice);
         expect.ok(
-          new Set(members.map((run) => run.source)).size === members.length,
+          sources.every(Boolean) && new Set(sources).size === members.length,
           "repeats come from distinct sweeps",
-          members.map((run) => run.source).join(" + ")
+          sources.join(" + ")
         );
         for (let i = 1; i < members.length; i += 1) {
           const delta = endpointDelta(members[0], members[i]);
@@ -244,7 +243,7 @@ export default [
       const residuals = [];
 
       for (const run of runs) {
-        const alpha = run.tint?.components?.[3];
+        const alpha = tintComponents(run)?.[3];
         if (!Number.isFinite(alpha)) continue;
         for (const sample of run.samples ?? []) {
           const gradient = (sample.effects ?? []).find(

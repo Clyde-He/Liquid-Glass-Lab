@@ -19,6 +19,7 @@ import {
   LearningFailure, Unverifiable, goldenDirectory, loadUnified, makeExpect,
   osDirectories, readManifest, sha256,
 } from "./lib/golden.mjs";
+import { CELL_FIELDS } from "./lib/cell.mjs";
 
 const args = process.argv.slice(2);
 const verbose = args.includes("--verbose");
@@ -95,6 +96,23 @@ async function checkIntegrity(osDirectory) {
         const bytes = await readFile(path.join(unifiedDirectory, entry.file));
         if (sha256(bytes) !== entry.sha256) {
           problems.push(`unified/${entry.file}: sha256 mismatch — rerun unify.mjs`);
+        }
+        // Checksums prove the file matches its meta entry, and both are written
+        // in the same pass — so they cannot detect an archive that is simply
+        // older than the code that produced it. A cell missing a field the
+        // schema now defines is exactly that drift, and it is silent: the
+        // missing field reads as null, which the archive treats as a legitimate
+        // uncontrolled axis rather than a stale row.
+        const document = JSON.parse(bytes.toString("utf8"));
+        const cell = (document.rows ?? document.runs ?? [])[0]?.cell;
+        if (cell) {
+          const absent = CELL_FIELDS.filter((field) => !(field in cell));
+          if (absent.length > 0) {
+            problems.push(
+              `unified/${entry.file}: cells predate the current schema, `
+              + `missing ${absent.join(", ")} — recapture or rerun unify.mjs`
+            );
+          }
         }
       } catch {
         problems.push(`unified/${entry.file}: listed in meta but missing`);

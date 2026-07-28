@@ -19,6 +19,8 @@ enum GlassLabGoldenPlan {
     static let referenceWidth: Double = 480
     static let referenceHeight: Double = 200
     static let referenceCornerRadius: Double = 16
+    static let staticAppearance = GlassLabTestAppearance.light
+    static let staticBackdrop = GlassLabBackdropMode.light
 
     // MARK: - Static plan
 
@@ -157,7 +159,7 @@ enum GlassLabGoldenPlan {
     }
 
     /// The tree is expensive per row, so it takes the core product only, plus
-    /// one repeat pass for cross-session stability evidence.
+    /// one repeat pass for within-capture stability evidence.
     static func treeContexts() -> [StaticContext] {
         var contexts = staticContexts().filter { $0.slice == "core" }
         // One row per variant at nil subvariant, not a second full product:
@@ -227,6 +229,22 @@ enum GlassLabGoldenPlan {
                 direction: .insertion
             ))
         }
+
+        // Re-capture the four Regular/Clear × Main cells that anchor the
+        // baseline geometry. Keeping these duplicates is the direct exporter's
+        // repeatability evidence; `slice` distinguishes the second sweep while
+        // the shared cell coordinate deliberately remains identical.
+        for main in [false, true] {
+            contexts.append(DynamicContext(
+                slice: "repeat",
+                shortSide: referenceHeight,
+                main: main,
+                appearance: .light,
+                backdrop: .light,
+                tinted: false,
+                direction: .insertion
+            ))
+        }
         return contexts
     }
 }
@@ -241,7 +259,8 @@ extension GoldenCell {
         variant: Int,
         subvariant: String?,
         context: GlassLabGoldenPlan.StaticContext,
-        appearance: GlassLabTestAppearance
+        appearance: GlassLabTestAppearance,
+        backdrop: GlassLabBackdropMode
     ) -> GoldenCell {
         GoldenCell(
             variant: variant,
@@ -250,7 +269,7 @@ extension GoldenCell {
             key: context.key,
             subdued: context.subdued,
             appearance: appearance == .system ? nil : appearance.rawValue,
-            backdrop: nil,
+            backdrop: backdrop.rawValue,
             tint: "None",
             width: context.width,
             height: context.height,
@@ -306,6 +325,7 @@ extension GoldenDynamicSample {
     /// and `animations` are dropped: no accepted learning reads them, and
     /// together they were 70% of the archive's bytes. `layerLines` stays
     /// because the SDF inflation claim parses element frames out of it.
+    @MainActor
     init(sample: GlassLabMaterializeSample) {
         let model = sample.snapshot.model
         let filters = model.filters.map { filter in
@@ -348,6 +368,7 @@ extension GoldenDynamicSample {
 }
 
 extension GoldenDynamicRun {
+    @MainActor
     init(capture: GlassLabMaterializeCapture, slice: String) {
         let context = capture.context
         // Regular and Clear are addressed by their private variant index here

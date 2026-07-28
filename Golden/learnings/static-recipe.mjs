@@ -11,12 +11,24 @@
 const SECTION = "static-scalar";
 
 const baseRows = (rows) =>
-  rows.filter((row) => !row.cell.subvariant && row.cell.subdued === false);
+  rows.filter(
+    (row) =>
+      !row.cell.subvariant
+      && row.cell.subdued === false
+      && row.cell.key !== true
+  );
 
 const regularMain = (rows) =>
   baseRows(rows).filter(
     (row) => row.cell.variant === 1 && row.cell.main === true
   );
+
+const payloadSignature = (row) =>
+  ["inputs", "highlight", "geometry", "colors", "points", "strings"]
+    .map((field) =>
+      `${field}:${JSON.stringify(Object.entries(row[field] ?? {}).sort())}`
+    )
+    .join("|");
 
 export default [
   {
@@ -102,6 +114,59 @@ export default [
         }
       }
       expect.equal(differing.length, 0, "inputs differing at equal shortSide");
+    },
+  },
+
+  {
+    id: "real-key-participation-selects-the-active-recipe",
+    claim:
+      "A Panel that is genuinely key without being main resolves the same "
+      + "Regular/Clear Recipe payload as Main participation",
+    source: "Golden/CAPTURE-SPEC.md — static-scalar real key slice",
+    sections: [SECTION],
+    verify({ sections, expect }) {
+      const document = sections[SECTION];
+      const keyValues = document.axes.values.key ?? [];
+      if (!keyValues.includes(true)) {
+        expect.unverifiable(
+          "no real-key slice — capture with the direct Golden exporter"
+        );
+      }
+
+      const rows = document.rows ?? [];
+      const keyRows = rows.filter((row) => row.cell.key === true);
+      expect.equal(keyRows.length, 4, "real-key rows");
+      const missing = [];
+      const differing = [];
+      for (const keyRow of keyRows) {
+        const cell = keyRow.cell;
+        const mainRow = rows.find((row) =>
+          row.cell.variant === cell.variant
+          && row.cell.subvariant === cell.subvariant
+          && row.cell.main === true
+          && row.cell.key === false
+          && row.cell.subdued === cell.subdued
+          && row.cell.appearance === cell.appearance
+          && row.cell.backdrop === cell.backdrop
+          && row.cell.tint === cell.tint
+          && row.cell.width === cell.width
+          && row.cell.height === cell.height
+          && row.cell.cornerRadius === cell.cornerRadius
+          && row.cell.host === cell.host
+        );
+        if (!mainRow) {
+          missing.push(`variant ${cell.variant} subdued ${cell.subdued}`);
+          continue;
+        }
+        if (keyRow.participation !== "key") {
+          differing.push(`variant ${cell.variant}: participation=${keyRow.participation}`);
+        }
+        if (payloadSignature(keyRow) !== payloadSignature(mainRow)) {
+          differing.push(`variant ${cell.variant}: payload`);
+        }
+      }
+      expect.equal(missing.length, 0, "key cells missing a Main counterpart");
+      expect.equal(differing.length, 0, "key/Main payload differences");
     },
   },
 

@@ -19,6 +19,10 @@ const family = (pass) =>
 const inventory = (row) =>
   Object.values(row.passes ?? {}).map(family).sort().join(" | ");
 
+/** Repeat rows are evidence about the core product, not extra product cells. */
+const coreRows = (document) =>
+  (document.rows ?? []).filter((row) => row.slice !== "repeat");
+
 /** Groups rows by a subset of cell fields. */
 function groupBy(rows, fields) {
   const groups = new Map();
@@ -48,7 +52,7 @@ export default [
     source: "AppKitGlassReverseEngineering.md — Recipe topology",
     sections: [SECTION],
     verify({ sections, expect }) {
-      const rows = sections[SECTION].rows ?? [];
+      const rows = coreRows(sections[SECTION]);
       const axes = sections[SECTION].axes.values;
       expect.equal(axes.variant.length, 21, "variants swept");
       expect.equal(axes.subvariant.length, 3, "non-nil subvariants swept");
@@ -69,6 +73,44 @@ export default [
   },
 
   {
+    id: "static-tree-repeat-agrees-with-core",
+    claim:
+      "The repeat sweep re-captures one nil-subvariant Main-On row per Variant "
+      + "and agrees with the core sweep on topology and resolved values",
+    source: "Golden/CAPTURE-SPEC.md — static-tree repeat",
+    sections: [SECTION],
+    verify({ sections, expect }) {
+      const document = sections[SECTION];
+      const repeats = (document.rows ?? []).filter((row) => row.slice === "repeat");
+      if (repeats.length === 0) {
+        expect.unverifiable(
+          "no static-tree repeat slice — capture with the direct Golden exporter"
+        );
+      }
+      expect.equal(repeats.length, 21, "repeat rows");
+
+      const core = new Map(coreRows(document).map((row) => [cellKey(row.cell), row]));
+      const missing = [];
+      const differing = [];
+      for (const repeat of repeats) {
+        const original = core.get(cellKey(repeat.cell));
+        if (!original) {
+          missing.push(cellKey(repeat.cell));
+          continue;
+        }
+        if (original.topologySignature !== repeat.topologySignature) {
+          differing.push(`${repeat.cell.variant}:topology`);
+        }
+        if (original.valueSignature !== repeat.valueSignature) {
+          differing.push(`${repeat.cell.variant}:value`);
+        }
+      }
+      expect.equal(missing.length, 0, "repeat cells missing from core");
+      expect.equal(differing.length, 0, "repeat signature differences");
+    },
+  },
+
+  {
     id: "topology-is-decided-by-variant-subvariant-and-subdued",
     claim:
       "Layer topology is a pure function of Variant, Subvariant, and Subdued. "
@@ -78,7 +120,7 @@ export default [
     source: "AppKitGlassReverseEngineering.md — Recipe topology",
     sections: [SECTION],
     verify({ sections, expect }) {
-      const rows = sections[SECTION].rows ?? [];
+      const rows = coreRows(sections[SECTION]);
       const signature = (row) => row.topologySignature;
 
       expect.equal(
@@ -112,7 +154,7 @@ export default [
     source: "AppKitGlassReverseEngineering.md — Recipe topology",
     sections: [SECTION],
     verify({ sections, expect }) {
-      const rows = sections[SECTION].rows ?? [];
+      const rows = coreRows(sections[SECTION]);
       const sensitive = new Set();
       for (const [, members] of groupBy(rows, ["variant", "subvariant", "main"])) {
         if (new Set(members.map((row) => row.topologySignature)).size > 1) {
@@ -152,7 +194,7 @@ export default [
     source: "AppKitGlassReverseEngineering.md — Recipe topology",
     sections: [SECTION],
     verify({ sections, expect }) {
-      const rows = sections[SECTION].rows ?? [];
+      const rows = coreRows(sections[SECTION]);
       const classOf = (row) => {
         const passes = Object.values(row.passes ?? {});
         if (passes.length === 0) return "empty";
@@ -208,7 +250,7 @@ export default [
     source: "AppKitGlassReverseEngineering.md — Recipe topology",
     sections: [SECTION],
     verify({ sections, expect }) {
-      const rows = sections[SECTION].rows ?? [];
+      const rows = coreRows(sections[SECTION]);
       const perSignature = new Map();
       for (const row of rows) {
         const signature = row.topologySignature;

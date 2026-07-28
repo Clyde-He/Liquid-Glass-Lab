@@ -64,9 +64,10 @@ public struct GlassMaterialBaseline: Equatable, Sendable {
     /// `min(width, height)` of the glass this was captured from.
     public let shortSide: Double
 
-    /// A baseline is only meaningful on an unmutated tree. Applying any
-    /// strength below 1 drives `inputFaceOpacity` down, so a settled value of 1
-    /// is a reliable "system still owns this" sentinel.
+    /// A baseline is only meaningful on an unmutated tree. Values near 1 are
+    /// candidates; the controller additionally checks filter identity and its
+    /// last authored face opacity so a user value such as 0.9995 is not
+    /// mistaken for a new system endpoint.
     public var isPristine: Bool {
         (numeric["inputFaceOpacity"] ?? 0) >= 0.999
     }

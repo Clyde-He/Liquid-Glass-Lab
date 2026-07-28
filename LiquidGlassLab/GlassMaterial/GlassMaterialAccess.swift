@@ -15,6 +15,15 @@
 import AppKit
 
 enum GlassMaterialAccess {
+    struct GlassBackgroundTarget {
+        let layer: CALayer
+        let filter: NSObject
+        let name: String
+        let inputKeys: Set<String>
+
+        var identity: ObjectIdentifier { ObjectIdentifier(filter) }
+    }
+
     // MARK: Layer discovery
 
     /// The `CABackdropLayer` carrying the glass shader. Only exists once the
@@ -64,24 +73,47 @@ enum GlassMaterialAccess {
         (layer.filters as? [NSObject])?.first { filterName($0) == "glassBackground" }
     }
 
+    static func glassBackgroundFilterIdentity(
+        on layer: CALayer
+    ) -> ObjectIdentifier? {
+        glassBackgroundFilter(on: layer).map(ObjectIdentifier.init)
+    }
+
     static func filterName(_ filter: NSObject) -> String? {
         valueIfResponds(forKey: "name", on: filter) as? String
     }
 
-    /// Runtime `inputKeys` is the authoritative capability list. Consulting it
-    /// before every read and write is what keeps this safe when a macOS release
-    /// adds, removes, or renames an input.
+    /// Runtime `inputKeys` is the authoritative capability list. Each target
+    /// snapshots it once per refresh/frame, then every read and write consults
+    /// that snapshot.
     static func filterInputKeys(_ filter: NSObject) -> [String] {
         valueIfResponds(forKey: "inputKeys", on: filter) as? [String] ?? []
     }
 
+    /// Resolves the mutable owner, filter identity, name, and capabilities
+    /// once per refresh/frame. Repeating this lookup for every channel makes a
+    /// 42-channel strength update pay for 42 tree scans and `inputKeys` reads.
+    static func glassBackgroundTarget(
+        under glass: NSGlassEffectView
+    ) -> GlassBackgroundTarget? {
+        guard let layer = backdropLayer(under: glass),
+              let filter = glassBackgroundFilter(on: layer),
+              let name = filterName(filter) else { return nil }
+        return GlassBackgroundTarget(
+            layer: layer,
+            filter: filter,
+            name: name,
+            inputKeys: Set(filterInputKeys(filter))
+        )
+    }
+
     /// Every numeric input of the glass shader: the resolved Recipe.
-    static func readNumbers(from glass: NSGlassEffectView) -> [String: Double] {
-        guard let backdrop = backdropLayer(under: glass),
-              let filter = glassBackgroundFilter(on: backdrop) else { return [:] }
+    static func readNumbers(
+        from target: GlassBackgroundTarget
+    ) -> [String: Double] {
         var values: [String: Double] = [:]
-        for key in filterInputKeys(filter) {
-            if let number = filter.value(forKey: key) as? NSNumber {
+        for key in target.inputKeys {
+            if let number = target.filter.value(forKey: key) as? NSNumber {
                 values[key] = number.doubleValue
             }
         }
@@ -89,15 +121,12 @@ enum GlassMaterialAccess {
     }
 
     static func readColors(
-        from glass: NSGlassEffectView,
+        from target: GlassBackgroundTarget,
         keys: [String]
     ) -> [String: NSColor] {
-        guard let backdrop = backdropLayer(under: glass),
-              let filter = glassBackgroundFilter(on: backdrop) else { return [:] }
-        let available = Set(filterInputKeys(filter))
         var values: [String: NSColor] = [:]
-        for key in keys where available.contains(key) {
-            guard let raw = filter.value(forKey: key),
+        for key in keys where target.inputKeys.contains(key) {
+            guard let raw = target.filter.value(forKey: key),
                   CFGetTypeID(raw as CFTypeRef) == CGColor.typeID else { continue }
             // swiftlint:disable:next force_cast
             guard let color = NSColor(cgColor: raw as! CGColor) else { continue }
@@ -113,12 +142,13 @@ enum GlassMaterialAccess {
     static func write(
         _ value: Any?,
         forKey key: String,
-        on backdrop: CALayer
+        to target: GlassBackgroundTarget
     ) {
-        guard let filter = glassBackgroundFilter(on: backdrop),
-              filterInputKeys(filter).contains(key),
-              let name = filterName(filter) else { return }
-        backdrop.setValue(value, forKeyPath: "filters.\(name).\(key)")
+        guard target.inputKeys.contains(key) else { return }
+        target.layer.setValue(
+            value,
+            forKeyPath: "filters.\(target.name).\(key)"
+        )
     }
 
     // MARK: Rim gate
@@ -152,7 +182,9 @@ enum GlassMaterialAccess {
             }
         }
         if let group = animation as? CAAnimationGroup {
-            return (group.animations ?? []).contains(where: animationTargetsGate)
+            for child in group.animations ?? [] {
+                if animationTargetsGate(child) { return true }
+            }
         }
         return false
     }
@@ -191,7 +223,8 @@ enum GlassMaterialAccess {
     static func tintMatrix(on layer: CALayer) -> [Float]? {
         guard let filter = (layer.filters as? [NSObject])?.first(where: {
             filterName($0) == "vibrantColorMatrix"
-        }), let value = filter.value(forKey: "inputColorMatrix") as? NSValue else {
+        }), filterInputKeys(filter).contains("inputColorMatrix"),
+        let value = filter.value(forKey: "inputColorMatrix") as? NSValue else {
             return nil
         }
         var storage = [Float](repeating: 0, count: 20)
@@ -207,6 +240,7 @@ enum GlassMaterialAccess {
               let filter = (layer.filters as? [NSObject])?.first(where: {
                   filterName($0) == "vibrantColorMatrix"
               }),
+              filterInputKeys(filter).contains("inputColorMatrix"),
               let name = filterName(filter) else { return }
         let storage = matrix
         let boxed = storage.withUnsafeBytes {
@@ -215,7 +249,13 @@ enum GlassMaterialAccess {
                 objCType: "[20f]"
             )
         }
-        layer.setValue(boxed, forKeyPath: "filters.\(name).inputColorMatrix")
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.setValue(
+            boxed,
+            forKeyPath: "filters.\(name).inputColorMatrix"
+        )
+        CATransaction.commit()
     }
 
     private static func NSValueByteCount(_ value: NSValue) -> Int {

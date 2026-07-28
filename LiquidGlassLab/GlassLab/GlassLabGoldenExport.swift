@@ -29,7 +29,7 @@ enum GlassLabGoldenExportError: LocalizedError {
             "Section \(section) captured no rows; the archive was not written."
         case let .duplicateRow(section, cell):
             "Section \(section) produced an unintended duplicate at \(cell). "
-                + "Only the dynamic overlap may repeat a cell."
+                + "This section does not permit repeated cells."
         }
     }
 }
@@ -101,7 +101,8 @@ extension GlassLabView {
                             variant: variant,
                             subvariant: subvariant,
                             context: context,
-                            appearance: .light
+                            appearance: GlassLabGoldenPlan.staticAppearance,
+                            backdrop: GlassLabGoldenPlan.staticBackdrop
                         ).identity)
                     }
                 }
@@ -164,6 +165,11 @@ extension GlassLabView {
     // MARK: - Driver
 
     func captureGoldenArchive(into directory: URL) async throws -> GoldenMeta {
+        let originalRenderer = state.rendererMode
+        let originalUsage = state.semanticUsage
+        let originalSemanticPage = selectedSemanticPage
+        let originalAnimationMode = materializeAnimationMode
+        let originalAnimationDuration = materializeLinearDuration
         let originalVisibility = state.isTestWindowVisible
         let originalMain = state.isTestWindowMain
         let originalKey = state.isTestWindowKey
@@ -177,6 +183,8 @@ extension GlassLabView {
         let originalRadius = state.cornerRadius
         let originalHost = state.windowHostType
         let originalAppearance = state.testAppearance
+        let originalBackdrop = state.testBackdrop
+        let originalPadding = state.windowPadding
         let activity = ProcessInfo.processInfo.beginActivity(
             options: [
                 .userInitiated, .idleSystemSleepDisabled, .idleDisplaySleepDisabled,
@@ -185,9 +193,16 @@ extension GlassLabView {
         )
         defer {
             ProcessInfo.processInfo.endActivity(activity)
+            state.rendererMode = originalRenderer
+            state.semanticUsage = originalUsage
+            selectedSemanticPage = originalSemanticPage
+            materializeAnimationMode = originalAnimationMode
+            materializeLinearDuration = originalAnimationDuration
             state.isTestWindowKey = originalKey
             state.windowHostType = originalHost
             state.testAppearance = originalAppearance
+            state.testBackdrop = originalBackdrop
+            state.windowPadding = originalPadding
             restoreTestWindowContext(
                 visibility: originalVisibility,
                 isMainWindow: originalMain,
@@ -200,13 +215,23 @@ extension GlassLabView {
                 glassHeight: originalHeight,
                 cornerRadius: originalRadius
             )
+            configureSemanticTransitionProbe()
         }
 
         // The static sections are captured under one explicit appearance so a
         // settled dynamic sample can be paired against its static endpoint.
         // The historical sweeps recorded whatever the machine happened to be
         // in, which is why that comparison was never expressible.
-        let appearance = GlassLabTestAppearance.light
+        let appearance = GlassLabGoldenPlan.staticAppearance
+        state.isCapturingRecipeMatrix = true
+        state.hasScrim = false
+        state.hasReducedTintOpacity = false
+        state.adaptiveAppearance = 2
+        state.tintColor = nil
+        state.testAppearance = appearance
+        state.testBackdrop = GlassLabGoldenPlan.staticBackdrop
+        state.windowPadding = 40
+        state.isTestWindowKey = false
         let environment = GoldenEnvironment(
             windowMargin: 40,
             scrim: false,
@@ -263,7 +288,13 @@ extension GlassLabView {
 
             state.rendererMode = .recipe
             state.windowHostType = context.host
-            state.testAppearance = GlassLabTestAppearance.light
+            state.testAppearance = GlassLabGoldenPlan.staticAppearance
+            state.testBackdrop = GlassLabGoldenPlan.staticBackdrop
+            state.windowPadding = 40
+            state.hasScrim = false
+            state.hasReducedTintOpacity = false
+            state.adaptiveAppearance = 2
+            state.tintColor = nil
             state.glassWidth = context.width
             state.glassHeight = context.height
             state.cornerRadius = context.cornerRadius
@@ -280,6 +311,9 @@ extension GlassLabView {
             guard NSApp.isActive else { continue }
             guard state.testWindow.isActuallyMain == context.main,
                   state.testWindow.isActuallyKey == context.key,
+                  GlassLabGoldenPlan.staticAppearance.matchesName(
+                      state.testWindow.effectiveAppearanceName ?? ""
+                  ),
                   let glass = state.testWindow.liveGlass else {
                 attempts += 1
                 guard attempts < 4 else {
@@ -287,7 +321,9 @@ extension GlassLabView {
                         slice: context.slice,
                         detail: "wanted main=\(context.main) key=\(context.key), "
                             + "got main=\(state.testWindow.isActuallyMain) "
-                            + "key=\(state.testWindow.isActuallyKey)"
+                            + "key=\(state.testWindow.isActuallyKey) "
+                            + "appearance="
+                            + "\(state.testWindow.effectiveAppearanceName ?? "unknown")"
                     )
                 }
                 continue
@@ -355,7 +391,8 @@ extension GlassLabView {
                         variant: entry.variant,
                         subvariant: entry.subvariant,
                         context: context,
-                        appearance: appearance
+                        appearance: appearance,
+                        backdrop: GlassLabGoldenPlan.staticBackdrop
                     ),
                     slice: context.slice
                 )
@@ -414,7 +451,8 @@ extension GlassLabView {
                         variant: entry.variant,
                         subvariant: entry.subvariant,
                         context: context,
-                        appearance: appearance
+                        appearance: appearance,
+                        backdrop: GlassLabGoldenPlan.staticBackdrop
                     ),
                     slice: context.slice
                 )
