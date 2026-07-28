@@ -146,7 +146,16 @@ public struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
             ))
         }
 
-        let output = GlassMaterialAccess.outputBounds(under: glass)
+        // The supported Regular/Clear topology always resolves both untinted
+        // grades, the rim, and the render bounds. A capture that finds
+        // `glassBackground` but not the rest sampled a partially materialized
+        // tree; admitting it would replay exactly the hybrid/clipped material
+        // the freeze exists to prevent.
+        guard !matrices.isEmpty, !rims.isEmpty,
+              let marginWidth = GlassMaterialAccess.marginWidth(under: glass),
+              let output = GlassMaterialAccess.outputBounds(under: glass)
+        else { return nil }
+
         var colors: [String: GlassMaterialColorValue] = [:]
         for (key, color) in inputs.colors {
             guard let value = GlassMaterialColorValue(color) else { return nil }
@@ -158,9 +167,9 @@ public struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
             colors: colors,
             points: inputs.points,
             nilKeys: inputs.nilKeys,
-            marginWidth: GlassMaterialAccess.marginWidth(under: glass),
-            outputMinimum: output?.minimum,
-            outputMaximum: output?.maximum,
+            marginWidth: marginWidth,
+            outputMinimum: output.minimum,
+            outputMaximum: output.maximum,
             matrices: matrices,
             rims: rims
         )
@@ -231,8 +240,13 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
     }
 
     /// The captured Tint matrix for a cell, but only when it was resolved for
-    /// this color — a stale matrix carries the previous color's hue, which is
-    /// worse than the live hue-suppressed fallback.
+    /// this color's hue — a stale matrix carries the previous color's hue,
+    /// which is worse than the live hue-suppressed fallback.
+    ///
+    /// Only RGB participates in the match. The source alpha never enters the
+    /// hue coefficients — coefficient 18 carries it, and the controller
+    /// replaces that from the current `tintColor` on every apply — so an
+    /// opacity-only change keeps serving the captured hue.
     public func tintMatrix(for cell: Cell, matching color: NSColor) -> [Float]? {
         guard let entry = tintMatrices[cell],
               let requested = GlassMaterialColorValue(color) else { return nil }
@@ -240,8 +254,7 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
         let tolerance = 0.001
         guard abs(stored.red - requested.red) <= tolerance,
               abs(stored.green - requested.green) <= tolerance,
-              abs(stored.blue - requested.blue) <= tolerance,
-              abs(stored.alpha - requested.alpha) <= tolerance else { return nil }
+              abs(stored.blue - requested.blue) <= tolerance else { return nil }
         return entry.matrix
     }
 
