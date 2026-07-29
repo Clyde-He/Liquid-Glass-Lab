@@ -506,6 +506,9 @@ final class GlassLabTestWindowController {
     var liveSemanticLayerRoot: CALayer? { semanticHost?.inspectionRootLayer }
     var semanticRenderStatus: String? { semanticHost?.renderStatus }
     var liveWindow: NSWindow? { window }
+    /// The Playground control window — the app's real main window, which the
+    /// in-window atlas provider uses as its capture host.
+    var liveControlWindow: NSWindow? { controlWindow }
     var effectiveAppearanceName: String? {
         window?.effectiveAppearance.name.rawValue
     }

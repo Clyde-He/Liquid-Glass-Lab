@@ -33,7 +33,33 @@ strength.tintColor = glassView.tintColor
 Live mode follows the window: lose main, and the glass re-reads Subdued
 endpoints. To lock a glass to a participation its window never has — a HUD
 panel that should always render the Main-On material — capture a
-`GlassMaterialStyleAtlas` from a probe glass and freeze it:
+`GlassMaterialStyleAtlas` and freeze it.
+
+The product-shaped capture path is `GlassMaterialAtlasProvider`: point it at
+a window that is genuinely main while the user works in it (the app's own
+settings or main window), and it fills the four Main-On cells with invisible
+probes clipped inside that window — parallel batches, a few seconds in the
+background on first run, persisted per environment, byte-identical to a
+visible probe sweep by measurement:
+
+```swift
+let provider = GlassMaterialAtlasProvider(
+    hostWindow: settingsWindow,
+    shortSides: [48, 64, 96, 160, 240],   // bracket your HUD's range + gates
+    storageURL: atlasFileURL
+)
+provider.onAtlasUpdated = { atlas in
+    hudGlass.materialStrength.freeze(atlas: atlas)
+}
+provider.ensureCaptured()                  // loads from disk when compatible
+
+// Capture-on-pick, about a second, at the moment the user chooses a color:
+provider.captureTintMatrices(for: pickedColor) { locked in ... }
+```
+
+The manual sweep below remains the reference path — it also captures the
+Main-Off cells the provider skips — and is what the provider is verified
+against:
 
 ```swift
 // One key-window opportunity yields the whole atlas: participation is the
@@ -127,13 +153,14 @@ deterministic final writer until that question is settled by capture.
 ## Take it
 
 Copy this directory. It has no dependency on the rest of Liquid Glass Lab —
-four files, AppKit only:
+five files, AppKit only:
 
 | File | Role |
 |---|---|
 | `GlassMaterialAccess.swift` | The minimum private-API surface: layer lookup, filter read/write, render bounds, rim gate/payload, color matrices |
 | `GlassMaterialCurve.swift` | The measured curve: shapes, channel table, baseline |
 | `GlassMaterialAtlas.swift` | The captured style atlas: appearance × variant × participation × size samples, Codable, interpolated |
+| `GlassMaterialAtlasProvider.swift` | The product capture path: invisible in-window probes, opportunistic Main-On batches, persistence |
 | `GlassMaterialStrength.swift` | The controller and the `NSGlassEffectView` subclass |
 
 ## How it works

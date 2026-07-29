@@ -57,8 +57,26 @@ extension GlassLabView {
         Section("Style Atlas") {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
+                    Button("Capture In-Window (Provider)") {
+                        startAtlasProvider()
+                    }
+                    .disabled(isCapturingAtlas)
+                    if let providerStatus {
+                        Text(providerStatus)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text("The product-shaped path: invisible probes clipped inside this control window — already genuinely main while you work in it — fill the four Main-On cells in parallel batches, a few seconds in the background, persisted per environment. This is what a real app would ship.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
                     Button(
-                        isCapturingAtlas ? "Capturing…" : "Capture Style Atlas"
+                        isCapturingAtlas
+                            ? "Capturing…" : "Capture Probe Sweep (reference)"
                     ) {
                         captureStyleAtlas()
                     }
@@ -69,7 +87,7 @@ extension GlassLabView {
                     Button("Load Saved Atlas") { loadSavedAtlas() }
                         .disabled(isCapturingAtlas)
                 }
-                Text("Sweeps the test window through appearance × Regular/Clear × Main On/Off at short sides \(Self.atlasProbeShortSides.map { String(Int($0)) }.joined(separator: "/")) — \(8 * Self.atlasProbeShortSides.count) samples — then stamps the capture environment and saves the atlas to Application Support. The app must stay active; Main-On cells need real participation.")
+                Text("The reference sweep drives the visible test window through appearance × Regular/Clear × Main On/Off at short sides \(Self.atlasProbeShortSides.map { String(Int($0)) }.joined(separator: "/")) — \(8 * Self.atlasProbeShortSides.count) samples including the Main-Off cells the provider skips. Slower and visible; kept as the ground truth the provider is verified against.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -367,6 +385,48 @@ extension GlassLabView {
         }
     }
 
+    // MARK: - In-window provider
+
+    func startAtlasProvider() {
+        let provider: GlassMaterialAtlasProvider
+        if let existing = atlasProvider {
+            provider = existing
+        } else {
+            guard let window = state.testWindow.liveControlWindow
+                ?? NSApp.mainWindow else {
+                providerStatus = "No control window available."
+                return
+            }
+            provider = GlassMaterialAtlasProvider(
+                hostWindow: window,
+                shortSides: Self.atlasProbeShortSides,
+                storageURL: try? Self.atlasStorageURL()
+            )
+            provider.onStateChanged = { newState in
+                providerStatus = Self.describeProviderState(newState)
+            }
+            provider.onAtlasUpdated = { updated in
+                atlasDocument = updated
+                hudPanelController?.setAtlas(updated)
+            }
+            atlasProvider = provider
+        }
+        provider.ensureCaptured()
+    }
+
+    static func describeProviderState(
+        _ state: GlassMaterialAtlasProvider.State
+    ) -> String {
+        switch state {
+        case .idle: "idle"
+        case .waitingForMainWindow:
+            "waiting for this window to be main and the app active"
+        case let .capturing(completed, total): "capturing \(completed)/\(total)"
+        case .ready: "ready — Main-On coverage complete"
+        case let .failed(reason): "failed: \(reason)"
+        }
+    }
+
     // MARK: - Atlas capture
 
     func captureStyleAtlas() {
@@ -539,6 +599,23 @@ extension GlassLabView {
             return
         }
         guard let tint = hudTintColor else { return }
+
+        // The provider path is the product-shaped one: a parallel in-window
+        // batch at the capture-on-pick moment, about a second.
+        if let provider = atlasProvider {
+            atlasStatus = "Locking tint hue via in-window provider…"
+            provider.captureTintMatrices(for: tint) { success in
+                if success {
+                    atlasDocument = provider.atlas
+                    hudPanelController?.setAtlas(provider.atlas)
+                    atlasStatus = "Tint hue locked (in-window)."
+                } else {
+                    atlasStatus = "Tint lock needs this window main and the "
+                        + "app active — click here and retry."
+                }
+            }
+            return
+        }
         guard !state.hasActiveOverrides else {
             atlasStatus = AtlasBenchError.overridesActive.errorDescription
             return
@@ -1396,6 +1473,77 @@ extension GlassLabView {
                     ?? "no convergence within 5s after drag burst"
             )
             hud.setStrength(1)
+        }
+
+        // In-window provider end-to-end: attach to the app's real control
+        // window, capture the Main-On cells with invisible clipped probes,
+        // and require sample equivalence with the visible sweep — the
+        // empirical proof that an obscured probe resolves identically.
+        state.isTestWindowMain = false
+        state.testWindow.sync(with: state)
+        try await Task.sleep(for: .milliseconds(600))
+        if let controlWindow = state.testWindow.liveControlWindow {
+            let providerSides: [Double] = [64, 96, 160]
+            let provider = GlassMaterialAtlasProvider(
+                hostWindow: controlWindow,
+                shortSides: providerSides,
+                storageURL: nil
+            )
+            provider.ensureCaptured()
+            var waitedMs = 0
+            while !provider.isMainOnCoverageComplete, waitedMs < 30000 {
+                try await Task.sleep(for: .milliseconds(300))
+                waitedMs += 300
+                if case .failed = provider.state { break }
+            }
+            step(
+                "provider-completes",
+                provider.isMainOnCoverageComplete,
+                Self.describeProviderState(provider.state)
+                    + " after \(waitedMs)ms"
+            )
+            if provider.isMainOnCoverageComplete {
+                var worstRelative = 0.0
+                var worstContext = "none"
+                for isLight in [true, false] {
+                    for isClear in [false, true] {
+                        let cell = GlassMaterialStyleAtlas.Cell(
+                            isLightAppearance: isLight,
+                            isClear: isClear,
+                            hasMainParticipation: true
+                        )
+                        for side in providerSides {
+                            guard let hidden = provider.atlas.sample(
+                                for: cell,
+                                at: side
+                            ), let visible = decoded.sample(
+                                for: cell,
+                                at: side
+                            ) else { continue }
+                            let diff = Self.compareSamples(
+                                live: hidden,
+                                interpolated: visible
+                            )
+                            if diff.maxRelative > worstRelative {
+                                worstRelative = diff.maxRelative
+                                worstContext = "\(Self.cellLabel(cell)) @ "
+                                    + "\(Int(side)) (\(diff.worstKey))"
+                            }
+                        }
+                    }
+                }
+                step(
+                    "provider-matches-sweep",
+                    worstRelative < 0.02,
+                    String(
+                        format: "worst %.3f%% at %@",
+                        worstRelative * 100,
+                        worstContext
+                    )
+                )
+            }
+        } else {
+            step("provider-completes", false, "no control window")
         }
 
         // Tint capture-on-pick — assert the whole pipeline on the HUD: the

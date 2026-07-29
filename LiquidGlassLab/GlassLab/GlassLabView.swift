@@ -134,6 +134,8 @@ struct GlassLabView: View {
     @State var atlasReadbackReport: String?
     @State var atlasReadbackTask: Task<Void, Never>?
     @State var isRunningAtlasReadback = false
+    @State var atlasProvider: GlassMaterialAtlasProvider?
+    @State var providerStatus: String?
     @State var hudPanelController: GlassLabHUDPanelController?
     @State var hudPanelVisible = false
     @State var hudAppearance = GlassLabHUDPanelController.Appearance.auto

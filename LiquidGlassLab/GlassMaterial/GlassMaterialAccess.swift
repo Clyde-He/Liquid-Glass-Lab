@@ -631,5 +631,16 @@ enum GlassMaterialAccess {
         guard object.responds(to: NSSelectorFromString(key)) else { return nil }
         return object.value(forKey: key)
     }
+
+    /// Writes the private variant with the same responds-guarded discipline
+    /// as every other private access: Regular is 1, Clear is 2. Used by the
+    /// atlas provider to give a fresh probe its material before the first
+    /// resolution settles.
+    static func setVariant(_ variant: Int, on glass: NSGlassEffectView) {
+        guard glass.responds(to: NSSelectorFromString("set_variant:")) else {
+            return
+        }
+        glass.setValue(variant, forKey: "_variant")
+    }
 }
 #endif
