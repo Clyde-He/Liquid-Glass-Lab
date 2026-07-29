@@ -91,10 +91,13 @@ public struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
 
     // Group 3 — render bounds. Without these the outer passes hard-clip at
     // the outline (the clipped-ring artifact): a flat context resolves
-    // `marginWidth` 0.5 where Main-On resolves `0.35 · shortSide`.
-    public var marginWidth: Double?
-    public var outputMinimum: Double?
-    public var outputMaximum: Double?
+    // `marginWidth` 0.5 where Main-On resolves `0.35 · shortSide`. The fields
+    // are non-optional by design: `capture` refuses a tree that does not
+    // resolve them, and decoding a persisted sample without them fails
+    // instead of installing a sample the restamp would later skip.
+    public var marginWidth: Double
+    public var outputMinimum: Double
+    public var outputMaximum: Double
 
     // Groups 2 and 4 — in deterministic traversal order.
     public var matrices: [GlassMaterialMatrixSample]
@@ -264,6 +267,17 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
         (cells[cell] ?? []).map(\.shortSide)
     }
 
+    /// True when every sample of the cell carries the exact supported
+    /// topology: two untinted grade slots and one key-fill rim. `capture`
+    /// guarantees this for its own output; a persisted atlas is re-validated
+    /// at freeze time because decoding cannot.
+    public func cellMatchesSupportedTopology(_ cell: Cell) -> Bool {
+        guard let samples = cells[cell], !samples.isEmpty else { return false }
+        return samples.allSatisfy {
+            $0.matrices.count == 2 && $0.rims.count == 1
+        }
+    }
+
     /// The style for one cell at one live geometry, piecewise-linearly
     /// interpolated between the two bracketing captures and clamped at the
     /// sampled ends. Size-invariant channels interpolate to themselves, so no
@@ -368,9 +382,12 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
             )
         }
         out.nilKeys = t < 0.5 ? low.nilKeys : high.nilKeys
-        out.marginWidth = mixOptional(low.marginWidth, high.marginWidth, t)
-        out.outputMinimum = mixOptional(low.outputMinimum, high.outputMinimum, t)
-        out.outputMaximum = mixOptional(low.outputMaximum, high.outputMaximum, t)
+        out.marginWidth = low.marginWidth
+            + (high.marginWidth - low.marginWidth) * t
+        out.outputMinimum = low.outputMinimum
+            + (high.outputMinimum - low.outputMinimum) * t
+        out.outputMaximum = low.outputMaximum
+            + (high.outputMaximum - low.outputMaximum) * t
         if low.matrices.count == high.matrices.count {
             out.matrices = zip(low.matrices, high.matrices).map { a, b in
                 GlassMaterialMatrixSample(
@@ -395,15 +412,6 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
             }
         }
         return out
-    }
-
-    private static func mixOptional(
-        _ a: Double?,
-        _ b: Double?,
-        _ t: Double
-    ) -> Double? {
-        guard let a, let b else { return t < 0.5 ? a : b }
-        return a + (b - a) * t
     }
 }
 

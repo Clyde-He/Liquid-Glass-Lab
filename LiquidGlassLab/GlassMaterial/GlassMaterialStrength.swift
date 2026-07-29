@@ -117,17 +117,21 @@ public final class GlassMaterialStrength {
 
     /// True when the glass currently has a `glassBackground` pass and this
     /// controller has values to drive it — a live baseline, or a frozen atlas
-    /// with samples for the *currently selected* cell. The cell check is
+    /// whose selected cell can be stamped onto the *complete* current tree.
+    /// While the destination is partially rebuilt, the frozen restamp writes
+    /// nothing (see `frozenDestination(for:on:)`) and this reports false for
+    /// the same window, rather than active-but-unwritten. The cell check is
     /// defensive: `freeze(atlas:)` refuses an atlas that could miss one.
     public var isAvailable: Bool {
         guard let glass,
               GlassMaterialAccess.glassBackgroundTarget(under: glass) != nil
         else { return false }
         if let frozenAtlas {
-            return frozenAtlas.sample(
+            guard let sample = frozenAtlas.sample(
                 for: currentCell(for: glass),
                 at: min(glass.bounds.width, glass.bounds.height)
-            ) != nil
+            ) else { return false }
+            return frozenDestination(for: sample, on: glass) != nil
         }
         return baseline != nil
     }
@@ -140,6 +144,35 @@ public final class GlassMaterialStrength {
             isClear: Self.isClear(glass),
             hasMainParticipation: frozenMainParticipation
         )
+    }
+
+    /// The complete destination topology a frozen restamp writes to, or nil
+    /// while any part of it is missing. A partially rebuilt tree can expose
+    /// `glassBackground` while the grade, rim, output, or tint layers are
+    /// still absent; stamping the groups that do exist and skipping the rest
+    /// would leave a hybrid material on screen until another context event.
+    /// Writing nothing keeps the tree consistently system-resolved for the
+    /// next refresh — and `isAvailable` runs the same check, so callers see
+    /// the frozen material as inactive during that window rather than active
+    /// but unwritten.
+    private func frozenDestination(
+        for sample: GlassMaterialStyleSample,
+        on glass: NSGlassEffectView
+    ) -> (matrixLayers: [CALayer], rimLayers: [CALayer])? {
+        let matrixLayers = GlassMaterialAccess.untintedMatrixLayers(under: glass)
+        let rimLayers = GlassMaterialAccess.rimLayers(under: glass)
+        guard matrixLayers.count == sample.matrices.count,
+              rimLayers.count == sample.rims.count,
+              GlassMaterialAccess.marginWidth(under: glass) != nil,
+              GlassMaterialAccess.outputBounds(under: glass) != nil
+        else { return nil }
+        if tintColor != nil {
+            guard let tintLayer = GlassMaterialAccess.tintMatrixLayer(
+                under: glass
+            ), GlassMaterialAccess.colorMatrix(on: tintLayer) != nil
+            else { return nil }
+        }
+        return (matrixLayers, rimLayers)
     }
 
     public init(glass: NSGlassEffectView, value: Double = 1) {
@@ -214,6 +247,10 @@ public final class GlassMaterialStrength {
         atlas: GlassMaterialStyleAtlas,
         mainParticipation: Bool = true
     ) -> Bool {
+        // Every sample is re-validated, not merely counted: a persisted atlas
+        // decodes without running `capture`'s completeness guard, so a stale
+        // or hand-edited file could otherwise install cells the restamp
+        // would later skip against the live topology.
         for isLight in [true, false] {
             for isClear in [true, false] {
                 let cell = GlassMaterialStyleAtlas.Cell(
@@ -221,7 +258,7 @@ public final class GlassMaterialStrength {
                     isClear: isClear,
                     hasMainParticipation: mainParticipation
                 )
-                guard !atlas.sampleShortSides(for: cell).isEmpty else {
+                guard atlas.cellMatchesSupportedTopology(cell) else {
                     return false
                 }
             }
@@ -359,19 +396,13 @@ public final class GlassMaterialStrength {
         // cell, so in the supported domain this lookup always succeeds.
         guard let sample = atlas.sample(for: cell, at: shortSide) else { return }
 
-        // Validate the complete destination topology before the first write.
-        // A partially rebuilt tree can expose `glassBackground` while the
-        // grade, rim, or output layers are still missing; stamping the shader
-        // first and skipping the absent groups would leave a hybrid material
-        // on screen until another context event. Writing nothing keeps the
-        // tree consistently system-resolved for the next refresh instead.
-        let matrixLayers = GlassMaterialAccess.untintedMatrixLayers(under: glass)
-        let rimLayers = GlassMaterialAccess.rimLayers(under: glass)
-        guard matrixLayers.count == sample.matrices.count,
-              rimLayers.count == sample.rims.count,
-              GlassMaterialAccess.marginWidth(under: glass) != nil,
-              GlassMaterialAccess.outputBounds(under: glass) != nil
+        // Validate the complete destination topology before the first write;
+        // an incomplete tree receives nothing at all. See
+        // `frozenDestination(for:on:)`.
+        guard let destination = frozenDestination(for: sample, on: glass)
         else { return }
+        let matrixLayers = destination.matrixLayers
+        let rimLayers = destination.rimLayers
 
         var sampleColors: [String: NSColor] = [:]
         for (key, color) in sample.colors { sampleColors[key] = color.nsColor }
@@ -412,17 +443,12 @@ public final class GlassMaterialStrength {
         // Render bounds do not animate with the transition; they are part of
         // the context. Held constant across `value` — at 0 every visible
         // channel is already at its dematerialized endpoint.
-        if let margin = sample.marginWidth {
-            GlassMaterialAccess.setMarginWidth(margin, under: glass)
-        }
-        if let minimum = sample.outputMinimum,
-           let maximum = sample.outputMaximum {
-            GlassMaterialAccess.setOutputBounds(
-                minimum: minimum,
-                maximum: maximum,
-                under: glass
-            )
-        }
+        GlassMaterialAccess.setMarginWidth(sample.marginWidth, under: glass)
+        GlassMaterialAccess.setOutputBounds(
+            minimum: sample.outputMinimum,
+            maximum: sample.outputMaximum,
+            under: glass
+        )
 
         // Grades and payloads are stamped pairwise in the shared traversal
         // order, against the topology validated above.
