@@ -62,32 +62,37 @@ public struct GlassMaterialColorValue: Codable, Hashable, Sendable {
 /// rim shows nothing — the flat payload resolves zero-alpha colors — so the
 /// payload travels with the style.
 public struct GlassMaterialRimSample: Codable, Hashable, Sendable {
-    public var layerOpacity: Double
-    public var values: [String: Double]
-    public var colors: [String: GlassMaterialColorValue]
+    public internal(set) var layerOpacity: Double
+    public internal(set) var values: [String: Double]
+    public internal(set) var colors: [String: GlassMaterialColorValue]
 }
 
 /// One untinted `vibrantColorMatrix` slot: the 4×5 matrix plus its optional
 /// scalar/Boolean inputs.
 public struct GlassMaterialMatrixSample: Codable, Hashable, Sendable {
-    public var matrix: [Float]
-    public var inputs: [String: Double]
+    public internal(set) var matrix: [Float]
+    public internal(set) var inputs: [String: Double]
+    /// Scalar inputs the filter declares that resolved nil in the captured
+    /// context. Nil is a value here just as it is for the shader: the
+    /// destination may resolve these nonnil in its real context, and replay
+    /// must clear them rather than leave them standing.
+    public internal(set) var nilInputKeys: Set<String>
 }
 
 /// One complete resolved style at one geometry: the transplant groups the
 /// AppKit reverse-engineering document verified to be individually necessary.
 public struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
     /// `min(width, height)` of the probe glass this was captured from.
-    public var shortSide: Double
+    public internal(set) var shortSide: Double
 
     // Group 1 — the glass shader, captured by declared capability rather than
     // by table: every numeric input, every color input, every point input,
     // and the keys that resolve nil. Nil is a value: replaying a captured nil
     // over a context's nonnil resolution requires an explicit clear.
-    public var numeric: [String: Double]
-    public var colors: [String: GlassMaterialColorValue]
-    public var points: [String: CGPoint]
-    public var nilKeys: Set<String>
+    public internal(set) var numeric: [String: Double]
+    public internal(set) var colors: [String: GlassMaterialColorValue]
+    public internal(set) var points: [String: CGPoint]
+    public internal(set) var nilKeys: Set<String>
 
     // Group 3 — render bounds. Without these the outer passes hard-clip at
     // the outline (the clipped-ring artifact): a flat context resolves
@@ -95,13 +100,13 @@ public struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
     // are non-optional by design: `capture` refuses a tree that does not
     // resolve them, and decoding a persisted sample without them fails
     // instead of installing a sample the restamp would later skip.
-    public var marginWidth: Double
-    public var outputMinimum: Double
-    public var outputMaximum: Double
+    public internal(set) var marginWidth: Double
+    public internal(set) var outputMinimum: Double
+    public internal(set) var outputMaximum: Double
 
     // Groups 2 and 4 — in deterministic traversal order.
-    public var matrices: [GlassMaterialMatrixSample]
-    public var rims: [GlassMaterialRimSample]
+    public internal(set) var matrices: [GlassMaterialMatrixSample]
+    public internal(set) var rims: [GlassMaterialRimSample]
 
     /// Every shader input this sample knows about — captured with a value or
     /// captured as nil. A destination that declares a managed input outside
@@ -137,9 +142,11 @@ public struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
             guard let matrix = GlassMaterialAccess.colorMatrix(on: layer) else {
                 return nil
             }
+            let scalars = GlassMaterialAccess.matrixScalarInputs(on: layer)
             matrices.append(GlassMaterialMatrixSample(
                 matrix: matrix,
-                inputs: GlassMaterialAccess.matrixScalarInputs(on: layer)
+                inputs: scalars.values,
+                nilInputKeys: scalars.nilKeys
             ))
         }
 
@@ -280,17 +287,25 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
         (cells[cell] ?? []).map(\.shortSide)
     }
 
-    /// True when every sample of the cell carries the exact supported
-    /// topology: two untinted grade slots with well-formed 4×5 matrices and
-    /// one key-fill rim. `capture` guarantees this for its own output; a
-    /// persisted atlas is re-validated at freeze time because decoding
-    /// cannot.
+    /// True when every sample of the cell carries the structural invariants
+    /// `capture` guarantees: two untinted grade slots with well-formed 4×5
+    /// matrices, and one key-fill rim with a nonempty value payload and both
+    /// effect colors. Capture enforces this for its own output and the
+    /// payload types are not publicly constructible or mutable, so this
+    /// re-validation exists for exactly one producer that cannot run those
+    /// guards: `Codable` decoding of a persisted atlas.
     public func cellMatchesSupportedTopology(_ cell: Cell) -> Bool {
         guard let samples = cells[cell], !samples.isEmpty else { return false }
         return samples.allSatisfy { sample in
-            sample.rims.count == 1
-                && sample.matrices.count == 2
+            sample.matrices.count == 2
                 && sample.matrices.allSatisfy { $0.matrix.count == 20 }
+                && sample.rims.count == 1
+                && sample.rims.allSatisfy { rim in
+                    !rim.values.isEmpty
+                        && GlassMaterialAccess.rimColorKeys.allSatisfy {
+                            rim.colors[$0] != nil
+                        }
+                }
         }
     }
 
@@ -412,7 +427,8 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
                             $0 + ($1 - $0) * Float(t)
                         }
                         : (t < 0.5 ? a.matrix : b.matrix),
-                    inputs: mixDictionaries(a.inputs, b.inputs, t, using: mix)
+                    inputs: mixDictionaries(a.inputs, b.inputs, t, using: mix),
+                    nilInputKeys: t < 0.5 ? a.nilInputKeys : b.nilInputKeys
                 )
             }
         }

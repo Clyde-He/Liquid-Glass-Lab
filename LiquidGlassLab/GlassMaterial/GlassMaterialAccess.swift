@@ -321,7 +321,7 @@ enum GlassMaterialAccess {
         "keyAngle", "keyColorAlpha", "keyHeight", "keyHeightOffset",
         "keyHeightScale", "keySpread", "keySpreadOffset", "keySpreadScale",
     ]
-    private static let rimColorKeys = ["fillColor", "keyColor"]
+    static let rimColorKeys = ["fillColor", "keyColor"]
 
     /// The rim effect's complete value/color payload. A flat context resolves
     /// zero-alpha rim colors, so opening the gate without restamping the
@@ -333,10 +333,17 @@ enum GlassMaterialAccess {
             as? NSObject else { return nil }
         var values: [String: Double] = [:]
         for key in rimValueKeys {
-            if let number = valueIfResponds(forKey: key, on: effect)
-                as? NSNumber {
-                values[key] = number.doubleValue
+            // A getter this build does not declare is skipped; a declared
+            // getter that fails to produce a number fails the capture — the
+            // all-or-nothing contract, so replay never leaves an omitted
+            // effect property at the destination context's value.
+            guard effect.responds(to: NSSelectorFromString(key)) else {
+                continue
             }
+            guard let number = effect.value(forKey: key) as? NSNumber else {
+                return nil
+            }
+            values[key] = number.doubleValue
         }
         guard !values.isEmpty else { return nil }
         var colors: [String: NSColor] = [:]
@@ -496,22 +503,30 @@ enum GlassMaterialAccess {
 
     /// The scalar/Boolean inputs a `vibrantColorMatrix` filter declares beside
     /// `inputColorMatrix` — the per-slot optional Booleans from the accepted
-    /// matrix mutation contract.
-    static func matrixScalarInputs(on layer: CALayer) -> [String: Double] {
+    /// matrix mutation contract. Nil is a value, exactly as for the shader:
+    /// an input the captured context resolves nil may resolve nonnil in the
+    /// destination's real context and must be cleared on replay.
+    static func matrixScalarInputs(
+        on layer: CALayer
+    ) -> (values: [String: Double], nilKeys: Set<String>) {
         guard let filter = (layer.filters as? [NSObject])?.first(where: {
             filterName($0) == "vibrantColorMatrix"
-        }) else { return [:] }
+        }) else { return ([:], []) }
         var values: [String: Double] = [:]
+        var nilKeys: Set<String> = []
         for key in filterInputKeys(filter) where key != "inputColorMatrix" {
             if let number = filter.value(forKey: key) as? NSNumber {
                 values[key] = number.doubleValue
+            } else {
+                nilKeys.insert(key)
             }
         }
-        return values
+        return (values, nilKeys)
     }
 
     static func setMatrixScalarInputs(
         _ values: [String: Double],
+        nilKeys: Set<String> = [],
         on layer: CALayer
     ) {
         guard let filter = (layer.filters as? [NSObject])?.first(where: {
@@ -522,6 +537,9 @@ enum GlassMaterialAccess {
         CATransaction.setDisableActions(true)
         for (key, value) in values where keys.contains(key) {
             layer.setValue(value, forKeyPath: "filters.\(name).\(key)")
+        }
+        for key in nilKeys where keys.contains(key) {
+            layer.setValue(nil, forKeyPath: "filters.\(name).\(key)")
         }
         CATransaction.commit()
     }

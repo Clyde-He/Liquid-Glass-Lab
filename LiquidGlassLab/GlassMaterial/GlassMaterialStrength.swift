@@ -93,10 +93,9 @@ public final class GlassMaterialStrength {
     private var appliedValue: Double = 1
     private var lastWrittenFilterIdentity: ObjectIdentifier?
     private var frozenMainParticipation = true
-    /// The destination `inputKeys` set whose managed inputs were last
-    /// verified as covered by the frozen sample. See
-    /// `sampleCoversDestination(_:target:)`.
-    private var coverageVerifiedInputKeys: Set<String>?
+    /// The destination's managed-input classification, cached against its
+    /// `inputKeys` set. See `sampleCoversDestination(_:target:)`.
+    private var managedKeysCache: (inputKeys: Set<String>, managed: Set<String>)?
 
     /// The installed style atlas, if any. See `freeze(atlas:)`.
     public private(set) var frozenAtlas: GlassMaterialStyleAtlas?
@@ -198,24 +197,26 @@ public final class GlassMaterialStrength {
     /// documented. Coverage is deliberately one-directional: sample keys the
     /// destination lacks are harmless, since writes are capability-guarded.
     ///
-    /// The typed classification costs one full read, so the verdict is cached
-    /// against the destination's `inputKeys` set — stable for a given shader
-    /// generation, and revalidated automatically if a rebuild changes it.
+    /// Only the expensive part — the typed classification of the
+    /// destination's inputs — is cached, keyed by its `inputKeys` set; the
+    /// subset comparison runs per call against the sample actually selected,
+    /// so the verdict never leaks from one sample to another.
     private func sampleCoversDestination(
         _ sample: GlassMaterialStyleSample,
         target: GlassMaterialAccess.GlassBackgroundTarget
     ) -> Bool {
-        if coverageVerifiedInputKeys == target.inputKeys { return true }
-        let typed = GlassMaterialAccess.readTypedInputs(from: target)
-        let managed = Set(typed.numeric.keys)
-            .union(typed.colors.keys)
-            .union(typed.points.keys)
-            .union(typed.nilKeys)
-        guard managed.subtracting(sample.capturedKeys).isEmpty else {
-            return false
+        let managed: Set<String>
+        if let cache = managedKeysCache, cache.inputKeys == target.inputKeys {
+            managed = cache.managed
+        } else {
+            let typed = GlassMaterialAccess.readTypedInputs(from: target)
+            managed = Set(typed.numeric.keys)
+                .union(typed.colors.keys)
+                .union(typed.points.keys)
+                .union(typed.nilKeys)
+            managedKeysCache = (target.inputKeys, managed)
         }
-        coverageVerifiedInputKeys = target.inputKeys
-        return true
+        return managed.subtracting(sample.capturedKeys).isEmpty
     }
 
     public init(glass: NSGlassEffectView, value: Double = 1) {
@@ -310,7 +311,6 @@ public final class GlassMaterialStrength {
         frozenMainParticipation = mainParticipation
         baseline = nil
         lastWrittenFilterIdentity = nil
-        coverageVerifiedInputKeys = nil
         apply()
         return true
     }
@@ -321,7 +321,6 @@ public final class GlassMaterialStrength {
     /// immediate true restore requires recreating the glass view.
     public func unfreeze() {
         frozenAtlas = nil
-        coverageVerifiedInputKeys = nil
         refresh()
     }
 
@@ -334,7 +333,6 @@ public final class GlassMaterialStrength {
         baseline = nil
         frozenAtlas = nil
         lastWrittenFilterIdentity = nil
-        coverageVerifiedInputKeys = nil
     }
 
     // MARK: Internals
@@ -503,7 +501,11 @@ public final class GlassMaterialStrength {
         // order, against the topology validated above.
         for (layer, slot) in zip(matrixLayers, sample.matrices) {
             GlassMaterialAccess.setColorMatrix(slot.matrix, on: layer)
-            GlassMaterialAccess.setMatrixScalarInputs(slot.inputs, on: layer)
+            GlassMaterialAccess.setMatrixScalarInputs(
+                slot.inputs,
+                nilKeys: slot.nilInputKeys,
+                on: layer
+            )
         }
 
         // The frozen rim owns both the payload and the gate, in both
