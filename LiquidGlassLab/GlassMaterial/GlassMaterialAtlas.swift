@@ -225,7 +225,10 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
 
         /// Schema and OS build must match to freeze; the display signature is
         /// deliberately not part of this — compare it yourself to decide when
-        /// to recapture opportunistically.
+        /// to recapture opportunistically. It is a recapture *hint*, not a
+        /// proven display identity: the research found three display/runtime-
+        /// sensitive resolved fields but has not established which display
+        /// metric drives them.
         public func isCompatible(with other: Environment) -> Bool {
             schemaVersion == other.schemaVersion && osBuild == other.osBuild
         }
