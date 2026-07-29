@@ -14,6 +14,92 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 extension GlassLabView {
+    /// The Bench Exports page: the report/JSON exports that used to sit in a
+    /// "Diagnostics" section on both General tweaking pages. Exports capture
+    /// through the renderer they name, so the page carries its own renderer
+    /// picker instead of inheriting whatever the tweaking side last used.
+    @ViewBuilder
+    func benchExportSections(state labState: GlassLabState) -> some View {
+        @Bindable var state = labState
+
+        Section("Exports") {
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("Renderer", selection: $state.rendererMode) {
+                    ForEach(GlassLabRendererMode.allCases) { mode in
+                        Text(mode.navigationTitle).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("Each export drives the selected renderer's test window through its own capture contexts and restores the previous context when it finishes.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            if state.rendererMode == .recipe {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Button("Copy Glass Report") { copyReport() }
+                        Button(isCapturingMatrix ? "Capturing…" : "Export Recipe Matrix (JSON)") {
+                            exportMatrix()
+                        }
+                        .disabled(isCapturingMatrix || isCapturingPassAudit)
+                    }
+                    Button(
+                        isCapturingPassAudit
+                            ? "Auditing…"
+                            : "Export Recursive Pass Audit (JSON)"
+                    ) {
+                        exportPassAudit()
+                    }
+                    .disabled(isCapturingMatrix || isCapturingPassAudit)
+                    Divider()
+                    Button(
+                        isCapturingMatrix
+                            ? "Capturing…"
+                            : "Capture Golden Archive (unified/)"
+                    ) {
+                        exportGoldenArchive()
+                    }
+                    .disabled(isCapturingMatrix || isCapturingPassAudit)
+                    Text("Golden Archive replaces the two exports above. It writes unified/ as four files — static-scalar, static-tree, dynamic, and meta — in one run, so every section shares an environment and can be compared cell by cell. See Golden/CAPTURE-SPEC.md for what each slice exists to prove.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Text("Recipe Matrix records 1,008 compact Shader/Rim rows across representative Heights. Recursive Pass Audit is a separate 336-row Panel capture at 480×200@16 and Margin 40; it walks sublayers, masks, filters, background filters, compositing filters, and object-backed effects across Main × Subdued × Variant × Subvariant. Both exports pause while the app is inactive and require clean system state with Overrides disabled.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Button("Copy Semantic Report") { copySemanticReport() }
+                            .disabled(semanticSnapshot == nil)
+                        Button(
+                            isCapturingSemanticTrees
+                                ? "Capturing…"
+                                : "Export All Usage Trees (JSON)"
+                        ) {
+                            exportSemanticUsageTrees()
+                        }
+                        .disabled(isCapturingSemanticTrees)
+                    }
+                    Text("The report copies the current live tree. Export walks every runtime Usage across Main Off/On at the current Size, Host, Corner Radius, and Window Margin, recording 48 availability/context rows, layers, CAFilter inputs, and object-backed SDF effects in a separate semantic-usage-trees.json file.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if !state.reportOutput.isEmpty {
+                ScrollView {
+                    Text(state.reportOutput)
+                        .font(.system(size: 11, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .frame(height: 180)
+            }
+        }
+    }
+
     enum MatrixExportError: LocalizedError {
         case participationRejected(main: Bool, subdued: Bool, height: Double)
         case invalidMatrix(String)

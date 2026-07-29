@@ -36,6 +36,45 @@ enum GlassLabRendererMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Sidebar sections. Recipe and Semantic Usage are the two tweaking surfaces
+/// and map 1:1 onto renderer modes; Bench is the research area — captures,
+/// probes, studies, and exports — and deliberately has no renderer of its own:
+/// each Bench page drives `rendererMode` to whatever its instrumentation
+/// needs, so tweaking pages never host capture UI again.
+enum GlassLabSection: String, CaseIterable, Identifiable {
+    case recipe = "Recipe (NSGlass)"
+    case semanticUsage = "Semantic Usage (SwiftUI)"
+    case bench = "Bench"
+
+    var id: Self { self }
+
+    var navigationTitle: String {
+        switch self {
+        case .recipe: "NSGlass"
+        case .semanticUsage: "SwiftUI"
+        case .bench: "Bench"
+        }
+    }
+
+    var navigationIcon: String {
+        switch self {
+        case .recipe: "square.stack.3d.up"
+        case .semanticUsage: "swift"
+        case .bench: "flask"
+        }
+    }
+
+    /// The renderer this section requires, or nil when the section leaves the
+    /// renderer to its pages.
+    var requiredRendererMode: GlassLabRendererMode? {
+        switch self {
+        case .recipe: .recipe
+        case .semanticUsage: .semanticUsage
+        case .bench: nil
+        }
+    }
+}
+
 enum GlassLabMaterializeAnimationMode: String, CaseIterable, Identifiable, Codable {
     case systemDefault = "System Default"
     case linear = "Linear"

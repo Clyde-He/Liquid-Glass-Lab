@@ -14,6 +14,24 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 extension GlassLabView {
+    /// The Bench Probes page. Both probes act on the live Recipe pass tree;
+    /// the hidden `.passes` context page keeps the pass inventory publishing
+    /// while this page is active.
+    @ViewBuilder
+    func benchProbeSections(state labState: GlassLabState) -> some View {
+        let items = passInventorySnapshot.map(passInventoryItems) ?? []
+        if let foreground = items.first(where: { $0.family == "glassForeground" }) {
+            foregroundAberrationProbeSections(item: foreground)
+        } else {
+            labBox {
+                Text("The aberration probe needs the glassForeground pass, which only Variant 14 exposes. Set the Recipe variant to 14 with the test window visible to arm it.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        vibrantColorMatrixProbeSections()
+    }
+
     @ViewBuilder
     func foregroundAberrationProbeSections(
         item: PassInventoryItem

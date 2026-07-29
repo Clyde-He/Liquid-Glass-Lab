@@ -101,6 +101,13 @@ enum GlassLabBackdropMode: String, CaseIterable, Identifiable, Codable {
 @Observable
 @MainActor
 final class GlassLabState {
+    // MARK: Navigation
+
+    /// The sidebar section. Distinct from `rendererMode`: Bench hosts the
+    /// research tooling and steers the renderer per page, so a Bench
+    /// selection never implies a renderer by itself.
+    var selectedSection: GlassLabSection = .recipe
+
     // MARK: Renderer
 
     /// Recipe and Semantic Usage intentionally remain separate renderer

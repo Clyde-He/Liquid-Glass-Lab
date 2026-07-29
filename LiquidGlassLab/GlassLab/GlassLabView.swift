@@ -16,6 +16,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct GlassLabView: View {
+    /// Recipe pages. `.materialize` and `.tint` survive as hidden context
+    /// state — the Bench pages and capture drivers still arm the materialize
+    /// probe and the pass-snapshot publisher through them — but the product
+    /// picker offers only `productCases`.
     enum RecipePage: String, CaseIterable, Identifiable {
         case general = "General"
         case passes = "Passes"
@@ -23,12 +27,31 @@ struct GlassLabView: View {
         case tint = "Tint"
 
         var id: Self { self }
+
+        static let productCases: [RecipePage] = [.general, .passes]
     }
 
+    /// Semantic pages. `.transition` survives as hidden context state for the
+    /// same reason as the hidden Recipe pages.
     enum SemanticPage: String, CaseIterable, Identifiable {
         case general = "General"
         case layerInspector = "Layer Inspector"
         case transition = "Transition"
+
+        var id: Self { self }
+
+        static let productCases: [SemanticPage] = [.general, .layerInspector]
+    }
+
+    /// The research area. Every page here is instrumentation: it may steer
+    /// `rendererMode` and the hidden context pages, and it hosts all capture,
+    /// probe, study, and export UI.
+    enum BenchPage: String, CaseIterable, Identifiable {
+        case exports = "Exports"
+        case materialize = "Materialize"
+        case tint = "Tint Study"
+        case transition = "Transition"
+        case probes = "Probes"
 
         var id: Self { self }
     }
@@ -37,6 +60,7 @@ struct GlassLabView: View {
     @State var selectedRecipePage = RecipePage.general
     @State var selectedPassSlotID: String?
     @State var selectedSemanticPage = SemanticPage.general
+    @State var selectedBenchPage = BenchPage.exports
     @State var isCapturingMatrix = false
     @State var isCapturingPassAudit = false
     @State var isCapturingSemanticTrees = false
@@ -106,7 +130,7 @@ struct GlassLabView: View {
     var body: some View {
         labForm
         .background(GlassLabControlWindowAnchor(state: state).frame(width: 0, height: 0))
-        .navigationTitle(state.rendererMode.navigationTitle)
+        .navigationTitle(state.selectedSection.navigationTitle)
         .onAppear {
             state.testWindow.activate(with: state)
             configureSemanticTransitionProbe()
@@ -146,6 +170,12 @@ struct GlassLabView: View {
                 cancelAppKitMaterializeProbe(rebuild: true)
             }
             scheduleLiveReadoutRefresh()
+        }
+        .onChange(of: state.selectedSection) {
+            applyBenchPageContext()
+        }
+        .onChange(of: selectedBenchPage) {
+            applyBenchPageContext()
         }
         .onChange(of: appKitMaterializeVariant) {
             if state.rendererMode == .recipe,
@@ -204,20 +234,77 @@ struct GlassLabView: View {
         labFormContent(snapshot: liveSnapshot)
     }
 
+    /// Bench pages steer the renderer and the hidden context pages so the
+    /// existing probe wiring — materialize arm/cancel on `selectedRecipePage`,
+    /// transition probe configuration on `selectedSemanticPage`, and the
+    /// pass-snapshot publisher's `.passes` gate — keeps working unchanged.
+    /// Leaving Bench (or a Bench page) resets any research page it had set,
+    /// which is also what disarms its instrumentation.
+    private func applyBenchPageContext() {
+        guard state.selectedSection == .bench else {
+            if selectedRecipePage == .materialize || selectedRecipePage == .tint {
+                selectedRecipePage = .general
+            }
+            if selectedSemanticPage == .transition {
+                selectedSemanticPage = .general
+            }
+            return
+        }
+        switch selectedBenchPage {
+        case .exports:
+            if selectedRecipePage == .materialize || selectedRecipePage == .tint {
+                selectedRecipePage = .general
+            }
+            if selectedSemanticPage == .transition {
+                selectedSemanticPage = .general
+            }
+        case .materialize:
+            state.rendererMode = .recipe
+            selectedRecipePage = .materialize
+            if selectedSemanticPage == .transition {
+                selectedSemanticPage = .general
+            }
+        case .tint:
+            state.rendererMode = .recipe
+            selectedRecipePage = .tint
+            if selectedSemanticPage == .transition {
+                selectedSemanticPage = .general
+            }
+        case .transition:
+            state.rendererMode = .semanticUsage
+            selectedSemanticPage = .transition
+            if selectedRecipePage == .materialize || selectedRecipePage == .tint {
+                selectedRecipePage = .general
+            }
+        case .probes:
+            state.rendererMode = .recipe
+            selectedRecipePage = .passes
+            if selectedSemanticPage == .transition {
+                selectedSemanticPage = .general
+            }
+        }
+    }
+
     private func labFormContent(snapshot: LiveReadoutSnapshot?) -> some View {
         @Bindable var state = state
         return VStack(spacing: 0) {
             Group {
-                switch state.rendererMode {
+                switch state.selectedSection {
                 case .recipe:
                     Picker("Recipe Page", selection: $selectedRecipePage) {
-                        ForEach(RecipePage.allCases) { page in
+                        ForEach(RecipePage.productCases) { page in
                             Text(page.rawValue).tag(page)
                         }
                     }
                 case .semanticUsage:
                     Picker("Semantic Page", selection: $selectedSemanticPage) {
-                        ForEach(SemanticPage.allCases) { page in
+                        ForEach(SemanticPage.productCases) { page in
+                            Text(page.rawValue).tag(page)
+                        }
+                    }
+                case .bench:
+                    Picker("Bench Page", selection: $selectedBenchPage) {
+                        ForEach(BenchPage.allCases) { page in
                             Text(page.rawValue).tag(page)
                         }
                     }
@@ -232,7 +319,7 @@ struct GlassLabView: View {
 
             Divider()
 
-            if state.rendererMode == .recipe, selectedRecipePage == .passes {
+            if state.selectedSection == .recipe, selectedRecipePage == .passes {
                 // Passes renders outside the Form: the grouped section platter
                 // cannot be suppressed per-row on macOS, and it double-boxes
                 // the control-group cards. Plain stacked boxes keep grouping
@@ -254,9 +341,25 @@ struct GlassLabView: View {
                         || isCapturingSemanticTrees
                         || isCapturingTintStudy
                 )
+            } else if state.selectedSection == .bench, selectedBenchPage == .probes {
+                // Probes share the Passes page's card styling, so they render
+                // outside the Form for the same single-platter reason.
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        benchProbeSections(state: state)
+                    }
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .disabled(
+                    isCapturingMatrix
+                        || isCapturingPassAudit
+                        || isCapturingSemanticTrees
+                        || isCapturingTintStudy
+                )
             } else {
             Form {
-                switch state.rendererMode {
+                switch state.selectedSection {
                 case .recipe:
                 switch selectedRecipePage {
                 case .general:
@@ -343,12 +446,8 @@ struct GlassLabView: View {
 
             generalWindowSections(state: state)
 
-                case .passes:
+                case .passes, .materialize, .tint:
                     EmptyView()
-                case .materialize:
-                    appKitMaterializeSections(state: state)
-                case .tint:
-                    tintStudySections(state: state)
                 }
 
                 case .semanticUsage:
@@ -358,7 +457,21 @@ struct GlassLabView: View {
                 case .layerInspector:
                     semanticInspectorSections(state: state, snapshot: semanticSnapshot)
                 case .transition:
+                    EmptyView()
+                }
+
+                case .bench:
+                switch selectedBenchPage {
+                case .exports:
+                    benchExportSections(state: state)
+                case .materialize:
+                    appKitMaterializeSections(state: state)
+                case .tint:
+                    tintStudySections(state: state)
+                case .transition:
                     semanticTransitionSections(state: state)
+                case .probes:
+                    EmptyView()
                 }
 
                 }
@@ -697,14 +810,11 @@ struct GlassLabView: View {
                 rimHighlightEditorSections(state: labState, snapshot: liveSnapshot)
             case "CASDFOutputEffect":
                 outputEffectEditorSections(state: labState, snapshot: liveSnapshot)
-            case "glassForeground":
-                foregroundAberrationProbeSections(item: selectedItem)
             case "vibrantColorMatrix":
                 vibrantColorMatrixEditorSections(
                     item: selectedItem,
                     state: labState
                 )
-                vibrantColorMatrixProbeSections()
             default:
                 EmptyView()
             }
@@ -733,7 +843,7 @@ struct GlassLabView: View {
     }
 
     /// Single-layer grouping container for the Form-free Passes page.
-    private func labBox<Content: View>(
+    func labBox<Content: View>(
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -766,7 +876,6 @@ struct GlassLabView: View {
         family == "glassBackground"
             || family == "CASDFKeyFillHighlightEffect"
             || family == "CASDFOutputEffect"
-            || family == "glassForeground"
             || family == "vibrantColorMatrix"
     }
 
@@ -1123,70 +1232,6 @@ struct GlassLabView: View {
                 .foregroundStyle(.secondary)
         }
 
-        Section("Diagnostics") {
-            if state.rendererMode == .recipe {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Button("Copy Glass Report") { copyReport() }
-                        Button(isCapturingMatrix ? "Capturing…" : "Export Recipe Matrix (JSON)") {
-                            exportMatrix()
-                        }
-                        .disabled(isCapturingMatrix || isCapturingPassAudit)
-                    }
-                    Button(
-                        isCapturingPassAudit
-                            ? "Auditing…"
-                            : "Export Recursive Pass Audit (JSON)"
-                    ) {
-                        exportPassAudit()
-                    }
-                    .disabled(isCapturingMatrix || isCapturingPassAudit)
-                    Divider()
-                    Button(
-                        isCapturingMatrix
-                            ? "Capturing…"
-                            : "Capture Golden Archive (unified/)"
-                    ) {
-                        exportGoldenArchive()
-                    }
-                    .disabled(isCapturingMatrix || isCapturingPassAudit)
-                    Text("Golden Archive replaces the two exports above. It writes unified/ as four files — static-scalar, static-tree, dynamic, and meta — in one run, so every section shares an environment and can be compared cell by cell. See Golden/CAPTURE-SPEC.md for what each slice exists to prove.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Text("Recipe Matrix records 1,008 compact Shader/Rim rows across representative Heights. Recursive Pass Audit is a separate 336-row Panel capture at 480×200@16 and Margin 40; it walks sublayers, masks, filters, background filters, compositing filters, and object-backed effects across Main × Subdued × Variant × Subvariant. Both exports pause while the app is inactive and require clean system state with Overrides disabled.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Button("Copy Semantic Report") { copySemanticReport() }
-                            .disabled(semanticSnapshot == nil)
-                        Button(
-                            isCapturingSemanticTrees
-                                ? "Capturing…"
-                                : "Export All Usage Trees (JSON)"
-                        ) {
-                            exportSemanticUsageTrees()
-                        }
-                        .disabled(isCapturingSemanticTrees)
-                    }
-                    Text("The report copies the current live tree. Export walks every runtime Usage across Main Off/On at the current Size, Host, Corner Radius, and Window Margin, recording 48 availability/context rows, layers, CAFilter inputs, and object-backed SDF effects in a separate semantic-usage-trees.json file.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if !state.reportOutput.isEmpty {
-                ScrollView {
-                    Text(state.reportOutput)
-                        .font(.system(size: 11, design: .monospaced))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-                .frame(height: 180)
-            }
-        }
     }
 
     // MARK: Controls

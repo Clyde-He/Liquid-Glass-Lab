@@ -21,7 +21,8 @@ For prioritized unknowns and future experiments across both renderers, see
 | [GlassLabTuning.swift](../LiquidGlassLab/GlassLab/GlassLabTuning.swift) | Guarded private access, capture/write paths, knob metadata and grouping |
 | [GlassLabSemantic.swift](../LiquidGlassLab/GlassLab/GlassLabSemantic.swift) | Runtime-gated SwiftUI `_Glass` Usage construction, static CA inspector, and Materialize time-series records |
 | [GlassLabTintStudy.swift](../LiquidGlassLab/GlassLab/GlassLabTintStudy.swift) | Deterministic Tint presets plus cross-renderer static and Materialize export models |
-| [GlassLabView.swift](../LiquidGlassLab/GlassLab/GlassLabView.swift) | Renderer/page controls, Inspectors, refresh scheduling, diagnostics and export |
+| [GlassLabView.swift](../LiquidGlassLab/GlassLab/GlassLabView.swift) | Section/page controls, the tweaking Inspectors, and refresh scheduling |
+| `GlassLabBench*.swift` | The Bench: capture drivers, probes, studies, exports, and the headless CLI harness, split per area (`Materialize`, `TintStudy`, `Probes`, `Headless`, `Tools`) as `GlassLabView` extensions |
 
 ## Two renderer spaces
 
@@ -199,17 +200,25 @@ walk private axes deterministically.
 
 ## Inspector and knob organization
 
-The control window first selects `NSGlass` or `SwiftUI` in Navigation, then
-presents renderer-specific page controls so only the current task's controls
-are mounted:
+The control window first selects `NSGlass`, `SwiftUI`, or `Bench` in
+Navigation, then presents section-specific page controls so only the current
+task's controls are mounted:
 
-- Recipe: `General`, `Passes`, `Materialize`, and `Tint`;
-- Semantic Usage: `General`, `Layer Inspector`, and `Transition`.
+- Recipe: `General` and `Passes` — the NSGlass tweaking surface;
+- Semantic Usage: `General` and `Layer Inspector` — the SwiftUI tweaking
+  surface;
+- Bench: `Exports`, `Materialize`, `Tint Study`, `Transition`, and `Probes` —
+  every capture, study, probe, and export lives here, off the tweaking pages.
 
-Recipe General contains geometry, Recipe selectors, test-window context, and
-matrix export. Passes reuses the Recursive exporter traversal and mounts one
+Bench is not a renderer: each Bench page steers `rendererMode` (and the
+hidden context pages the capture drivers still key on) to whatever its
+instrumentation needs, and leaving Bench hands the renderer back to the
+sidebar selection.
+
+Recipe General contains geometry, Recipe selectors, and test-window context.
+Passes reuses the Recursive exporter traversal and mounts one
 selected live pass instance at a time without assuming a first Shader or Rim
-instance. Recipe Materialize is the non-injecting SwiftUI-to-NSGlass shared-pass
+instance. Bench Materialize is the non-injecting SwiftUI-to-NSGlass shared-pass
 probe described below. `glassBackground`, both `vibrantColorMatrix` slots,
 key-fill highlight, and Output effects reuse their accepted editors inline;
 every other filter, compositing filter, or object-backed effect states its
@@ -231,10 +240,13 @@ counts, signatures, report copying, and the raw recursive layer tree).
 Semantic General contains the named Usage, its runtime tag and availability,
 shared geometry, and the same controlled window context. Its Layer Inspector
 flattens the live SwiftUI/Core Animation composition and shows layer paths,
-CAFilter inputs, and object-backed SDF effect values. Transition is a separate
-Regular/Clear Materialize probe; leaving it returns the host to the static,
-animation-suppressed contract. Recipe Tint owns the cross-renderer static and
-Materialize capture described below.
+CAFilter inputs, and object-backed SDF effect values. Bench Transition is a
+separate Regular/Clear Materialize probe; leaving it returns the host to the
+static, animation-suppressed contract. Bench Tint Study owns the
+cross-renderer static and Materialize capture described below, Bench Probes
+hosts the aberration and vibrant-matrix mutation probes, and Bench Exports
+carries the report/JSON exports and the Golden archive capture that used to
+sit in a Diagnostics section on both General pages.
 
 The recursive Pass snapshot is sampled only while Passes is mounted so normal
 Slider and Override refreshes do not repeatedly read the complete property

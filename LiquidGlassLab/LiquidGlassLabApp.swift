@@ -21,10 +21,10 @@ private struct LiquidGlassLabNavigation: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: rendererSelection) {
-                ForEach(GlassLabRendererMode.allCases) { mode in
-                    Label(mode.navigationTitle, systemImage: mode.navigationIcon)
-                        .tag(mode)
+            List(selection: sectionSelection) {
+                ForEach(GlassLabSection.allCases) { section in
+                    Label(section.navigationTitle, systemImage: section.navigationIcon)
+                        .tag(section)
                 }
             }
             .navigationTitle("Liquid Glass Lab")
@@ -34,12 +34,15 @@ private struct LiquidGlassLabNavigation: View {
         }
     }
 
-    private var rendererSelection: Binding<GlassLabRendererMode?> {
+    private var sectionSelection: Binding<GlassLabSection?> {
         Binding {
-            state.rendererMode
-        } set: { mode in
-            guard let mode else { return }
-            state.rendererMode = mode
+            state.selectedSection
+        } set: { section in
+            guard let section else { return }
+            state.selectedSection = section
+            if let mode = section.requiredRendererMode {
+                state.rendererMode = mode
+            }
         }
     }
 }
