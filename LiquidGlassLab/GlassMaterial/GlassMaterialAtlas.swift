@@ -103,6 +103,18 @@ public struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
     public var matrices: [GlassMaterialMatrixSample]
     public var rims: [GlassMaterialRimSample]
 
+    /// Every shader input this sample knows about — captured with a value or
+    /// captured as nil. A destination that declares a managed input outside
+    /// this set was resolved by a shader this sample never saw (typically an
+    /// atlas persisted across an OS upgrade), and replaying onto it would
+    /// leave the unknown inputs at the window's real-context values.
+    public var capturedKeys: Set<String> {
+        Set(numeric.keys)
+            .union(colors.keys)
+            .union(points.keys)
+            .union(nilKeys)
+    }
+
     /// Captures the currently resolved style, or nil when the tree is missing,
     /// mutated (`inputFaceOpacity < 0.999`), or any discovered matrix or rim
     /// slot fails to read completely — a partial capture must not report
@@ -254,6 +266,7 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
     /// opacity-only change keeps serving the captured hue.
     public func tintMatrix(for cell: Cell, matching color: NSColor) -> [Float]? {
         guard let entry = tintMatrices[cell],
+              entry.matrix.count == 20,
               let requested = GlassMaterialColorValue(color) else { return nil }
         let stored = entry.sourceColor
         let tolerance = 0.001
@@ -268,13 +281,16 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
     }
 
     /// True when every sample of the cell carries the exact supported
-    /// topology: two untinted grade slots and one key-fill rim. `capture`
-    /// guarantees this for its own output; a persisted atlas is re-validated
-    /// at freeze time because decoding cannot.
+    /// topology: two untinted grade slots with well-formed 4×5 matrices and
+    /// one key-fill rim. `capture` guarantees this for its own output; a
+    /// persisted atlas is re-validated at freeze time because decoding
+    /// cannot.
     public func cellMatchesSupportedTopology(_ cell: Cell) -> Bool {
         guard let samples = cells[cell], !samples.isEmpty else { return false }
-        return samples.allSatisfy {
-            $0.matrices.count == 2 && $0.rims.count == 1
+        return samples.allSatisfy { sample in
+            sample.rims.count == 1
+                && sample.matrices.count == 2
+                && sample.matrices.allSatisfy { $0.matrix.count == 20 }
         }
     }
 

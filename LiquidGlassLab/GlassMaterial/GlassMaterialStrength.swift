@@ -93,6 +93,10 @@ public final class GlassMaterialStrength {
     private var appliedValue: Double = 1
     private var lastWrittenFilterIdentity: ObjectIdentifier?
     private var frozenMainParticipation = true
+    /// The destination `inputKeys` set whose managed inputs were last
+    /// verified as covered by the frozen sample. See
+    /// `sampleCoversDestination(_:target:)`.
+    private var coverageVerifiedInputKeys: Set<String>?
 
     /// The installed style atlas, if any. See `freeze(atlas:)`.
     public private(set) var frozenAtlas: GlassMaterialStyleAtlas?
@@ -119,19 +123,25 @@ public final class GlassMaterialStrength {
     /// controller has values to drive it — a live baseline, or a frozen atlas
     /// whose selected cell can be stamped onto the *complete* current tree.
     /// While the destination is partially rebuilt, the frozen restamp writes
-    /// nothing (see `frozenDestination(for:on:)`) and this reports false for
+    /// nothing (see `frozenDestination(for:target:on:)`) and this reports false for
     /// the same window, rather than active-but-unwritten. The cell check is
     /// defensive: `freeze(atlas:)` refuses an atlas that could miss one.
     public var isAvailable: Bool {
         guard let glass,
-              GlassMaterialAccess.glassBackgroundTarget(under: glass) != nil
+              let target = GlassMaterialAccess.glassBackgroundTarget(
+                under: glass
+              )
         else { return false }
         if let frozenAtlas {
             guard let sample = frozenAtlas.sample(
                 for: currentCell(for: glass),
                 at: min(glass.bounds.width, glass.bounds.height)
             ) else { return false }
-            return frozenDestination(for: sample, on: glass) != nil
+            return frozenDestination(
+                for: sample,
+                target: target,
+                on: glass
+            ) != nil
         }
         return baseline != nil
     }
@@ -157,8 +167,12 @@ public final class GlassMaterialStrength {
     /// but unwritten.
     private func frozenDestination(
         for sample: GlassMaterialStyleSample,
+        target: GlassMaterialAccess.GlassBackgroundTarget,
         on glass: NSGlassEffectView
     ) -> (matrixLayers: [CALayer], rimLayers: [CALayer])? {
+        guard sampleCoversDestination(sample, target: target) else {
+            return nil
+        }
         let matrixLayers = GlassMaterialAccess.untintedMatrixLayers(under: glass)
         let rimLayers = GlassMaterialAccess.rimLayers(under: glass)
         guard matrixLayers.count == sample.matrices.count,
@@ -173,6 +187,35 @@ public final class GlassMaterialStrength {
             else { return nil }
         }
         return (matrixLayers, rimLayers)
+    }
+
+    /// True when every *managed* input the destination declares — one that
+    /// resolves a number, color, pair, or nil — is a key the sample captured.
+    /// A destination with managed inputs the sample never saw was resolved by
+    /// a different shader generation (an atlas persisted across an OS
+    /// upgrade); replaying onto it would hold the unknown inputs at the
+    /// window's real-context values, the exact bug class the macOS 27 landing
+    /// documented. Coverage is deliberately one-directional: sample keys the
+    /// destination lacks are harmless, since writes are capability-guarded.
+    ///
+    /// The typed classification costs one full read, so the verdict is cached
+    /// against the destination's `inputKeys` set — stable for a given shader
+    /// generation, and revalidated automatically if a rebuild changes it.
+    private func sampleCoversDestination(
+        _ sample: GlassMaterialStyleSample,
+        target: GlassMaterialAccess.GlassBackgroundTarget
+    ) -> Bool {
+        if coverageVerifiedInputKeys == target.inputKeys { return true }
+        let typed = GlassMaterialAccess.readTypedInputs(from: target)
+        let managed = Set(typed.numeric.keys)
+            .union(typed.colors.keys)
+            .union(typed.points.keys)
+            .union(typed.nilKeys)
+        guard managed.subtracting(sample.capturedKeys).isEmpty else {
+            return false
+        }
+        coverageVerifiedInputKeys = target.inputKeys
+        return true
     }
 
     public init(glass: NSGlassEffectView, value: Double = 1) {
@@ -267,6 +310,7 @@ public final class GlassMaterialStrength {
         frozenMainParticipation = mainParticipation
         baseline = nil
         lastWrittenFilterIdentity = nil
+        coverageVerifiedInputKeys = nil
         apply()
         return true
     }
@@ -277,6 +321,7 @@ public final class GlassMaterialStrength {
     /// immediate true restore requires recreating the glass view.
     public func unfreeze() {
         frozenAtlas = nil
+        coverageVerifiedInputKeys = nil
         refresh()
     }
 
@@ -289,6 +334,7 @@ public final class GlassMaterialStrength {
         baseline = nil
         frozenAtlas = nil
         lastWrittenFilterIdentity = nil
+        coverageVerifiedInputKeys = nil
     }
 
     // MARK: Internals
@@ -398,9 +444,12 @@ public final class GlassMaterialStrength {
 
         // Validate the complete destination topology before the first write;
         // an incomplete tree receives nothing at all. See
-        // `frozenDestination(for:on:)`.
-        guard let destination = frozenDestination(for: sample, on: glass)
-        else { return }
+        // `frozenDestination(for:target:on:)`.
+        guard let destination = frozenDestination(
+            for: sample,
+            target: target,
+            on: glass
+        ) else { return }
         let matrixLayers = destination.matrixLayers
         let rimLayers = destination.rimLayers
 

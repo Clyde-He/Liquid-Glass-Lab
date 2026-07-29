@@ -341,8 +341,11 @@ enum GlassMaterialAccess {
         guard !values.isEmpty else { return nil }
         var colors: [String: NSColor] = [:]
         for key in rimColorKeys {
+            // Both colors are part of the completeness contract: a payload
+            // missing either would later open a rim whose omitted color stays
+            // at the destination's zero-alpha value.
             guard let cgColor = effectColor(effect, getter: key),
-                  let color = NSColor(cgColor: cgColor) else { continue }
+                  let color = NSColor(cgColor: cgColor) else { return nil }
             colors[key] = color
         }
         return (values, colors)
