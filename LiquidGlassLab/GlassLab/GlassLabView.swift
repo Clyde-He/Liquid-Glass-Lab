@@ -141,7 +141,9 @@ struct GlassLabView: View {
     @State var hudAppearance = GlassLabHUDPanelController.Appearance.auto
     @State var hudIsClear = false
     @State var hudStrength = 1.0
-    @State var hudTintColor: NSColor?
+    @State var hudTintEnabled = false
+    @State var hudTint = Color(red: 1, green: 0.45, blue: 0.35).opacity(0.6)
+    @State var tintLockTask: Task<Void, Never>?
     @State var hudContentWidth = 320.0
     @State var hudContentHeight = 120.0
 
@@ -247,6 +249,7 @@ struct GlassLabView: View {
             tintStudyTask?.cancel()
             atlasCaptureTask?.cancel()
             atlasReadbackTask?.cancel()
+            tintLockTask?.cancel()
             hudPanelController?.tearDown()
         }
     }

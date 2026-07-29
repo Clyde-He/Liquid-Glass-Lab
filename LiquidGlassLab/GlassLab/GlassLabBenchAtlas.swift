@@ -132,21 +132,18 @@ extension GlassLabView {
             labeledSlider("Glass Visibility", value: hudStrengthBinding, in: 0...1)
 
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    ColorPicker(
+                Toggle(isOn: hudTintEnabledBinding) {
+                    LabRowLabel(
                         "Tint",
-                        selection: hudTintBinding,
-                        supportsOpacity: true
+                        description: "Applies immediately; the Main-On hue auto-locks about half a second after you settle on a color — you are picking it in this window, which is exactly the main-participation moment the capture needs."
                     )
-                    Button("Lock Tint Hue") { lockTintForHUD() }
-                        .disabled(
-                            isCapturingAtlas || hudTintColor == nil
-                                || atlasDocument == nil
-                        )
                 }
-                Text("Zero opacity removes the tint. Lock Tint Hue captures the Main-On tint matrix for this color in all four appearance × material cells (capture-on-pick); until then the hue falls back to the live, hue-suppressed resolution.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                ColorPicker(
+                    "Tint Color",
+                    selection: hudTintColorBinding,
+                    supportsOpacity: true
+                )
+                .disabled(!hudTintEnabled)
             }
 
             labeledSlider("Content Width", value: hudContentWidthBinding, in: 120...560)
@@ -264,7 +261,7 @@ extension GlassLabView {
                 controller.setAppearance(hudAppearance)
                 controller.setClear(hudIsClear)
                 controller.setStrength(hudStrength)
-                controller.setTint(hudTintColor)
+                controller.setTint(currentHUDTintColor())
                 controller.setContentSize(CGSize(
                     width: hudContentWidth,
                     height: hudContentHeight
@@ -318,14 +315,65 @@ extension GlassLabView {
         ))
     }
 
-    /// Zero opacity means "no tint", mirroring the lab's public-tint binding.
-    private var hudTintBinding: Binding<Color> {
-        Binding {
-            hudTintColor.map(Color.init) ?? Color.white.opacity(0)
-        } set: { color in
-            let nsColor = NSColor(color)
-            hudTintColor = nsColor.alphaComponent == 0 ? nil : nsColor
-            hudPanelController?.setTint(hudTintColor)
+    /// The effective HUD tint. The picker keeps a visible default (coral at
+    /// 60%) so the panel's remembered opacity slider can never silently turn
+    /// every picked color into "no tint" — the trap the earlier
+    /// zero-opacity-means-nil binding fell into.
+    func currentHUDTintColor() -> NSColor? {
+        guard hudTintEnabled else { return nil }
+        let nsColor = NSColor(hudTint)
+        return nsColor.alphaComponent == 0 ? nil : nsColor
+    }
+
+    private var hudTintEnabledBinding: Binding<Bool> {
+        Binding { hudTintEnabled } set: { enabled in
+            hudTintEnabled = enabled
+            hudPanelController?.setTint(currentHUDTintColor())
+            if enabled { scheduleTintAutoLock() } else { tintLockTask?.cancel() }
+        }
+    }
+
+    private var hudTintColorBinding: Binding<Color> {
+        Binding { hudTint } set: { color in
+            hudTint = color
+            hudPanelController?.setTint(currentHUDTintColor())
+            scheduleTintAutoLock()
+        }
+    }
+
+    /// Capture-on-pick, debounced: the tint applies immediately (live
+    /// suppressed hue at the chosen opacity), and the Main-On hue matrices
+    /// lock through the in-window provider about half a second after the
+    /// user settles on a color — no button, no visible session.
+    func scheduleTintAutoLock() {
+        tintLockTask?.cancel()
+        guard currentHUDTintColor() != nil else { return }
+        tintLockTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled, let tint = currentHUDTintColor() else {
+                return
+            }
+            if atlasProvider == nil { startAtlasProvider() }
+            guard let provider = atlasProvider else { return }
+            if provider.atlas.tintMatrix(
+                for: .init(
+                    isLightAppearance: true,
+                    isClear: false,
+                    hasMainParticipation: true
+                ),
+                matching: tint
+            ) != nil { return }
+            atlasStatus = "Locking tint hue…"
+            provider.captureTintMatrices(for: tint) { success in
+                if success {
+                    atlasDocument = provider.atlas
+                    hudPanelController?.setAtlas(provider.atlas)
+                    atlasStatus = "Tint hue locked."
+                } else {
+                    atlasStatus = "Tint lock needs this window main and the "
+                        + "app active; it retries on your next change."
+                }
+            }
         }
     }
 
@@ -588,72 +636,11 @@ extension GlassLabView {
 
     // MARK: - Tint capture-on-pick
 
-    /// Captures the Main-On tint matrix for the HUD's current color in all
-    /// four appearance × material cells and folds them into the atlas. This
-    /// is the product's capture-on-pick moment: the user chose the color in
-    /// an active window, which is exactly the participation the matrix needs.
-    func lockTintForHUD() {
-        guard !isCapturingAtlas else { return }
-        guard var atlas = atlasDocument else {
-            atlasStatus = AtlasBenchError.atlasMissing.errorDescription
-            return
-        }
-        guard let tint = hudTintColor else { return }
-
-        // The provider path is the product-shaped one: a parallel in-window
-        // batch at the capture-on-pick moment, about a second.
-        if let provider = atlasProvider {
-            atlasStatus = "Locking tint hue via in-window provider…"
-            provider.captureTintMatrices(for: tint) { success in
-                if success {
-                    atlasDocument = provider.atlas
-                    hudPanelController?.setAtlas(provider.atlas)
-                    atlasStatus = "Tint hue locked (in-window)."
-                } else {
-                    atlasStatus = "Tint lock needs this window main and the "
-                        + "app active — click here and retry."
-                }
-            }
-            return
-        }
-        guard !state.hasActiveOverrides else {
-            atlasStatus = AtlasBenchError.overridesActive.errorDescription
-            return
-        }
-
-        liveRefreshTask?.cancel()
-        isCapturingAtlas = true
-        atlasStatus = "Capturing tint matrices…"
-        let restore = snapshotProbeContext()
-
-        atlasCaptureTask = Task { @MainActor in
-            defer {
-                restoreProbeContext(restore)
-                state.testWindow.sync(with: state)
-                isCapturingAtlas = false
-                atlasCaptureTask = nil
-                scheduleLiveReadoutRefresh(refreshSchema: true)
-            }
-            do {
-                try await captureTintMatrices(for: tint, into: &atlas)
-                atlasDocument = atlas
-                let url = try saveAtlasToDisk(atlas)
-                atlasStatus = "Tint hue locked for all four Main-On cells · "
-                    + "saved to \(url.lastPathComponent)"
-                hudPanelController?.setAtlas(atlas)
-            } catch is CancellationError {
-                atlasStatus = "Tint capture cancelled."
-            } catch {
-                let message = (error as? LocalizedError)?.errorDescription
-                    ?? error.localizedDescription
-                atlasStatus = "Tint capture failed: \(message)"
-            }
-        }
-    }
-
     /// Captures the Main-On tint matrix for this color in all four
-    /// appearance × material cells and folds them into the atlas. Shared by
-    /// the interactive Lock Tint Hue button and the headless verification.
+    /// appearance × material cells via the visible probe sweep. The
+    /// interactive path auto-locks through the in-window provider instead
+    /// (`scheduleTintAutoLock`); this remains the reference used by the
+    /// headless verification.
     func captureTintMatrices(
         for tint: NSColor,
         into atlas: inout GlassMaterialStyleAtlas
@@ -1272,52 +1259,55 @@ extension GlassLabView {
                     // appearance switch).
                     hud.setStrength(1)
                     var colorsOK = false
-                    for _ in 0..<10 {
+                    var gradesOK = false
+                    for _ in 0..<20 {
                         try await Task.sleep(for: .milliseconds(200))
-                        guard let target =
+                        if let target =
                             GlassMaterialAccess.glassBackgroundTarget(
                                 under: glass
-                            ) else { continue }
-                        let colors = GlassMaterialAccess.readTypedInputs(
-                            from: target
-                        ).colors
-                        colorsOK = expected.colors.allSatisfy { key, value in
-                            colors[key].map {
-                                GlassMaterialAccess.colorsMatch(
-                                    $0,
-                                    value.nsColor
-                                )
-                            } ?? false
+                            ) {
+                            let colors = GlassMaterialAccess.readTypedInputs(
+                                from: target
+                            ).colors
+                            colorsOK = expected.colors.allSatisfy { key, value in
+                                colors[key].map {
+                                    GlassMaterialAccess.colorsMatch(
+                                        $0,
+                                        value.nsColor
+                                    )
+                                } ?? false
+                            }
                         }
-                        if colorsOK { break }
+                        let gradeLayers =
+                            GlassMaterialAccess.untintedMatrixLayers(
+                                under: glass
+                            )
+                        gradesOK = gradeLayers.count == expected.matrices.count
+                        if gradesOK {
+                            for (layer, slot) in zip(
+                                gradeLayers,
+                                expected.matrices
+                            ) {
+                                guard let current =
+                                    GlassMaterialAccess.colorMatrix(
+                                        on: layer
+                                    ), current.count == slot.matrix.count,
+                                    zip(current, slot.matrix).allSatisfy({
+                                        abs($0 - $1) < 1e-3
+                                    })
+                                else {
+                                    gradesOK = false
+                                    break
+                                }
+                            }
+                        }
+                        if colorsOK, gradesOK { break }
                     }
                     step(
                         "colors-track-atlas \(context)",
                         colorsOK,
                         "\(expected.colors.count) color inputs vs atlas at G=1"
                     )
-
-                    let gradeLayers = GlassMaterialAccess.untintedMatrixLayers(
-                        under: glass
-                    )
-                    var gradesOK = gradeLayers.count == expected.matrices.count
-                    if gradesOK {
-                        for (layer, slot) in zip(
-                            gradeLayers,
-                            expected.matrices
-                        ) {
-                            guard let current = GlassMaterialAccess.colorMatrix(
-                                on: layer
-                            ), current.count == slot.matrix.count,
-                                zip(current, slot.matrix).allSatisfy({
-                                    abs($0 - $1) < 1e-3
-                                })
-                            else {
-                                gradesOK = false
-                                break
-                            }
-                        }
-                    }
                     step(
                         "grades-track-atlas \(context)",
                         gradesOK,
@@ -1483,6 +1473,11 @@ extension GlassLabView {
         state.testWindow.sync(with: state)
         try await Task.sleep(for: .milliseconds(600))
         if let controlWindow = state.testWindow.liveControlWindow {
+            // Simulate the user working in the window: the provider's whole
+            // premise is capturing at real main/active moments.
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            controlWindow.makeKeyAndOrderFront(nil)
+            try await Task.sleep(for: .milliseconds(400))
             let providerSides: [Double] = [64, 96, 160]
             let provider = GlassMaterialAtlasProvider(
                 hostWindow: controlWindow,

@@ -576,17 +576,27 @@ public final class GlassMaterialStrength {
         scheduleFrozenReassert()
     }
 
-    /// The beats are denser early: the system's re-derive usually lands
+    /// The beats are denser early — the system's re-derive usually lands
     /// within the first ~100ms, and the visible flash lasts until the beat
-    /// that catches it.
+    /// that catches it — then settle into a slow perpetual guard: compact
+    /// sizes were measured churning past any fixed budget, and a static
+    /// panel that exhausts a bounded loop mid-storm has no later event to
+    /// heal on. The guard beat is a handful of model-layer reads; it only
+    /// re-applies on mismatch.
     private static let frozenReassertBeats: [Int] = [
         80, 120, 160, 200, 250, 250, 250, 250, 500, 500,
     ]
+    private static let frozenGuardBeatMilliseconds = 1000
 
     private func scheduleFrozenReassert() {
         frozenReassertTask?.cancel()
         frozenReassertTask = Task { @MainActor [weak self] in
-            for delay in Self.frozenReassertBeats {
+            var beat = 0
+            while true {
+                let delay = beat < Self.frozenReassertBeats.count
+                    ? Self.frozenReassertBeats[beat]
+                    : Self.frozenGuardBeatMilliseconds
+                beat += 1
                 try? await Task.sleep(for: .milliseconds(delay))
                 guard !Task.isCancelled, let self, self.frozenAtlas != nil,
                       let glass = self.glass else { return }
@@ -594,9 +604,10 @@ public final class GlassMaterialStrength {
                     for: self.currentCell(for: glass),
                     at: min(glass.bounds.width, glass.bounds.height)
                 ), self.frozenStateHolds(sample, on: glass) {
-                    return
+                    continue
                 }
                 self.apply()
+                beat = 0
             }
         }
     }
