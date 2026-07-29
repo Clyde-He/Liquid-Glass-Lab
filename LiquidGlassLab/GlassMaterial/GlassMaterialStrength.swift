@@ -576,15 +576,18 @@ public final class GlassMaterialStrength {
         scheduleFrozenReassert()
     }
 
-    /// The beats are denser early — the system's re-derive usually lands
-    /// within the first ~100ms, and the visible flash lasts until the beat
-    /// that catches it — then settle into a slow perpetual guard: compact
-    /// sizes were measured churning past any fixed budget, and a static
-    /// panel that exhausts a bounded loop mid-storm has no later event to
-    /// heal on. The guard beat is a handful of model-layer reads; it only
-    /// re-applies on mismatch.
+    /// The beats open at frame cadence — the system paints its own
+    /// resolution for the frame(s) between its restamp and our next check,
+    /// so the visible Main-Off flash lasts exactly until the beat that
+    /// catches it; at 16–33ms it is one or two frames instead of a visible
+    /// blink. The cadence then decays and settles into a slow perpetual
+    /// guard: compact sizes were measured churning past any fixed budget,
+    /// and a static panel that exhausts a bounded loop mid-storm has no
+    /// later event to heal on. A guard beat is a few dozen KVC reads and
+    /// only re-applies on mismatch.
     private static let frozenReassertBeats: [Int] = [
-        80, 120, 160, 200, 250, 250, 250, 250, 500, 500,
+        16, 16, 16, 16, 33, 33, 33, 33, 50, 50, 80, 80,
+        120, 160, 250, 250, 500, 500,
     ]
     private static let frozenGuardBeatMilliseconds = 1000
 

@@ -1523,6 +1523,13 @@ extension GlassLabView {
             provider.ensureCaptured()
             var waitedMs = 0
             while !provider.isMainOnCoverageComplete, waitedMs < 30000 {
+                // Cooperative activation can deny the first request when the
+                // user is working in another app; keep asking politely.
+                if !NSApp.isActive || !(controlWindow.isMainWindow
+                    || controlWindow.isKeyWindow) {
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                    controlWindow.makeKeyAndOrderFront(nil)
+                }
                 try await Task.sleep(for: .milliseconds(300))
                 waitedMs += 300
                 if case .failed = provider.state { break }
