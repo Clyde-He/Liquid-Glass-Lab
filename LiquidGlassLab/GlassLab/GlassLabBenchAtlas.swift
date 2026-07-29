@@ -476,20 +476,28 @@ extension GlassLabView {
                 progress: atlasStatus ?? "Atlas capture paused."
             )
             state.testWindow.sync(with: state)
+            // A same-value variant write does not re-resolve the shader, and
+            // a window appearance flip alone does not either — the first
+            // atlas's Light cells captured the machine's dark resolution
+            // while the window's effectiveAppearance dutifully reported
+            // aqua. Only a fresh glass provably resolves every channel under
+            // the current appearance, participation, and size.
+            state.testWindow.rebuildGlass(with: state)
             guard let glass = state.testWindow.liveGlass else {
                 try await Task.sleep(for: .milliseconds(180))
                 continue
             }
             GlassLabTuning.applyRecipe(from: state, to: glass)
-            // The margin channel re-derives on recipe events at whatever size
-            // is current *then*, not on the resize itself — give the tree a
-            // longer beat and demand a longer stable streak than the other
-            // channels would need, or the capture stores a stale margin.
-            try await Task.sleep(for: .milliseconds(500))
+            // The rebuild inserts a fresh materialize; give it a beat to
+            // settle into the long-lived Recipe before sampling stability.
+            try await Task.sleep(for: .milliseconds(700))
             try Task.checkCancellation()
             guard NSApp.isActive,
                   state.testWindow.isActuallyMain == requestedMain,
-                  !state.testWindow.isActuallyKey else {
+                  !state.testWindow.isActuallyKey,
+                  state.testAppearance.matchesName(
+                    state.testWindow.effectiveAppearanceName ?? ""
+                  ) else {
                 if attempt < 5 { continue }
                 throw AtlasBenchError.contextRejected(context)
             }
@@ -596,16 +604,23 @@ extension GlassLabView {
                 progress: atlasStatus ?? "Tint capture paused."
             )
             state.testWindow.sync(with: state)
+            // Same context discipline as the style sweep: only a fresh glass
+            // provably resolves the tint matrix under the requested
+            // appearance rather than the machine's current one.
+            state.testWindow.rebuildGlass(with: state)
             guard let glass = state.testWindow.liveGlass else {
                 try await Task.sleep(for: .milliseconds(180))
                 continue
             }
             GlassLabTuning.applyRecipe(from: state, to: glass)
-            try await Task.sleep(for: .milliseconds(240))
+            try await Task.sleep(for: .milliseconds(700))
             try Task.checkCancellation()
             guard NSApp.isActive,
                   state.testWindow.isActuallyMain,
-                  !state.testWindow.isActuallyKey else {
+                  !state.testWindow.isActuallyKey,
+                  state.testAppearance.matchesName(
+                    state.testWindow.effectiveAppearanceName ?? ""
+                  ) else {
                 if attempt < 5 { continue }
                 throw AtlasBenchError.contextRejected(context)
             }
@@ -1223,6 +1238,90 @@ extension GlassLabView {
                         "both untinted matrices vs atlas at G=1"
                     )
                 }
+            }
+        }
+
+        // Diagnostic: forced-Light presentation probe. The model layer can
+        // hold every frozen Light value while the eye still sees the dark
+        // material — either an animation is pinning the presentation, or the
+        // visible difference lives outside the captured tree. Dump the color
+        // inputs from BOTH trees plus every animation on the subtree.
+        hud.setAppearance(.light)
+        hud.setClear(false)
+        hud.setContentSize(CGSize(width: 320, height: 120))
+        hud.setStrength(1)
+        try await Task.sleep(for: .milliseconds(1500))
+        if let glass = hud.glassView, let layer = glass.layer {
+            CATransaction.flush()
+            let model = GlassLabTuning.capturePassAuditSnapshot(from: layer)
+            let presentation = GlassLabTuning.capturePassAuditSnapshot(
+                from: layer.presentation()
+            )
+            func colorDump(
+                _ snapshot: GlassLabTuning.PassAuditSnapshot?
+            ) -> String {
+                guard let snapshot else { return "nil snapshot" }
+                var lines: [String] = []
+                for (id, pass) in snapshot.passes.sorted(by: { $0.key < $1.key })
+                where pass.name?.contains("glassBackground") == true
+                    || pass.objectClass.contains("Backdrop") {
+                    for (key, property) in pass.properties.sorted(
+                        by: { $0.key < $1.key }
+                    ) where key.lowercased().contains("color") {
+                        lines.append(
+                            "\(id).\(key)=\(property.value ?? property.state)"
+                        )
+                    }
+                }
+                return lines.joined(separator: " · ")
+            }
+            step("info-light-model-colors", true, colorDump(model))
+            step(
+                "info-light-presentation-colors",
+                true,
+                colorDump(presentation)
+            )
+
+            var animationLines: [String] = []
+            func walkAnimations(_ current: CALayer, path: String) {
+                if let keys = current.animationKeys(), !keys.isEmpty {
+                    animationLines.append(
+                        "\(path)[\(String(describing: type(of: current)))]: "
+                            + keys.joined(separator: ",")
+                    )
+                }
+                for (index, child) in (current.sublayers ?? []).enumerated() {
+                    walkAnimations(child, path: path + ".\(index)")
+                }
+            }
+            walkAnimations(layer, path: "root")
+            step(
+                "info-light-animations",
+                true,
+                animationLines.isEmpty
+                    ? "no animations on the subtree"
+                    : animationLines.joined(separator: " · ")
+            )
+
+            let cell = GlassMaterialStyleAtlas.Cell(
+                isLightAppearance: true,
+                isClear: false,
+                hasMainParticipation: true
+            )
+            if let sample = decoded.sample(for: cell, at: 120) {
+                let colors = sample.colors.sorted(by: { $0.key < $1.key })
+                    .map { key, value in
+                        String(
+                            format: "%@=(%.3f %.3f %.3f %.3f)",
+                            key, value.red, value.green, value.blue,
+                            value.alpha
+                        )
+                    }
+                step(
+                    "info-light-atlas-colors",
+                    true,
+                    colors.joined(separator: " · ")
+                )
             }
         }
 
