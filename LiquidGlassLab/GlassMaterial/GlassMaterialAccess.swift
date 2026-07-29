@@ -384,7 +384,7 @@ enum GlassMaterialAccess {
         return true
     }
 
-    private static func colorsMatch(_ a: NSColor, _ b: NSColor) -> Bool {
+    static func colorsMatch(_ a: NSColor, _ b: NSColor) -> Bool {
         guard let aRGB = a.usingColorSpace(.extendedSRGB),
               let bRGB = b.usingColorSpace(.extendedSRGB) else { return false }
         return abs(aRGB.redComponent - bRGB.redComponent) < 1e-4

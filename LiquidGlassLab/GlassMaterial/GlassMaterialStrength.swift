@@ -94,12 +94,16 @@ public final class GlassMaterialStrength {
     private var lastWrittenFilterIdentity: ObjectIdentifier?
     private var frozenMainParticipation = true
     private var frozenReassertTask: Task<Void, Never>?
-    /// The numeric shader vector the last frozen apply wrote, kept as the
-    /// reassert sentinel's reference: margin and rim can both survive a
-    /// system restamp untouched (a resize carries the rim over, and Clear
-    /// samples a margin equal to the flat one), so only the written inputs
-    /// themselves prove the tree still holds the frozen material.
+    /// The shader vector the last frozen apply wrote, kept as the reassert
+    /// sentinel's reference: margin and rim can both survive a system
+    /// restamp untouched (a resize carries the rim over, and Clear samples a
+    /// margin equal to the flat one), so only the written inputs themselves
+    /// prove the tree still holds the frozen material. Colors are tracked
+    /// alongside numbers because restamps revert different subsets per
+    /// event: an appearance switch was measured carrying the numerics over
+    /// while reverting the color inputs and grade matrices.
     private var lastFrozenNumbers: [String: Double] = [:]
+    private var lastFrozenColors: [String: NSColor] = [:]
 
     /// The installed style atlas, if any. See `freeze(atlas:)`.
     public private(set) var frozenAtlas: GlassMaterialStyleAtlas?
@@ -302,6 +306,7 @@ public final class GlassMaterialStrength {
         frozenReassertTask?.cancel()
         frozenReassertTask = nil
         lastFrozenNumbers = [:]
+        lastFrozenColors = [:]
         frozenAtlas = nil
         refresh()
     }
@@ -315,6 +320,7 @@ public final class GlassMaterialStrength {
         frozenReassertTask?.cancel()
         frozenReassertTask = nil
         lastFrozenNumbers = [:]
+        lastFrozenColors = [:]
         baseline = nil
         frozenAtlas = nil
         lastWrittenFilterIdentity = nil
@@ -472,6 +478,7 @@ public final class GlassMaterialStrength {
             to: target
         )
         lastFrozenNumbers = numbers
+        lastFrozenColors = colors
 
         // Grades and payloads are stamped pairwise in the shared traversal
         // order, against the topology validated above.
@@ -605,12 +612,29 @@ public final class GlassMaterialStrength {
         guard let target = GlassMaterialAccess.glassBackgroundTarget(
             under: glass
         ) else { return false }
-        let currentNumbers = GlassMaterialAccess.readTypedInputs(
-            from: target
-        ).numeric
+        let currentInputs = GlassMaterialAccess.readTypedInputs(from: target)
         for (key, written) in lastFrozenNumbers {
-            guard let current = currentNumbers[key],
+            guard let current = currentInputs.numeric[key],
                   abs(current - written) < 1e-3 else { return false }
+        }
+        for (key, written) in lastFrozenColors {
+            guard let current = currentInputs.colors[key],
+                  GlassMaterialAccess.colorsMatch(current, written)
+            else { return false }
+        }
+        let matrixLayersNow = GlassMaterialAccess.untintedMatrixLayers(
+            under: glass
+        )
+        guard matrixLayersNow.count == sample.matrices.count else {
+            return false
+        }
+        for (layer, slot) in zip(matrixLayersNow, sample.matrices) {
+            guard let current = GlassMaterialAccess.colorMatrix(on: layer),
+                  current.count == slot.matrix.count,
+                  zip(current, slot.matrix).allSatisfy({
+                      abs($0 - $1) < 1e-3
+                  })
+            else { return false }
         }
         let rimLayers = GlassMaterialAccess.rimLayers(under: glass)
         guard rimLayers.count == sample.rims.count else { return false }

@@ -1163,6 +1163,65 @@ extension GlassLabView {
                             expected.outputMaximum
                         )
                     )
+
+                    // At G = 1 the written colors and grade matrices equal
+                    // the sample exactly — the appearance axis lives largely
+                    // here, so numeric checks alone would miss a restamp
+                    // that reverts only colors and grades (measured on an
+                    // appearance switch).
+                    hud.setStrength(1)
+                    var colorsOK = false
+                    for _ in 0..<10 {
+                        try await Task.sleep(for: .milliseconds(200))
+                        guard let target =
+                            GlassMaterialAccess.glassBackgroundTarget(
+                                under: glass
+                            ) else { continue }
+                        let colors = GlassMaterialAccess.readTypedInputs(
+                            from: target
+                        ).colors
+                        colorsOK = expected.colors.allSatisfy { key, value in
+                            colors[key].map {
+                                GlassMaterialAccess.colorsMatch(
+                                    $0,
+                                    value.nsColor
+                                )
+                            } ?? false
+                        }
+                        if colorsOK { break }
+                    }
+                    step(
+                        "colors-track-atlas \(context)",
+                        colorsOK,
+                        "\(expected.colors.count) color inputs vs atlas at G=1"
+                    )
+
+                    let gradeLayers = GlassMaterialAccess.untintedMatrixLayers(
+                        under: glass
+                    )
+                    var gradesOK = gradeLayers.count == expected.matrices.count
+                    if gradesOK {
+                        for (layer, slot) in zip(
+                            gradeLayers,
+                            expected.matrices
+                        ) {
+                            guard let current = GlassMaterialAccess.colorMatrix(
+                                on: layer
+                            ), current.count == slot.matrix.count,
+                                zip(current, slot.matrix).allSatisfy({
+                                    abs($0 - $1) < 1e-3
+                                })
+                            else {
+                                gradesOK = false
+                                break
+                            }
+                        }
+                    }
+                    step(
+                        "grades-track-atlas \(context)",
+                        gradesOK,
+                        "both untinted matrices vs atlas at G=1"
+                    )
                 }
             }
         }
