@@ -358,6 +358,41 @@ enum GlassMaterialAccess {
         return (values, colors)
     }
 
+    /// True when the layer's current rim payload already equals this one.
+    /// Writing a rim payload replaces the SDF effect object, and AppKit
+    /// reacts to that replacement by re-deriving `CABackdropLayer.marginWidth`
+    /// for the window's *real* participation on the next cycle — so a frozen
+    /// apply must not replace an effect that already carries its values, or
+    /// every G scrub re-triggers that reaction and the margin restamp can
+    /// never be the final writer.
+    static func rimPayloadMatches(
+        values: [String: Double],
+        colors: [String: NSColor],
+        on layer: CALayer
+    ) -> Bool {
+        guard let current = rimPayload(on: layer) else { return false }
+        guard current.values.count == values.count,
+              current.colors.count == colors.count else { return false }
+        for (key, value) in values {
+            guard let existing = current.values[key],
+                  abs(existing - value) < 1e-6 else { return false }
+        }
+        for (key, color) in colors {
+            guard let existing = current.colors[key],
+                  colorsMatch(existing, color) else { return false }
+        }
+        return true
+    }
+
+    private static func colorsMatch(_ a: NSColor, _ b: NSColor) -> Bool {
+        guard let aRGB = a.usingColorSpace(.extendedSRGB),
+              let bRGB = b.usingColorSpace(.extendedSRGB) else { return false }
+        return abs(aRGB.redComponent - bRGB.redComponent) < 1e-4
+            && abs(aRGB.greenComponent - bRGB.greenComponent) < 1e-4
+            && abs(aRGB.blueComponent - bRGB.blueComponent) < 1e-4
+            && abs(aRGB.alphaComponent - bRGB.alphaComponent) < 1e-4
+    }
+
     static func setRimPayload(
         values: [String: Double],
         colors: [String: NSColor],

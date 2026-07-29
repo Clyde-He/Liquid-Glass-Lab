@@ -93,6 +93,7 @@ public final class GlassMaterialStrength {
     private var appliedValue: Double = 1
     private var lastWrittenFilterIdentity: ObjectIdentifier?
     private var frozenMainParticipation = true
+    private var frozenReassertTask: Task<Void, Never>?
 
     /// The installed style atlas, if any. See `freeze(atlas:)`.
     public private(set) var frozenAtlas: GlassMaterialStyleAtlas?
@@ -292,6 +293,8 @@ public final class GlassMaterialStrength {
     /// Recipe is adopted as the live baseline again; as everywhere else, an
     /// immediate true restore requires recreating the glass view.
     public func unfreeze() {
+        frozenReassertTask?.cancel()
+        frozenReassertTask = nil
         frozenAtlas = nil
         refresh()
     }
@@ -302,6 +305,8 @@ public final class GlassMaterialStrength {
     /// `glassBackground` override survives until the glass is rebuilt. Discard
     /// and recreate the `NSGlassEffectView` for a true restore.
     public func invalidate() {
+        frozenReassertTask?.cancel()
+        frozenReassertTask = nil
         baseline = nil
         frozenAtlas = nil
         lastWrittenFilterIdentity = nil
@@ -459,16 +464,6 @@ public final class GlassMaterialStrength {
             to: target
         )
 
-        // Render bounds do not animate with the transition; they are part of
-        // the context. Held constant across `value` — at 0 every visible
-        // channel is already at its dematerialized endpoint.
-        GlassMaterialAccess.setMarginWidth(sample.marginWidth, under: glass)
-        GlassMaterialAccess.setOutputBounds(
-            minimum: sample.outputMinimum,
-            maximum: sample.outputMaximum,
-            under: glass
-        )
-
         // Grades and payloads are stamped pairwise in the shared traversal
         // order, against the topology validated above.
         for (layer, slot) in zip(matrixLayers, sample.matrices) {
@@ -483,14 +478,26 @@ public final class GlassMaterialStrength {
         // The frozen rim owns both the payload and the gate, in both
         // directions: it opens a captured Main-On rim on a window that is not
         // main, and holds a captured flat rim closed on one that is.
+        //
+        // The payload is only replaced when it differs: replacing the SDF
+        // effect makes AppKit re-derive `marginWidth` for the window's real
+        // participation one cycle later, so an unconditional replace on every
+        // G change would hand the margin back to the system after each scrub
+        // step (and pay an effect copy per frame for nothing).
         for (layer, rim) in zip(rimLayers, sample.rims) {
             var rimColors: [String: NSColor] = [:]
             for (key, color) in rim.colors { rimColors[key] = color.nsColor }
-            GlassMaterialAccess.setRimPayload(
+            if !GlassMaterialAccess.rimPayloadMatches(
                 values: rim.values,
                 colors: rimColors,
                 on: layer
-            )
+            ) {
+                GlassMaterialAccess.setRimPayload(
+                    values: rim.values,
+                    colors: rimColors,
+                    on: layer
+                )
+            }
             GlassMaterialAccess.setRimOpacity(
                 value > 0 ? rim.layerOpacity : 0,
                 on: layer
@@ -520,7 +527,52 @@ public final class GlassMaterialStrength {
             }
         }
 
+        // Render bounds do not animate with the transition; they are part of
+        // the context and held constant across `value`.
+        GlassMaterialAccess.setMarginWidth(sample.marginWidth, under: glass)
+        GlassMaterialAccess.setOutputBounds(
+            minimum: sample.outputMinimum,
+            maximum: sample.outputMaximum,
+            under: glass
+        )
+
         finishApply(to: target)
+
+        // AppKit re-derives `CABackdropLayer.marginWidth` for the window's
+        // real participation one cycle *after* certain events — measured on a
+        // never-main panel: replacing the rim's SDF effect provokes it, and a
+        // resize provokes it on its own even when the rim payload carries
+        // over unchanged. The re-derivation lands after every write above
+        // regardless of ordering, and its delay varies with size, so any
+        // single write can lose the race — after which a static panel has no
+        // further event to heal on. Every frozen apply therefore arms a
+        // trailing verify-and-repeat: each beat checks the margin against
+        // the frozen sample and re-applies only on mismatch, for a bounded
+        // number of beats. Re-applies inside the loop find the rim already
+        // matching, so they replace nothing and provoke no new reaction —
+        // the loop converges instead of oscillating, and when the margin
+        // already reads back correctly the first beat exits immediately.
+        scheduleFrozenReassert()
+    }
+
+    private func scheduleFrozenReassert() {
+        frozenReassertTask?.cancel()
+        frozenReassertTask = Task { @MainActor [weak self] in
+            for _ in 0..<8 {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled, let self, self.frozenAtlas != nil,
+                      let glass = self.glass else { return }
+                if let sample = self.frozenAtlas?.sample(
+                    for: self.currentCell(for: glass),
+                    at: min(glass.bounds.width, glass.bounds.height)
+                ),
+                   let margin = GlassMaterialAccess.marginWidth(under: glass),
+                   abs(margin - sample.marginWidth) < 0.25 {
+                    return
+                }
+                self.apply()
+            }
+        }
     }
 
     private func writeShader(

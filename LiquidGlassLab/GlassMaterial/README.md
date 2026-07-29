@@ -90,6 +90,18 @@ edge-to-edge will still clip the Main-On outer passes no matter what this
 module writes. Size the panel to content plus `marginWidth` padding;
 `sample(for:at:)` exposes the captured value.
 
+One channel needs an active defense rather than a single write:
+`CABackdropLayer.marginWidth`. AppKit re-derives it for the window's *real*
+participation one cycle after a rim effect replacement, and after a resize
+even when the rim carries over — always later than any write in the same
+apply, with size-dependent delay. A frozen apply therefore replaces the rim
+effect only when its payload actually differs (which also removes the
+per-frame effect copy during a `value` scrub) and arms a bounded
+verify-and-repeat that re-applies while the margin reads back wrong. Measured
+on the acceptance HUD: contexts converge within 400ms at typical sizes and
+within ~1.8s at compact ones; during that window the glass shows the
+system-resolved margin, which the next beat corrects.
+
 Tint under a frozen Main-On lock needs one extra capture: a non-main window
 resolves the hue-suppressed tint matrix, so store Main-context matrices per
 cell with `addTintMatrix(_:for:)`, captured via
