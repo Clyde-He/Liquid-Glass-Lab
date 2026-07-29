@@ -94,6 +94,12 @@ public final class GlassMaterialStrength {
     private var lastWrittenFilterIdentity: ObjectIdentifier?
     private var frozenMainParticipation = true
     private var frozenReassertTask: Task<Void, Never>?
+    /// The numeric shader vector the last frozen apply wrote, kept as the
+    /// reassert sentinel's reference: margin and rim can both survive a
+    /// system restamp untouched (a resize carries the rim over, and Clear
+    /// samples a margin equal to the flat one), so only the written inputs
+    /// themselves prove the tree still holds the frozen material.
+    private var lastFrozenNumbers: [String: Double] = [:]
 
     /// The installed style atlas, if any. See `freeze(atlas:)`.
     public private(set) var frozenAtlas: GlassMaterialStyleAtlas?
@@ -295,6 +301,7 @@ public final class GlassMaterialStrength {
     public func unfreeze() {
         frozenReassertTask?.cancel()
         frozenReassertTask = nil
+        lastFrozenNumbers = [:]
         frozenAtlas = nil
         refresh()
     }
@@ -307,6 +314,7 @@ public final class GlassMaterialStrength {
     public func invalidate() {
         frozenReassertTask?.cancel()
         frozenReassertTask = nil
+        lastFrozenNumbers = [:]
         baseline = nil
         frozenAtlas = nil
         lastWrittenFilterIdentity = nil
@@ -463,6 +471,7 @@ public final class GlassMaterialStrength {
             nilKeys: sample.nilKeys,
             to: target
         )
+        lastFrozenNumbers = numbers
 
         // Grades and payloads are stamped pairwise in the shared traversal
         // order, against the topology validated above.
@@ -555,24 +564,68 @@ public final class GlassMaterialStrength {
         scheduleFrozenReassert()
     }
 
+    /// The beats are denser early: the system's re-derive usually lands
+    /// within the first ~100ms, and the visible flash lasts until the beat
+    /// that catches it.
+    private static let frozenReassertBeats: [Int] = [
+        80, 120, 160, 200, 250, 250, 250, 250, 500, 500,
+    ]
+
     private func scheduleFrozenReassert() {
         frozenReassertTask?.cancel()
         frozenReassertTask = Task { @MainActor [weak self] in
-            for _ in 0..<8 {
-                try? await Task.sleep(for: .milliseconds(250))
+            for delay in Self.frozenReassertBeats {
+                try? await Task.sleep(for: .milliseconds(delay))
                 guard !Task.isCancelled, let self, self.frozenAtlas != nil,
                       let glass = self.glass else { return }
                 if let sample = self.frozenAtlas?.sample(
                     for: self.currentCell(for: glass),
                     at: min(glass.bounds.width, glass.bounds.height)
-                ),
-                   let margin = GlassMaterialAccess.marginWidth(under: glass),
-                   abs(margin - sample.marginWidth) < 0.25 {
+                ), self.frozenStateHolds(sample, on: glass) {
                     return
                 }
                 self.apply()
             }
         }
+    }
+
+    /// The reassert sentinel, layered because every partial check has a
+    /// measured blind spot: margin alone misses Clear (its sampled margin is
+    /// 0, exactly the flat value), and margin + rim together still miss the
+    /// drag-burst restamp that carries the rim over while reverting the
+    /// shader inputs. The written numeric vector is the authoritative check
+    /// — the system cannot reproduce it at any `value` on a flat window —
+    /// with margin and rim kept as cheaper leading checks.
+    private func frozenStateHolds(
+        _ sample: GlassMaterialStyleSample,
+        on glass: NSGlassEffectView
+    ) -> Bool {
+        guard let margin = GlassMaterialAccess.marginWidth(under: glass),
+              abs(margin - sample.marginWidth) < 0.25 else { return false }
+        guard let target = GlassMaterialAccess.glassBackgroundTarget(
+            under: glass
+        ) else { return false }
+        let currentNumbers = GlassMaterialAccess.readTypedInputs(
+            from: target
+        ).numeric
+        for (key, written) in lastFrozenNumbers {
+            guard let current = currentNumbers[key],
+                  abs(current - written) < 1e-3 else { return false }
+        }
+        let rimLayers = GlassMaterialAccess.rimLayers(under: glass)
+        guard rimLayers.count == sample.rims.count else { return false }
+        for (layer, rim) in zip(rimLayers, sample.rims) {
+            var rimColors: [String: NSColor] = [:]
+            for (key, color) in rim.colors { rimColors[key] = color.nsColor }
+            if !GlassMaterialAccess.rimPayloadMatches(
+                values: rim.values,
+                colors: rimColors,
+                on: layer
+            ) {
+                return false
+            }
+        }
+        return true
     }
 
     private func writeShader(

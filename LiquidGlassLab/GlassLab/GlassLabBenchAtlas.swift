@@ -1167,6 +1167,70 @@ extension GlassLabView {
             }
         }
 
+        // Continuous-drag simulation — the interactive failure mode the
+        // single-resize contexts missed: a burst of rapid size changes ends
+        // with the system's late restamp winning, and on Clear cells the
+        // sampled margin equals the system's (both 0), so a margin-only
+        // sentinel never heals it. Burst-resize each variant, then require
+        // passive convergence of face, margin, and the rim payload.
+        for isClear in [true, false] {
+            hud.setAppearance(.dark)
+            hud.setClear(isClear)
+            try await Task.sleep(for: .milliseconds(600))
+            let cell = GlassMaterialStyleAtlas.Cell(
+                isLightAppearance: false,
+                isClear: isClear,
+                hasMainParticipation: true
+            )
+            hud.setStrength(0.6)
+            for stepIndex in 0...10 {
+                hud.setContentSize(CGSize(
+                    width: 320,
+                    height: 200 + Double(stepIndex) * 6
+                ))
+                try await Task.sleep(for: .milliseconds(30))
+            }
+            let shortSide = 260.0
+            let expected = decoded.sample(for: cell, at: shortSide)
+            let expectedFace = expected?.numeric["inputFaceOpacity"] ?? .nan
+            var convergedAfter: Int?
+            if let glass = hud.glassView, let expected {
+                for elapsed in stride(from: 200, through: 5000, by: 200) {
+                    try await Task.sleep(for: .milliseconds(200))
+                    let face = Self.appliedFaceOpacity(on: glass)
+                    let margin = GlassMaterialAccess.marginWidth(under: glass)
+                    var rimHolds = false
+                    if let rimLayer = GlassMaterialAccess.rimLayers(
+                        under: glass
+                    ).first, let rim = expected.rims.first {
+                        var rimColors: [String: NSColor] = [:]
+                        for (key, color) in rim.colors {
+                            rimColors[key] = color.nsColor
+                        }
+                        rimHolds = GlassMaterialAccess.rimPayloadMatches(
+                            values: rim.values,
+                            colors: rimColors,
+                            on: rimLayer
+                        )
+                    }
+                    if let face, abs(face - 0.6 * expectedFace) < 0.02,
+                       let margin,
+                       abs(margin - expected.marginWidth) < 0.5,
+                       rimHolds {
+                        convergedAfter = elapsed
+                        break
+                    }
+                }
+            }
+            step(
+                "drag-burst-heals MainOn·Dark·\(isClear ? "Clear" : "Regular")",
+                convergedAfter != nil,
+                convergedAfter.map { "converged after \($0)ms" }
+                    ?? "no convergence within 5s after drag burst"
+            )
+            hud.setStrength(1)
+        }
+
         // App deactivate/reactivate — the P2-sensitive transition. The HUD is
         // never key or main, so the *only* event that flips its resolved
         // participation is application activation; the frozen style must
