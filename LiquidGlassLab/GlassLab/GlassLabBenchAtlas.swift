@@ -1167,6 +1167,65 @@ extension GlassLabView {
             }
         }
 
+        // App deactivate/reactivate — the P2-sensitive transition. The HUD is
+        // never key or main, so the *only* event that flips its resolved
+        // participation is application activation; the frozen style must
+        // survive both directions. The effect view observes the app
+        // notifications, so this asserts the whole chain: system restamp →
+        // observed → frozen re-apply wins as final writer.
+        if let glass = hud.glassView {
+            let cell = GlassMaterialStyleAtlas.Cell(
+                isLightAppearance: false,
+                isClear: true,
+                hasMainParticipation: true
+            )
+            let shortSide = min(520.0, 280.0)
+            let expectedFace = decoded.sample(for: cell, at: shortSide)?
+                .numeric["inputFaceOpacity"] ?? .nan
+            hud.setStrength(0.7)
+
+            func faceHolds() async throws -> (Bool, Double) {
+                var last = Double.nan
+                for _ in 0..<15 {
+                    try await Task.sleep(for: .milliseconds(200))
+                    if let face = Self.appliedFaceOpacity(on: glass) {
+                        last = face
+                        if abs(face - 0.7 * expectedFace) < 0.02 {
+                            return (true, face)
+                        }
+                    }
+                }
+                return (false, last)
+            }
+
+            NSApp.deactivate()
+            try await Task.sleep(for: .milliseconds(800))
+            let whileInactive = try await faceHolds()
+            step(
+                "frozen-survives-deactivate",
+                whileInactive.0,
+                String(
+                    format: "face %.4f vs expected %.4f while inactive",
+                    whileInactive.1,
+                    0.7 * expectedFace
+                )
+            )
+
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            try await Task.sleep(for: .milliseconds(800))
+            let afterReactivate = try await faceHolds()
+            step(
+                "frozen-survives-reactivate",
+                afterReactivate.0,
+                String(
+                    format: "face %.4f vs expected %.4f after reactivation",
+                    afterReactivate.1,
+                    0.7 * expectedFace
+                )
+            )
+            hud.setStrength(1)
+        }
+
         let failures = steps.filter { ($0["passed"] as? Bool) != true }
         return [
             "formatVersion": 1,
