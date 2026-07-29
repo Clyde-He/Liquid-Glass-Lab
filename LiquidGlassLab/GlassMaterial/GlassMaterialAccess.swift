@@ -603,12 +603,22 @@ enum GlassMaterialAccess {
               }),
               filterInputKeys(filter).contains("inputColorMatrix"),
               let name = filterName(filter) else { return }
-        let storage = matrix
-        let boxed = storage.withUnsafeBytes {
-            NSValue(
-                bytes: $0.baseAddress!,
-                objCType: "[20f]"
-            )
+        // Re-box with the destination's own objCType. The render server
+        // decodes the filter's native encoding ({CAColorMatrix=…}); a plain
+        // [20f] box round-trips through every KVC and presentation read yet
+        // renders nothing — model-perfect and pixel-absent, measured on the
+        // tint branch against a genuine Main-On window. Same 80 bytes,
+        // different type tag; the accepted lab mutation contract has always
+        // re-boxed with the captured type string.
+        let currentValue = layer.value(
+            forKeyPath: "filters.\(name).inputColorMatrix"
+        ) as? NSValue
+        let typeString = currentValue.map { String(cString: $0.objCType) }
+            ?? "[20f]"
+        let boxed = typeString.withCString { typePointer in
+            matrix.withUnsafeBytes {
+                NSValue(bytes: $0.baseAddress!, objCType: typePointer)
+            }
         }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
