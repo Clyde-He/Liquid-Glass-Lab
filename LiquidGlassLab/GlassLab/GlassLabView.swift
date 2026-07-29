@@ -47,6 +47,7 @@ struct GlassLabView: View {
     /// `rendererMode` and the hidden context pages, and it hosts all capture,
     /// probe, study, and export UI.
     enum BenchPage: String, CaseIterable, Identifiable {
+        case atlas = "Atlas"
         case exports = "Exports"
         case materialize = "Materialize"
         case tint = "Tint Study"
@@ -60,7 +61,7 @@ struct GlassLabView: View {
     @State var selectedRecipePage = RecipePage.general
     @State var selectedPassSlotID: String?
     @State var selectedSemanticPage = SemanticPage.general
-    @State var selectedBenchPage = BenchPage.exports
+    @State var selectedBenchPage = BenchPage.atlas
     @State var isCapturingMatrix = false
     @State var isCapturingPassAudit = false
     @State var isCapturingSemanticTrees = false
@@ -126,6 +127,21 @@ struct GlassLabView: View {
     @State var vibrantMatrixProbeStatus: String?
     @State var isVibrantMatrixProbeRunning = false
     @State var hasPendingSchemaRefresh = false
+    @State var atlasDocument: GlassMaterialStyleAtlas?
+    @State var atlasStatus: String?
+    @State var atlasCaptureTask: Task<Void, Never>?
+    @State var isCapturingAtlas = false
+    @State var atlasReadbackReport: String?
+    @State var atlasReadbackTask: Task<Void, Never>?
+    @State var isRunningAtlasReadback = false
+    @State var hudPanelController: GlassLabHUDPanelController?
+    @State var hudPanelVisible = false
+    @State var hudAppearance = GlassLabHUDPanelController.Appearance.auto
+    @State var hudIsClear = false
+    @State var hudStrength = 1.0
+    @State var hudTintColor: NSColor?
+    @State var hudContentWidth = 320.0
+    @State var hudContentHeight = 120.0
 
     var body: some View {
         labForm
@@ -227,6 +243,9 @@ struct GlassLabView: View {
             materializeStudyTask?.cancel()
             appKitMaterializeTask?.cancel()
             tintStudyTask?.cancel()
+            atlasCaptureTask?.cancel()
+            atlasReadbackTask?.cancel()
+            hudPanelController?.tearDown()
         }
     }
 
@@ -251,6 +270,14 @@ struct GlassLabView: View {
             return
         }
         switch selectedBenchPage {
+        case .atlas:
+            state.rendererMode = .recipe
+            if selectedRecipePage == .materialize || selectedRecipePage == .tint {
+                selectedRecipePage = .general
+            }
+            if selectedSemanticPage == .transition {
+                selectedSemanticPage = .general
+            }
         case .exports:
             if selectedRecipePage == .materialize || selectedRecipePage == .tint {
                 selectedRecipePage = .general
@@ -462,6 +489,8 @@ struct GlassLabView: View {
 
                 case .bench:
                 switch selectedBenchPage {
+                case .atlas:
+                    benchAtlasSections(state: state)
                 case .exports:
                     benchExportSections(state: state)
                 case .materialize:

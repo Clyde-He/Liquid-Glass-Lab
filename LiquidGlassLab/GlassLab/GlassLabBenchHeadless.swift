@@ -132,10 +132,12 @@ extension GlassLabView {
         )
         let goldenFlag = arguments.firstIndex(of: "--capture-golden")
         let planFlag = arguments.firstIndex(of: "--print-golden-plan")
+        let atlasFlag = arguments.firstIndex(of: "--verify-style-atlas")
         guard let flagIndex = sizeFlag
                 ?? resizeFlag
                 ?? removalWarmupFlag
                 ?? goldenFlag
+                ?? atlasFlag
                 ?? planFlag,
               arguments.index(after: flagIndex) < arguments.endIndex
                 || planFlag != nil else {
@@ -191,6 +193,18 @@ extension GlassLabView {
                 let passed = (result["passed"] as? Bool) == true
                 report = "== Removal warm-up check ==\n"
                     + "Cells: \((result["cells"] as? [Any])?.count ?? 0)\n"
+                    + "Result: \(passed ? "PASSED" : "FAILED")"
+                if !passed { exitCode = 2 }
+            } else if atlasFlag != nil {
+                let result = try await performStyleAtlasVerification()
+                payload = try JSONSerialization.data(
+                    withJSONObject: result,
+                    options: [.prettyPrinted, .sortedKeys]
+                )
+                let passed = (result["passed"] as? Bool) == true
+                report = "== Style atlas verification ==\n"
+                    + "Steps: \((result["steps"] as? [Any])?.count ?? 0)\n"
+                    + "Failures: \(result["failureCount"] ?? "?")\n"
                     + "Result: \(passed ? "PASSED" : "FAILED")"
                 if !passed { exitCode = 2 }
             } else {

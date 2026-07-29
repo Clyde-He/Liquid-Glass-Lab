@@ -851,7 +851,7 @@ enum GlassLabTuning {
         return nil
     }
 
-    private static func setGuarded(_ value: Any?, forKey key: String, on glass: NSGlassEffectView) {
+    static func setGuarded(_ value: Any?, forKey key: String, on glass: NSGlassEffectView) {
         setValueIfResponds(value, forKey: key, on: glass)
     }
 

@@ -207,8 +207,13 @@ task's controls are mounted:
 - Recipe: `General` and `Passes` — the NSGlass tweaking surface;
 - Semantic Usage: `General` and `Layer Inspector` — the SwiftUI tweaking
   surface;
-- Bench: `Exports`, `Materialize`, `Tint Study`, `Transition`, and `Probes` —
-  every capture, study, probe, and export lives here, off the tweaking pages.
+- Bench: `Atlas`, `Exports`, `Materialize`, `Tint Study`, `Transition`, and
+  `Probes` — every capture, study, probe, and export lives here, off the
+  tweaking pages. Atlas is the frozen-baseline acceptance page: it captures
+  the `GlassMaterialStyleAtlas` probe sweep, persists it, drives a real
+  non-activating HUD panel frozen from it, and quantifies the
+  size-interpolation error against live resolutions
+  (`--verify-style-atlas` runs its automatable core headless).
 
 Bench is not a renderer: each Bench page steers `rendererMode` (and the
 hidden context pages the capture drivers still key on) to whatever its
