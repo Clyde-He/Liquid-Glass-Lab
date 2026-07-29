@@ -104,6 +104,7 @@ public final class GlassMaterialStrength {
     /// while reverting the color inputs and grade matrices.
     private var lastFrozenNumbers: [String: Double] = [:]
     private var lastFrozenColors: [String: NSColor] = [:]
+    private var lastFrozenTintMatrix: [Float]?
 
     /// The installed style atlas, if any. See `freeze(atlas:)`.
     public private(set) var frozenAtlas: GlassMaterialStyleAtlas?
@@ -307,6 +308,7 @@ public final class GlassMaterialStrength {
         frozenReassertTask = nil
         lastFrozenNumbers = [:]
         lastFrozenColors = [:]
+        lastFrozenTintMatrix = nil
         frozenAtlas = nil
         refresh()
     }
@@ -321,6 +323,7 @@ public final class GlassMaterialStrength {
         frozenReassertTask = nil
         lastFrozenNumbers = [:]
         lastFrozenColors = [:]
+        lastFrozenTintMatrix = nil
         baseline = nil
         frozenAtlas = nil
         lastWrittenFilterIdentity = nil
@@ -539,9 +542,11 @@ public final class GlassMaterialStrength {
                 )
                 if let matrix {
                     GlassMaterialAccess.setColorMatrix(matrix, on: tintLayer)
+                    lastFrozenTintMatrix = matrix
                 }
             }
         }
+        if tintColor == nil { lastFrozenTintMatrix = nil }
 
         // Render bounds do not animate with the transition; they are part of
         // the context and held constant across `value`.
@@ -634,6 +639,14 @@ public final class GlassMaterialStrength {
                   zip(current, slot.matrix).allSatisfy({
                       abs($0 - $1) < 1e-3
                   })
+            else { return false }
+        }
+        if tintColor != nil, let written = lastFrozenTintMatrix {
+            guard let tintLayer = GlassMaterialAccess.tintMatrixLayer(
+                under: glass
+            ), let current = GlassMaterialAccess.colorMatrix(on: tintLayer),
+                current.count == written.count,
+                zip(current, written).allSatisfy({ abs($0 - $1) < 1e-3 })
             else { return false }
         }
         let rimLayers = GlassMaterialAccess.rimLayers(under: glass)

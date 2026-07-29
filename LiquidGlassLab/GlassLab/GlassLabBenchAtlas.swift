@@ -558,28 +558,7 @@ extension GlassLabView {
                 scheduleLiveReadoutRefresh(refreshSchema: true)
             }
             do {
-                configureAtlasProbeContext()
-                state.glassHeight = 200
-                state.isTestWindowMain = true
-                state.tintColor = tint
-
-                for isLight in [true, false] {
-                    for isClear in [false, true] {
-                        let cell = GlassMaterialStyleAtlas.Cell(
-                            isLightAppearance: isLight,
-                            isClear: isClear,
-                            hasMainParticipation: true
-                        )
-                        atlasStatus = "Tint matrix · " + Self.cellLabel(cell)
-                        state.testAppearance = isLight ? .light : .dark
-                        state.variant = isClear ? 2 : 1
-                        let matrix = try await captureSettledTintMatrix(
-                            context: Self.cellLabel(cell)
-                        )
-                        atlas.addTintMatrix(matrix, for: cell)
-                    }
-                }
-
+                try await captureTintMatrices(for: tint, into: &atlas)
                 atlasDocument = atlas
                 let url = try saveAtlasToDisk(atlas)
                 atlasStatus = "Tint hue locked for all four Main-On cells · "
@@ -591,6 +570,36 @@ extension GlassLabView {
                 let message = (error as? LocalizedError)?.errorDescription
                     ?? error.localizedDescription
                 atlasStatus = "Tint capture failed: \(message)"
+            }
+        }
+    }
+
+    /// Captures the Main-On tint matrix for this color in all four
+    /// appearance × material cells and folds them into the atlas. Shared by
+    /// the interactive Lock Tint Hue button and the headless verification.
+    func captureTintMatrices(
+        for tint: NSColor,
+        into atlas: inout GlassMaterialStyleAtlas
+    ) async throws {
+        configureAtlasProbeContext()
+        state.glassHeight = 200
+        state.isTestWindowMain = true
+        state.tintColor = tint
+
+        for isLight in [true, false] {
+            for isClear in [false, true] {
+                let cell = GlassMaterialStyleAtlas.Cell(
+                    isLightAppearance: isLight,
+                    isClear: isClear,
+                    hasMainParticipation: true
+                )
+                atlasStatus = "Tint matrix · " + Self.cellLabel(cell)
+                state.testAppearance = isLight ? .light : .dark
+                state.variant = isClear ? 2 : 1
+                let matrix = try await captureSettledTintMatrix(
+                    context: Self.cellLabel(cell)
+                )
+                atlas.addTintMatrix(matrix, for: cell)
             }
         }
     }
@@ -1387,6 +1396,92 @@ extension GlassLabView {
                     ?? "no convergence within 5s after drag burst"
             )
             hud.setStrength(1)
+        }
+
+        // Tint capture-on-pick — assert the whole pipeline on the HUD: the
+        // tint branch exists on a never-main window at all, the captured
+        // Main-context hue is installed rather than the live suppressed one,
+        // and coefficient 18 carries sourceAlpha × G².
+        let tintColor = NSColor(srgbRed: 1.0, green: 0.45, blue: 0.35, alpha: 0.6)
+        var tintedAtlas = decoded
+        try await captureTintMatrices(for: tintColor, into: &tintedAtlas)
+        hud.setAtlas(tintedAtlas)
+        hud.setAppearance(.dark)
+        hud.setClear(false)
+        hud.setContentSize(CGSize(width: 320, height: 120))
+        hud.setTint(tintColor)
+        hud.setStrength(1)
+        try await Task.sleep(for: .milliseconds(1000))
+        if let glass = hud.glassView {
+            let cell = GlassMaterialStyleAtlas.Cell(
+                isLightAppearance: false,
+                isClear: false,
+                hasMainParticipation: true
+            )
+            let expectedHue = tintedAtlas.tintMatrix(
+                for: cell,
+                matching: tintColor
+            )
+            var layerExists = false
+            var hueOK = false
+            var alphaAtOne = Double.nan
+            for _ in 0..<15 {
+                try await Task.sleep(for: .milliseconds(200))
+                guard let tintLayer = GlassMaterialAccess.tintMatrixLayer(
+                    under: glass
+                ) else { continue }
+                layerExists = true
+                guard let current = GlassMaterialAccess.colorMatrix(
+                    on: tintLayer
+                ), current.count == 20 else { continue }
+                alphaAtOne = Double(current[18])
+                if let expectedHue, expectedHue.count == 20 {
+                    hueOK = (0..<20).filter { $0 != 18 }.allSatisfy {
+                        abs(current[$0] - expectedHue[$0]) < 1e-3
+                    }
+                }
+                if hueOK, abs(alphaAtOne - 0.6) < 0.02 { break }
+            }
+            step(
+                "tint-layer-exists-on-hud",
+                layerExists,
+                "tint matrix branch present on the never-main panel"
+            )
+            step(
+                "tint-hue-tracks-capture",
+                hueOK,
+                "19 hue coefficients vs the captured Main-context matrix"
+            )
+            step(
+                "tint-alpha-at-g1",
+                abs(alphaAtOne - 0.6) < 0.02,
+                String(format: "matrix[18] %.4f vs sourceAlpha 0.6", alphaAtOne)
+            )
+
+            hud.setStrength(0.5)
+            var alphaAtHalf = Double.nan
+            for _ in 0..<15 {
+                try await Task.sleep(for: .milliseconds(200))
+                if let tintLayer = GlassMaterialAccess.tintMatrixLayer(
+                    under: glass
+                ), let current = GlassMaterialAccess.colorMatrix(
+                    on: tintLayer
+                ), current.count == 20 {
+                    alphaAtHalf = Double(current[18])
+                    if abs(alphaAtHalf - 0.15) < 0.02 { break }
+                }
+            }
+            step(
+                "tint-alpha-at-g05",
+                abs(alphaAtHalf - 0.15) < 0.02,
+                String(
+                    format: "matrix[18] %.4f vs 0.6 × 0.5² = 0.15",
+                    alphaAtHalf
+                )
+            )
+            hud.setTint(nil)
+            hud.setStrength(1)
+            try await Task.sleep(for: .milliseconds(400))
         }
 
         // App deactivate/reactivate — the P2-sensitive transition. The HUD is
