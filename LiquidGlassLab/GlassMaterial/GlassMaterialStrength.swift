@@ -117,10 +117,8 @@ public final class GlassMaterialStrength {
 
     /// True when the glass currently has a `glassBackground` pass and this
     /// controller has values to drive it — a live baseline, or a frozen atlas
-    /// with samples for the *currently selected* cell. A partial atlas that
-    /// lacks the live appearance × variant cell reports false: the previously
-    /// stamped values remain on the tree, but nothing tracks `value` until
-    /// the cell is captured or the context returns.
+    /// with samples for the *currently selected* cell. The cell check is
+    /// defensive: `freeze(atlas:)` refuses an atlas that could miss one.
     public var isAvailable: Bool {
         guard let glass,
               GlassMaterialAccess.glassBackgroundTarget(under: glass) != nil
@@ -195,6 +193,14 @@ public final class GlassMaterialStrength {
     }
 
     /// Locks the glass to the captured atlas and stamps it immediately.
+    /// Returns false — installing nothing — unless the atlas covers the
+    /// complete appearance × variant cell space for the frozen participation.
+    ///
+    /// Coverage is validated here rather than discovered at a later context
+    /// switch: appearance and variant change at runtime by design, and a
+    /// cell miss after a switch would strand the previous cell's authored
+    /// values with nothing tracking `value`. Rejecting a partial atlas keeps
+    /// that state unreachable in the supported domain.
     ///
     /// Participation is the frozen axis: `mainParticipation` selects which
     /// captured cells serve, independent of the window's real state.
@@ -203,15 +209,29 @@ public final class GlassMaterialStrength {
     /// Regular/Clear select different atlas cells with no recapture — and
     /// size follows by interpolating each cell's samples at the current
     /// short side.
+    @discardableResult
     public func freeze(
         atlas: GlassMaterialStyleAtlas,
         mainParticipation: Bool = true
-    ) {
+    ) -> Bool {
+        for isLight in [true, false] {
+            for isClear in [true, false] {
+                let cell = GlassMaterialStyleAtlas.Cell(
+                    isLightAppearance: isLight,
+                    isClear: isClear,
+                    hasMainParticipation: mainParticipation
+                )
+                guard !atlas.sampleShortSides(for: cell).isEmpty else {
+                    return false
+                }
+            }
+        }
         frozenAtlas = atlas
         frozenMainParticipation = mainParticipation
         baseline = nil
         lastWrittenFilterIdentity = nil
         apply()
+        return true
     }
 
     /// Returns to live-read behavior. The frozen values persist on the tree
@@ -335,10 +355,23 @@ public final class GlassMaterialStrength {
         let isLight = Self.isLightAppearance(glass)
         let cell = currentCell(for: glass)
         let shortSide = min(glass.bounds.width, glass.bounds.height)
-        // A cell with no samples leaves the previous stamp in place and
-        // reports isAvailable == false — visually continuous, but nothing
-        // tracks `value`. Cover every cell the product exposes.
+        // Defensive only: freeze(atlas:) rejects an atlas that could miss a
+        // cell, so in the supported domain this lookup always succeeds.
         guard let sample = atlas.sample(for: cell, at: shortSide) else { return }
+
+        // Validate the complete destination topology before the first write.
+        // A partially rebuilt tree can expose `glassBackground` while the
+        // grade, rim, or output layers are still missing; stamping the shader
+        // first and skipping the absent groups would leave a hybrid material
+        // on screen until another context event. Writing nothing keeps the
+        // tree consistently system-resolved for the next refresh instead.
+        let matrixLayers = GlassMaterialAccess.untintedMatrixLayers(under: glass)
+        let rimLayers = GlassMaterialAccess.rimLayers(under: glass)
+        guard matrixLayers.count == sample.matrices.count,
+              rimLayers.count == sample.rims.count,
+              GlassMaterialAccess.marginWidth(under: glass) != nil,
+              GlassMaterialAccess.outputBounds(under: glass) != nil
+        else { return }
 
         var sampleColors: [String: NSColor] = [:]
         for (key, color) in sample.colors { sampleColors[key] = color.nsColor }
@@ -392,34 +425,27 @@ public final class GlassMaterialStrength {
         }
 
         // Grades and payloads are stamped pairwise in the shared traversal
-        // order; a count mismatch means the topology is not the one captured
-        // (Variant change, mid-rebuild sample) and nothing is guessed.
-        let matrixLayers = GlassMaterialAccess.untintedMatrixLayers(under: glass)
-        if matrixLayers.count == sample.matrices.count {
-            for (layer, slot) in zip(matrixLayers, sample.matrices) {
-                GlassMaterialAccess.setColorMatrix(slot.matrix, on: layer)
-                GlassMaterialAccess.setMatrixScalarInputs(slot.inputs, on: layer)
-            }
+        // order, against the topology validated above.
+        for (layer, slot) in zip(matrixLayers, sample.matrices) {
+            GlassMaterialAccess.setColorMatrix(slot.matrix, on: layer)
+            GlassMaterialAccess.setMatrixScalarInputs(slot.inputs, on: layer)
         }
 
         // The frozen rim owns both the payload and the gate, in both
         // directions: it opens a captured Main-On rim on a window that is not
         // main, and holds a captured flat rim closed on one that is.
-        let rimLayers = GlassMaterialAccess.rimLayers(under: glass)
-        if rimLayers.count == sample.rims.count {
-            for (layer, rim) in zip(rimLayers, sample.rims) {
-                var rimColors: [String: NSColor] = [:]
-                for (key, color) in rim.colors { rimColors[key] = color.nsColor }
-                GlassMaterialAccess.setRimPayload(
-                    values: rim.values,
-                    colors: rimColors,
-                    on: layer
-                )
-                GlassMaterialAccess.setRimOpacity(
-                    value > 0 ? rim.layerOpacity : 0,
-                    on: layer
-                )
-            }
+        for (layer, rim) in zip(rimLayers, sample.rims) {
+            var rimColors: [String: NSColor] = [:]
+            for (key, color) in rim.colors { rimColors[key] = color.nsColor }
+            GlassMaterialAccess.setRimPayload(
+                values: rim.values,
+                colors: rimColors,
+                on: layer
+            )
+            GlassMaterialAccess.setRimOpacity(
+                value > 0 ? rim.layerOpacity : 0,
+                on: layer
+            )
         }
 
         if let tintColor,

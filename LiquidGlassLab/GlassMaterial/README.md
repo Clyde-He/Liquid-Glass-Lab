@@ -48,9 +48,14 @@ for cell in cellsToCapture {          // appearance × variant × participation
     }
 }
 
-hudGlass.materialStrength.freeze(atlas: atlas)
-hudGlass.materialStrength.value = 0.5   // interpolates the frozen style
+hudGlass.materialStrength.freeze(atlas: atlas)   // false if coverage is partial
+hudGlass.materialStrength.value = 0.5            // interpolates the frozen style
 ```
+
+`freeze` installs nothing unless the atlas covers the complete
+appearance × variant cell space for the frozen participation — appearance and
+variant switch at runtime by design, and a cell miss after a switch would
+strand the previous cell's values with nothing tracking `value`.
 
 Only participation is frozen. Appearance and variant stay live — Light/Dark/
 Auto and Regular/Clear switch by selecting atlas cells with no recapture — and
