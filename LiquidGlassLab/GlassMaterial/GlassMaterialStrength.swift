@@ -94,6 +94,7 @@ public final class GlassMaterialStrength {
     private var lastWrittenFilterIdentity: ObjectIdentifier?
     private var frozenMainParticipation = true
     private var frozenReassertTask: Task<Void, Never>?
+    private var preCommitObserver: CFRunLoopObserver?
     /// The shader vector the last frozen apply wrote, kept as the reassert
     /// sentinel's reference: margin and rim can both survive a system
     /// restamp untouched (a resize carries the rim over, and Clear samples a
@@ -295,8 +296,54 @@ public final class GlassMaterialStrength {
         frozenMainParticipation = mainParticipation
         baseline = nil
         lastWrittenFilterIdentity = nil
+        installPreCommitObserver()
         apply()
         return true
+    }
+
+    /// The frame-order weapon. The private subtree lays out *after* the
+    /// hosting view, so a restamp during a resize lands later in the same
+    /// layout pass than any write our own `layout()` hook can make — during
+    /// a short-side drag the system wins every frame and the correction
+    /// always paints one frame late. Core Animation commits the transaction
+    /// from a `.beforeWaiting` run-loop observer at order 2,000,000; running
+    /// the sentinel just below that order places the frozen rewrite after
+    /// every layout of the turn and before the commit, making it the frame's
+    /// final model state. The check is a few dozen KVC reads per turn and
+    /// writes only on mismatch.
+    private func installPreCommitObserver() {
+        guard preCommitObserver == nil else { return }
+        let activities = CFRunLoopActivity.beforeWaiting.rawValue
+            | CFRunLoopActivity.exit.rawValue
+        let observer = CFRunLoopObserverCreateWithHandler(
+            kCFAllocatorDefault,
+            activities,
+            true,
+            1_999_999
+        ) { [weak self] _, _ in
+            MainActor.assumeIsolated {
+                self?.preCommitReassertIfNeeded()
+            }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        preCommitObserver = observer
+    }
+
+    private func removePreCommitObserver() {
+        if let preCommitObserver {
+            CFRunLoopObserverInvalidate(preCommitObserver)
+        }
+        preCommitObserver = nil
+    }
+
+    private func preCommitReassertIfNeeded() {
+        guard let frozenAtlas, let glass else { return }
+        guard let sample = frozenAtlas.sample(
+            for: currentCell(for: glass),
+            at: min(glass.bounds.width, glass.bounds.height)
+        ) else { return }
+        if frozenStateHolds(sample, on: glass) { return }
+        apply()
     }
 
     /// Returns to live-read behavior. The frozen values persist on the tree
@@ -304,6 +351,7 @@ public final class GlassMaterialStrength {
     /// Recipe is adopted as the live baseline again; as everywhere else, an
     /// immediate true restore requires recreating the glass view.
     public func unfreeze() {
+        removePreCommitObserver()
         frozenReassertTask?.cancel()
         frozenReassertTask = nil
         lastFrozenNumbers = [:]
@@ -319,6 +367,7 @@ public final class GlassMaterialStrength {
     /// `glassBackground` override survives until the glass is rebuilt. Discard
     /// and recreate the `NSGlassEffectView` for a true restore.
     public func invalidate() {
+        removePreCommitObserver()
         frozenReassertTask?.cancel()
         frozenReassertTask = nil
         lastFrozenNumbers = [:]
@@ -327,6 +376,12 @@ public final class GlassMaterialStrength {
         baseline = nil
         frozenAtlas = nil
         lastWrittenFilterIdentity = nil
+    }
+
+    deinit {
+        if let preCommitObserver {
+            CFRunLoopObserverInvalidate(preCommitObserver)
+        }
     }
 
     // MARK: Internals
