@@ -47,15 +47,21 @@ for cell in cellsToCapture {          // appearance × variant × participation
         atlas.add(GlassMaterialStyleSample.capture(from: probeGlass)!, for: cell)
     }
 }
+atlas.environment = .current(for: probeWindow.screen)
 
-hudGlass.materialStrength.freeze(atlas: atlas)   // false if coverage is partial
+hudGlass.materialStrength.freeze(atlas: atlas)   // false if stale or partial
 hudGlass.materialStrength.value = 0.5            // interpolates the frozen style
 ```
 
-`freeze` installs nothing unless the atlas covers the complete
-appearance × variant cell space for the frozen participation — appearance and
-variant switch at runtime by design, and a cell miss after a switch would
-strand the previous cell's values with nothing tracking `value`.
+An atlas is a **disposable cache**, not a portable document. `freeze` installs
+nothing unless the atlas was stamped under the current capture schema and OS
+build and covers the complete appearance × variant cell space for the frozen
+participation — appearance and variant switch at runtime by design, and a cell
+miss after a switch would strand the previous cell's values with nothing
+tracking `value`. When schema or OS build change, discard the whole atlas and
+recapture at the next key-window opportunity; the display signature is stored
+for the same decision but is advisory, since its known sensitivity is three
+small resolved fields.
 
 Only participation is frozen. Appearance and variant stay live — Light/Dark/
 Auto and Regular/Clear switch by selecting atlas cells with no recapture — and
@@ -85,15 +91,15 @@ module writes. Size the panel to content plus `marginWidth` padding;
 `sample(for:at:)` exposes the captured value.
 
 Tint under a frozen Main-On lock needs one extra capture: a non-main window
-resolves the hue-suppressed tint matrix, so store the Main-context matrix per
-cell with `setTintMatrix(_:for:)`, captured via
+resolves the hue-suppressed tint matrix, so store Main-context matrices per
+cell with `addTintMatrix(_:for:)`, captured via
 `GlassMaterialStyleAtlas.captureTintMatrix(from:)` at tint-selection time —
 the user picks the color in an active window, which is exactly the
-participation the matrix needs. Strength then drives alpha as
-`sourceAlpha × value²` on the captured hue. The matrix is bound to the color
-it was resolved for: after `tintColor` changes, the hue falls back to the live
-(suppressed) resolution until the new color's matrix is captured and the
-atlas refrozen.
+participation the matrix needs. Tint accumulates independently of the size
+samples and is keyed by source RGB: a new color captures four matrices (one
+per Main-On cell), never a new size atlas, and alpha stays a runtime
+coefficient (`sourceAlpha × value²`) on the captured hue. Until a color's
+matrix is captured, its hue falls back to the live (suppressed) resolution.
 
 `unfreeze()` returns to live behavior at the next rebuild. One caveat is
 inherited from an open research question: whether AppKit writes an

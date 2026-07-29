@@ -108,18 +108,6 @@ public struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
     public internal(set) var matrices: [GlassMaterialMatrixSample]
     public internal(set) var rims: [GlassMaterialRimSample]
 
-    /// Every shader input this sample knows about — captured with a value or
-    /// captured as nil. A destination that declares a managed input outside
-    /// this set was resolved by a shader this sample never saw (typically an
-    /// atlas persisted across an OS upgrade), and replaying onto it would
-    /// leave the unknown inputs at the window's real-context values.
-    public var capturedKeys: Set<String> {
-        Set(numeric.keys)
-            .union(colors.keys)
-            .union(points.keys)
-            .union(nilKeys)
-    }
-
     /// Captures the currently resolved style, or nil when the tree is missing,
     /// mutated (`inputFaceOpacity < 0.999`), or any discovered matrix or rim
     /// slot fails to read completely — a partial capture must not report
@@ -201,9 +189,52 @@ public struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
 }
 
 /// The captured style atlas: one entry per context cell, each holding samples
-/// at several short sides plus an optional Main-context tint matrix for the
-/// currently chosen tint color.
+/// at several short sides plus Main-context tint matrices for the tint colors
+/// captured so far.
+///
+/// An atlas is a **disposable cache**, not a portable document. It is valid
+/// for the capture schema, OS build, and display environment it was captured
+/// in; when any of those change, discard it and recapture rather than
+/// attempting cross-environment compatibility. `freeze(atlas:)` enforces the
+/// schema and OS build; the display signature is advisory, because its known
+/// sensitivity is three small resolved fields, and refusing to freeze on a
+/// second display would cost far more than it protects.
 public struct GlassMaterialStyleAtlas: Codable, Sendable {
+    /// Bump when the sample schema changes shape. A persisted atlas from
+    /// another schema is discarded wholesale instead of migrated.
+    public static let currentSchemaVersion = 1
+
+    /// The environment an atlas was captured in.
+    public struct Environment: Codable, Hashable, Sendable {
+        public var schemaVersion: Int
+        public var osBuild: String
+        public var displaySignature: String
+
+        /// The running environment. Stamp this onto an atlas right after
+        /// capturing it: `atlas.environment = .current(for: window.screen)`.
+        @MainActor
+        public static func current(for screen: NSScreen?) -> Environment {
+            Environment(
+                schemaVersion: GlassMaterialStyleAtlas.currentSchemaVersion,
+                osBuild: ProcessInfo.processInfo.operatingSystemVersionString,
+                displaySignature: screen.map {
+                    "\($0.localizedName) @\($0.backingScaleFactor)x"
+                } ?? "unknown"
+            )
+        }
+
+        /// Schema and OS build must match to freeze; the display signature is
+        /// deliberately not part of this — compare it yourself to decide when
+        /// to recapture opportunistically.
+        public func isCompatible(with other: Environment) -> Bool {
+            schemaVersion == other.schemaVersion && osBuild == other.osBuild
+        }
+    }
+
+    /// Where this atlas was captured. Nil means never stamped, which
+    /// `freeze(atlas:)` treats as incompatible.
+    public var environment: Environment?
+
     /// A context cell. Appearance and variant are read live at apply time —
     /// which is how Light/Dark/Auto and Regular/Clear switch without
     /// recapture — while participation is the frozen axis.
@@ -240,7 +271,7 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
     }
 
     private var cells: [Cell: [GlassMaterialStyleSample]] = [:]
-    private var tintMatrices: [Cell: TintMatrix] = [:]
+    private var tintMatrices: [Cell: [TintMatrix]] = [:]
 
     public init() {}
 
@@ -259,8 +290,17 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
         cells[cell] = samples
     }
 
-    public mutating func setTintMatrix(_ matrix: TintMatrix?, for cell: Cell) {
-        tintMatrices[cell] = matrix
+    /// Adds a captured tint matrix for the cell, replacing any entry with the
+    /// same source RGB. Tint accumulates independently of the size samples:
+    /// choosing a new color captures four matrices (one per Main-On cell),
+    /// never a new size atlas.
+    public mutating func addTintMatrix(_ matrix: TintMatrix, for cell: Cell) {
+        var entries = tintMatrices[cell] ?? []
+        entries.removeAll {
+            Self.matchesRGB($0.sourceColor, matrix.sourceColor)
+        }
+        entries.append(matrix)
+        tintMatrices[cell] = entries
     }
 
     /// The captured Tint matrix for a cell, but only when it was resolved for
@@ -272,15 +312,22 @@ public struct GlassMaterialStyleAtlas: Codable, Sendable {
     /// replaces that from the current `tintColor` on every apply — so an
     /// opacity-only change keeps serving the captured hue.
     public func tintMatrix(for cell: Cell, matching color: NSColor) -> [Float]? {
-        guard let entry = tintMatrices[cell],
-              entry.matrix.count == 20,
+        guard let entries = tintMatrices[cell],
               let requested = GlassMaterialColorValue(color) else { return nil }
-        let stored = entry.sourceColor
+        return entries.first {
+            $0.matrix.count == 20
+                && Self.matchesRGB($0.sourceColor, requested)
+        }?.matrix
+    }
+
+    private static func matchesRGB(
+        _ a: GlassMaterialColorValue,
+        _ b: GlassMaterialColorValue
+    ) -> Bool {
         let tolerance = 0.001
-        guard abs(stored.red - requested.red) <= tolerance,
-              abs(stored.green - requested.green) <= tolerance,
-              abs(stored.blue - requested.blue) <= tolerance else { return nil }
-        return entry.matrix
+        return abs(a.red - b.red) <= tolerance
+            && abs(a.green - b.green) <= tolerance
+            && abs(a.blue - b.blue) <= tolerance
     }
 
     public func sampleShortSides(for cell: Cell) -> [Double] {

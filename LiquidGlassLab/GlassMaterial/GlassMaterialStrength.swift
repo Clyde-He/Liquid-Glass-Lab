@@ -93,9 +93,6 @@ public final class GlassMaterialStrength {
     private var appliedValue: Double = 1
     private var lastWrittenFilterIdentity: ObjectIdentifier?
     private var frozenMainParticipation = true
-    /// The destination's managed-input classification, cached against its
-    /// `inputKeys` set. See `sampleCoversDestination(_:target:)`.
-    private var managedKeysCache: (inputKeys: Set<String>, managed: Set<String>)?
 
     /// The installed style atlas, if any. See `freeze(atlas:)`.
     public private(set) var frozenAtlas: GlassMaterialStyleAtlas?
@@ -169,9 +166,6 @@ public final class GlassMaterialStrength {
         target: GlassMaterialAccess.GlassBackgroundTarget,
         on glass: NSGlassEffectView
     ) -> (matrixLayers: [CALayer], rimLayers: [CALayer])? {
-        guard sampleCoversDestination(sample, target: target) else {
-            return nil
-        }
         let matrixLayers = GlassMaterialAccess.untintedMatrixLayers(under: glass)
         let rimLayers = GlassMaterialAccess.rimLayers(under: glass)
         guard matrixLayers.count == sample.matrices.count,
@@ -188,36 +182,6 @@ public final class GlassMaterialStrength {
         return (matrixLayers, rimLayers)
     }
 
-    /// True when every *managed* input the destination declares — one that
-    /// resolves a number, color, pair, or nil — is a key the sample captured.
-    /// A destination with managed inputs the sample never saw was resolved by
-    /// a different shader generation (an atlas persisted across an OS
-    /// upgrade); replaying onto it would hold the unknown inputs at the
-    /// window's real-context values, the exact bug class the macOS 27 landing
-    /// documented. Coverage is deliberately one-directional: sample keys the
-    /// destination lacks are harmless, since writes are capability-guarded.
-    ///
-    /// Only the expensive part — the typed classification of the
-    /// destination's inputs — is cached, keyed by its `inputKeys` set; the
-    /// subset comparison runs per call against the sample actually selected,
-    /// so the verdict never leaks from one sample to another.
-    private func sampleCoversDestination(
-        _ sample: GlassMaterialStyleSample,
-        target: GlassMaterialAccess.GlassBackgroundTarget
-    ) -> Bool {
-        let managed: Set<String>
-        if let cache = managedKeysCache, cache.inputKeys == target.inputKeys {
-            managed = cache.managed
-        } else {
-            let typed = GlassMaterialAccess.readTypedInputs(from: target)
-            managed = Set(typed.numeric.keys)
-                .union(typed.colors.keys)
-                .union(typed.points.keys)
-                .union(typed.nilKeys)
-            managedKeysCache = (target.inputKeys, managed)
-        }
-        return managed.subtracting(sample.capturedKeys).isEmpty
-    }
 
     public init(glass: NSGlassEffectView, value: Double = 1) {
         self.glass = glass
@@ -270,8 +234,10 @@ public final class GlassMaterialStrength {
     }
 
     /// Locks the glass to the captured atlas and stamps it immediately.
-    /// Returns false — installing nothing — unless the atlas covers the
-    /// complete appearance × variant cell space for the frozen participation.
+    /// Returns false — installing nothing — unless the atlas was captured
+    /// under the current schema and OS build and covers the complete
+    /// appearance × variant cell space for the frozen participation. An
+    /// incompatible atlas is a stale cache: discard it and recapture.
     ///
     /// Coverage is validated here rather than discovered at a later context
     /// switch: appearance and variant change at runtime by design, and a
@@ -291,6 +257,12 @@ public final class GlassMaterialStrength {
         atlas: GlassMaterialStyleAtlas,
         mainParticipation: Bool = true
     ) -> Bool {
+        guard let glass,
+              let environment = atlas.environment,
+              environment.isCompatible(
+                with: .current(for: glass.window?.screen)
+              )
+        else { return false }
         // Every sample is re-validated, not merely counted: a persisted atlas
         // decodes without running `capture`'s completeness guard, so a stale
         // or hand-edited file could otherwise install cells the restamp
