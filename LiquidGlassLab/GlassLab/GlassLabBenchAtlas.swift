@@ -144,6 +144,12 @@ extension GlassLabView {
                     supportsOpacity: true
                 )
                 .disabled(!hudTintEnabled)
+                Button("Show Main-On Reference in Test Window") {
+                    showMainOnTintReference()
+                }
+                Text("A/B: configures the visible test window as a genuinely main window with the HUD's exact context — variant, appearance, size, and tint — so the frozen replica and the real thing sit side by side.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
 
             labeledSlider("Content Width", value: hudContentWidthBinding, in: 120...560)
@@ -431,6 +437,36 @@ extension GlassLabView {
         } catch {
             atlasStatus = "Load failed: \(error.localizedDescription)"
         }
+    }
+
+    /// One-click A/B reference: the visible test window takes the HUD's
+    /// exact context with real Main participation, so a rendering-level
+    /// difference (anything below the CA model, which diffs clean) shows up
+    /// to the eye immediately.
+    func showMainOnTintReference() {
+        state.rendererMode = .recipe
+        selectedRecipePage = .general
+        state.isTestWindowVisible = true
+        state.windowHostType = .panel
+        state.testBackdrop = .ambient
+        state.isSubdued = false
+        state.hasScrim = false
+        state.subvariant = ""
+        state.adaptiveAppearance = 2
+        state.variant = hudIsClear ? 2 : 1
+        state.testAppearance = switch hudAppearance {
+        case .light: .light
+        case .dark: .dark
+        case .auto: .system
+        }
+        state.glassWidth = hudContentWidth
+        state.glassHeight = hudContentHeight
+        state.cornerRadius = 24
+        state.windowPadding = 120
+        state.tintColor = currentHUDTintColor()
+        state.isTestWindowMain = true
+        state.testWindow.sync(with: state)
+        state.testWindow.rebuildGlass(with: state)
     }
 
     // MARK: - In-window provider
@@ -1622,6 +1658,60 @@ extension GlassLabView {
                     alphaAtHalf
                 )
             )
+            // Diagnostic: the tint matrix can be perfect while the branch
+            // still renders nothing — dump the complete tint chain (layer
+            // gate, filter scalars, ancestor opacities, background tint
+            // keys) from the frozen HUD and from a genuine Main-On probe
+            // with the same tint, side by side.
+            hud.setStrength(1)
+            if let hudGlass = hud.glassView {
+                step(
+                    "info-tint-chain-hud",
+                    true,
+                    Self.tintBranchDescription(hudGlass)
+                )
+            }
+            if let controlWindow = state.testWindow.liveControlWindow,
+               let content = controlWindow.contentView {
+                let container = NSView(frame: .zero)
+                container.wantsLayer = true
+                container.layer?.masksToBounds = true
+                content.addSubview(container)
+                defer { container.removeFromSuperview() }
+                let probe = NSGlassEffectView(frame: NSRect(
+                    x: 0, y: 0, width: 320, height: 120
+                ))
+                probe.appearance = NSAppearance(named: .darkAqua)
+                GlassMaterialAccess.setVariant(1, on: probe)
+                probe.tintColor = tintColor
+                container.addSubview(probe)
+                probe.needsLayout = true
+                probe.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(1500))
+                step(
+                    "info-tint-chain-mainon-probe",
+                    true,
+                    Self.tintBranchDescription(probe)
+                )
+
+                // The decisive comparison: a complete recursive pass-audit
+                // diff between the frozen HUD tree and this genuine Main-On
+                // tree. Whatever still renders differently must appear here.
+                if let hudGlass = hud.glassView {
+                    let hudAudit = GlassLabTuning.capturePassAuditSnapshot(
+                        from: hudGlass
+                    )
+                    let probeAudit = GlassLabTuning.capturePassAuditSnapshot(
+                        from: probe
+                    )
+                    step(
+                        "info-tint-tree-diff",
+                        true,
+                        Self.passAuditDiff(hud: hudAudit, reference: probeAudit)
+                    )
+                }
+            }
+
             hud.setTint(nil)
             hud.setStrength(1)
             try await Task.sleep(for: .milliseconds(400))
@@ -1697,6 +1787,120 @@ extension GlassLabView {
             "passed": failures.isEmpty,
             "failureCount": failures.count,
         ]
+    }
+
+    /// Property-level diff between two recursive pass audits, keyed by the
+    /// structural pass id. Reports value differences and passes present on
+    /// only one side; capped so the step detail stays readable.
+    private static func passAuditDiff(
+        hud: GlassLabTuning.PassAuditSnapshot?,
+        reference: GlassLabTuning.PassAuditSnapshot?
+    ) -> String {
+        guard let hud, let reference else { return "missing snapshot" }
+        var lines: [String] = []
+        let hudIDs = Set(hud.passes.keys)
+        let referenceIDs = Set(reference.passes.keys)
+        for id in hudIDs.subtracting(referenceIDs).sorted() {
+            lines.append("only-hud: \(id)")
+        }
+        for id in referenceIDs.subtracting(hudIDs).sorted() {
+            lines.append("only-ref: \(id)")
+        }
+        for id in hudIDs.intersection(referenceIDs).sorted() {
+            guard let hudPass = hud.passes[id],
+                  let referencePass = reference.passes[id] else { continue }
+            let keys = Set(hudPass.properties.keys)
+                .union(referencePass.properties.keys)
+            for key in keys.sorted() {
+                let hudValue = hudPass.properties[key]?.value
+                    ?? hudPass.properties[key]?.state
+                let referenceValue = referencePass.properties[key]?.value
+                    ?? referencePass.properties[key]?.state
+                if hudValue != referenceValue {
+                    lines.append(
+                        "\(hudPass.name ?? hudPass.objectClass).\(key): "
+                            + "hud=\(hudValue ?? "absent") "
+                            + "ref=\(referenceValue ?? "absent")"
+                    )
+                }
+            }
+        }
+        if lines.isEmpty { return "no pass-level differences" }
+        let capped = lines.prefix(60)
+        return capped.joined(separator: "\n")
+            + (lines.count > 60 ? "\n… \(lines.count - 60) more" : "")
+    }
+
+    /// Everything observable about the tint branch: the matrix layer's own
+    /// gate, its filter scalars and nil keys, every ancestor opacity up to
+    /// the glass root, and any tint-named numeric input on the background
+    /// filter.
+    private static func tintBranchDescription(
+        _ glass: NSGlassEffectView
+    ) -> String {
+        guard let layer = GlassMaterialAccess.tintMatrixLayer(under: glass)
+        else { return "no tint layer" }
+        var parts: [String] = []
+        parts.append(String(
+            format: "opacity=%.3f hidden=%@",
+            layer.opacity,
+            layer.isHidden ? "yes" : "no"
+        ))
+        if let matrix = GlassMaterialAccess.colorMatrix(on: layer),
+           matrix.count == 20 {
+            let hueMax = matrix[0..<18].map { abs($0) }.max() ?? 0
+            parts.append(String(
+                format: "matrix18=%.3f hueMax=%.3f m19=%.3f",
+                matrix[18], hueMax, matrix[19]
+            ))
+        } else {
+            parts.append("no matrix")
+        }
+        let scalars = GlassMaterialAccess.matrixScalarInputs(on: layer)
+        parts.append("inputs=" + scalars.values
+            .map { "\($0.key)=\(String(format: "%.3f", $0.value))" }
+            .sorted().joined(separator: ","))
+        parts.append("nilKeys=" + scalars.nilKeys.sorted().joined(separator: ","))
+        var chain: [String] = []
+        var current: CALayer? = layer
+        while let node = current, node !== glass.layer {
+            chain.append(String(
+                format: "%@:%.2f%@",
+                String(describing: type(of: node)),
+                node.opacity,
+                node.isHidden ? "(hidden)" : ""
+            ))
+            current = node.superlayer
+        }
+        parts.append("chain=" + chain.joined(separator: " > "))
+        parts.append(String(
+            format: "bounds=%.0fx%.0f",
+            layer.bounds.width, layer.bounds.height
+        ))
+        parts.append(
+            "animations=" + (layer.animationKeys() ?? []).joined(separator: ",")
+        )
+        if let presentation = layer.presentation(),
+           let presented = GlassMaterialAccess.colorMatrix(on: presentation),
+           presented.count == 20 {
+            let hueMax = presented[0..<18].map { abs($0) }.max() ?? 0
+            parts.append(String(
+                format: "PRESENTED m18=%.3f hueMax=%.3f",
+                presented[18], hueMax
+            ))
+        } else {
+            parts.append("PRESENTED: unreadable")
+        }
+        if let target = GlassMaterialAccess.glassBackgroundTarget(
+            under: glass
+        ) {
+            let tintKeys = GlassMaterialAccess.readTypedInputs(from: target)
+                .numeric.filter { $0.key.lowercased().contains("tint") }
+            parts.append("bgTintKeys=" + tintKeys
+                .map { "\($0.key)=\(String(format: "%.3f", $0.value))" }
+                .sorted().joined(separator: ","))
+        }
+        return parts.joined(separator: " · ")
     }
 
     private static func appliedFaceOpacity(
