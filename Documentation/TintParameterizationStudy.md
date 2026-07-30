@@ -426,3 +426,18 @@ picks a color in the app's own window, false for a background app), the
 eight-cell probe set has a one-time materialization cost that should be
 measured, and the rendered A/B harness should gate the new path exactly as it
 gates synthesis today.
+
+### The alpha-only contract also holds outside the certified domain
+
+The product's commit path keys its resolution cache by RGB and patches the
+requested alpha into coefficient 18, which is what makes dragging an opacity
+slider cost no resolution at all. That contract was originally certified from
+a fixed-RGB alpha sweep over *in-domain* colors, so applying it to
+wider-gamut colors was an assumption.
+
+`Golden/macOS-26/tint-sync-resolution.json` now also carries two
+out-of-domain Display P3 colors resolved at five alphas each (0.15 / 0.4 /
+0.6 / 0.8 / 1.0) across all eight cells. Across 64 alpha pairs in 16
+(color, cell) groups: coefficient 18 equals the requested alpha everywhere,
+and the other nineteen coefficients are **bit-identical** (maximum difference
+exactly `0`). The assumption is now measured where it is used.

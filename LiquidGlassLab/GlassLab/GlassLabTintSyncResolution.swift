@@ -154,7 +154,42 @@ extension GlassLabView {
             color("p3-vivid-green", NSColor(
                 displayP3Red: 0.1, green: 0.95, blue: 0.2, alpha: 1
             )),
-        ].compactMap { $0 }
+        ].compactMap { $0 } + Self.outOfDomainAlphaSweepColors
+    }
+
+    /// The alpha-only contract — alpha is coefficient 18 and touches nothing
+    /// else — was certified from a fixed-RGB alpha sweep over **in-domain**
+    /// colors. The product's commit path applies the same contract to
+    /// wider-gamut colors: the resolution cache is keyed by RGB and the
+    /// requested alpha is patched in, which is what makes dragging an opacity
+    /// slider free. This sweep tests that assumption where it is being used,
+    /// by resolving the same out-of-domain RGB at several alphas.
+    private static var outOfDomainAlphaSweepColors: [GlassLabTintSweepColor] {
+        let bases: [(String, NSColor)] = [
+            ("p3-c7cd28", NSColor(
+                displayP3Red: 199 / 255.0,
+                green: 205 / 255.0,
+                blue: 40 / 255.0,
+                alpha: 1
+            )),
+            ("p3-pure-red", NSColor(displayP3Red: 1, green: 0, blue: 0, alpha: 1)),
+        ]
+        return bases.flatMap { name, base in
+            [0.15, 0.4, 0.6, 0.8, 1.0].compactMap { alpha in
+                guard let value = GlassMaterialColorValue(
+                    base.withAlphaComponent(alpha)
+                ) else { return nil }
+                let id = "alpha-\(name)-a\(Int(alpha * 100))"
+                return GlassLabTintSweepColor(
+                    id: id,
+                    label: id,
+                    red: value.red,
+                    green: value.green,
+                    blue: value.blue,
+                    alpha: value.alpha
+                )
+            }
+        }
     }
 
     func performTintSyncResolutionCheck() async throws
