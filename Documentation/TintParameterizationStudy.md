@@ -309,3 +309,42 @@ domain, not for normal color-picker changes on a certified major.
   standard transform when validating dark cells.
 - All sweep output goes to `Golden/` with a manifest entry (sha256,
   entryCount, axes, notes), matching `Golden/CAPTURE-SPEC.md`.
+
+## macOS 26 resolver investigation (symbol route)
+
+Motivation: extending the certified synthesis domain per gamut (sRGB → P3 →
+Rec.2020) closes one gamut at a time. Calling the system's own resolver would
+close the axis permanently. Findings on macOS 26.6:
+
+**The CoreUI vibrant-matrix API is not the glass Tint resolver.**
+`CUIShapeEffectPreset` exposes `+standardVibrantColorMatrixOptionsForColor:`,
+`+vibrantColorMatrixOptionsWithColor:saturation:brightness:`, and
+`+configureVibrantColorMatrixFilter:withOptions:` (options struct
+`{_CUIVibrantColorMatrixOptions = [4d] + 10d}`, color passed as `CGColorRef`),
+and `CUICatalog` has
+`-_vibrantColorMatrixBrightnessSaturationForColor:saturation:brightness:`.
+Calling them resolves the **classic** vibrancy grade — a 0.5 diagonal plus
+bias — not the rank-1 luma form the glass Tint branch uses. This route is a
+dead end as a glass Tint oracle. AppKit exports no glass tint/matrix symbol
+(`NSGlassEffectView.tintColor` is a plain stored property; the only matrix
+strings are `inputColorMatrix` and `filters.colorMatrix.inputColorMatrix`).
+
+**The Tint matrix is computed in-process at CA commit time.** With a glass
+view in a layer-backed host, `inputColorMatrix` is absent immediately after
+setting `tintColor` and after `layoutSubtreeIfNeeded`, and present
+immediately after `[CATransaction flush]` — no render-server round trip and
+no multi-frame settle. Further runloop turns do not change the value.
+
+**Consequence — a better permanent route.** Instead of extrapolating the
+endpoint formulas per gamut, make the *capture* synchronous: set the color on
+a probe in the genuinely main host window, flush the transaction, read the
+resolved matrix. The system computes it, so any color in any present or
+future gamut is covered, and the cost collapses from the current
+debounce + settle + stable-read + frozen-validation sequence (~2.5 s) toward
+a small number of frames. The Main-On participation proof (paired witness)
+must stay: flush determinism says nothing about which branch resolved.
+
+Open item: the flush behavior above was measured on a non-participating
+window (a plain CLI binary cannot become main/key). Confirming it under
+genuine Main-On requires running the experiment inside the bundled Lab app
+before any product path is changed.
