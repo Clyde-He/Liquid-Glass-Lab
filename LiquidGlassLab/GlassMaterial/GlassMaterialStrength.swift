@@ -355,6 +355,13 @@ final class GlassMaterialStrength {
     /// This refuses unless the caller's `baseGeneration` matches the base that
     /// was validated at freeze time, so any base change still goes through the
     /// full transaction.
+    ///
+    /// Returning false still leaves the requested color staged on `tintColor`,
+    /// because the write is what proves the branch exists — a tint being
+    /// inserted for the first time legitimately fails here. A caller that
+    /// discards the result therefore holds a staged color against a base that
+    /// was never restamped; every caller must answer false with the full
+    /// install path.
     @discardableResult
     public func restampTintOverlay(
         _ atlas: GlassMaterialStyleAtlas,
