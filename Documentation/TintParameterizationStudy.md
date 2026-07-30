@@ -142,6 +142,24 @@ coral 0.662). Two points cannot pin the function — that is the study.
 
 ## The study
 
+### Implemented capture instrument
+
+The existing Bench `Tint Study` page now includes a `Parameterization Sweep`
+section rather than exposing a second Atlas-side study. Its full-grid v1 plan
+captures 170 colors × 8 paired cells = 1,360 compact rows in one long-lived
+probe session, writes an atomic checkpoint after every completed color, and
+can resume the same OS-build/display-bound checkpoint. It does not call the
+product's color-lock path or mutate the runtime Tint cache.
+
+The plan contains the required 12 × 4 × 3 HSV grid, achromatic and very-dark
+slices, exact Coral/Cyan historical anchors, and a fixed-RGB alpha sweep.
+Each row is rejected unless the paired style samples prove genuine Main-On
+participation and the Tint matrix passes the luma-endpoint or neutral-
+suppression structure gate. Use
+`Golden/tools/analyze-tint-parameterization.mjs` to re-run those gates and
+summarize per-cell transform selection. No fitted RGB→matrix model is claimed
+until a complete dataset has been captured and analyzed.
+
 1. **Grid sweep.** Reuse the paired-witness capture machinery
    (`GlassMaterialAtlasProvider.captureTintMatrices` and the Bench tint
    auto-lock in `GlassLabBenchAtlas.swift`) to sweep a color grid per cell:

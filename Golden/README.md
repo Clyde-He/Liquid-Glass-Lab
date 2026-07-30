@@ -286,7 +286,9 @@ and value-signature counts plus raw changed-row totals.
 Run the comparator integration coverage with:
 
 ```sh
-node --test Golden/tools/compare.test.mjs Golden/tools/unified-contract.test.mjs
+node --test Golden/tools/compare.test.mjs \
+  Golden/tools/unified-contract.test.mjs \
+  Golden/tools/analyze-tint-parameterization.test.mjs
 ```
 
 The contract tests exercise the direct-capture shape rather than the committed
@@ -318,6 +320,24 @@ The report verifies count/context coverage and calculates:
 
 The accepted interpretation and current NSGlass transplant boundary live in
 [`SwiftUIGlassReverseEngineering.md`](../Documentation/SwiftUIGlassReverseEngineering.md).
+
+## Tint parameterization sweep
+
+The Bench `Tint Study` page also exports the compact Phase 2 dataset used to
+fit arbitrary RGB→Tint-matrix synthesis. Capture checkpoints contain 170
+colors across all eight Light/Dark × Regular/Clear × Main-On/Off cells and can
+be analyzed before or after completion:
+
+```sh
+node Golden/tools/analyze-tint-parameterization.mjs \
+  /path/to/tint-parameterization-sweep.json
+```
+
+The analyzer revalidates source colors, alpha routing, rank-1 luma or neutral
+structure, eight-cell coverage, per-cell transform-family selection, and the
+fixed-RGB alpha sweep. Promote only a complete, passing export into the
+matching `Golden/macOS-<major>/` directory; the raw dataset is evidence for
+formula fitting, not a runtime catalog.
 
 ## Core Recipe exporter
 

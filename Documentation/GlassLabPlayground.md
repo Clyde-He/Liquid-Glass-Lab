@@ -571,6 +571,43 @@ The measured interpretation belongs in
 `SwiftUIGlassReverseEngineering.md`; this page documents the reproducible
 instrument contract.
 
+#### Parameterization sweep
+
+The same Bench `Tint Study` page owns the Phase 2 color-parameterization
+instrument. `Capture / Resume Full Grid` keeps four Main-On probes and four
+paired Main-Off witnesses alive while it applies 170 deterministic colors:
+the 12-hue × 4-saturation × 3-brightness fitting grid, six achromatic samples,
+a 12-hue near-black ring, the historical Coral/Cyan anchors, and a six-step
+fixed-RGB alpha sweep. This produces 1,360 compact rows containing only source
+extended-sRGB, the eight context cells, and their 20 matrix coefficients.
+
+Every pair must independently pass the same `verifiesMainOn` style proof used
+by the product calibration. Every matrix must then pass the rank-1 Rec.709
+luma/neutral-suppression structure gate. A completed color is written
+atomically to the selected JSON checkpoint, so cancellation or loss of app
+participation can be resumed without repeating accepted colors. This path
+never mutates the product Atlas or its runtime Tint cache.
+
+The same capture can run without the save panel:
+
+```sh
+LiquidGlassLab.app/Contents/MacOS/LiquidGlassLab \
+  --capture-tint-parameterization /path/to/tint-parameterization-sweep.json
+```
+
+Validate either a checkpoint or the complete export with:
+
+```sh
+node Golden/tools/analyze-tint-parameterization.mjs \
+  /path/to/tint-parameterization-sweep.json
+```
+
+The analyzer re-runs the structural gates, reports the standard/pastel/neutral
+family selected by every cell, verifies coverage, and checks that the alpha
+sweep leaves all coefficients except index 18 unchanged. Accepted complete
+datasets belong under the matching `Golden/macOS-<major>/` directory; formula
+fitting and product synthesis remain downstream of this capture.
+
 ### Full P1 Materialize environment matrix
 
 The Semantic `Transition` page also owns `Capture Full P1 Matrix (64 Runs)`,

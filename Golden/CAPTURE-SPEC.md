@@ -32,6 +32,23 @@ shadow, and a spoofed `isKeyWindow` do not change the branch* stays unverified
 here. Re-deriving it means rebuilding that probe, which is out of scope for
 P1.
 
+### Standalone Tint parameterization evidence
+
+The RGB→Tint-matrix fitting sweep also stays outside `unified/`: it is a
+research dataset for deriving a color transform, not an `NSGlassEffectView`
+style catalog consumed at runtime. A complete per-major fixture contains 170
+source colors × eight Light/Dark × Regular/Clear × Main-On/Off cells = 1,360
+rows, each with the source extended-sRGB value, all 20 matrix coefficients,
+and its validated luma-endpoint or neutral-suppression structure.
+
+Capture writes an exact-build/display-bound checkpoint after every completed
+color so one dataset never silently mixes sessions. Once complete and
+validated by `Golden/tools/analyze-tint-parameterization.mjs`, promote it as
+`tint-parameterization-sweep.json` in the corresponding OS directory and add
+its SHA-256, 1,360 entry count, color/cell axes, and capture environment to
+that directory's manifest. Exact checkpoint identity is research provenance;
+it does not change the product Catalog's major-only compatibility rule.
+
 What the exporter *can* produce is the load-bearing half of that finding: real
 key participation alone selects the active branch. That is the `key` slice
 below, and it is the half `GlassMaterialStrength` depends on, since it reads

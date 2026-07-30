@@ -133,11 +133,15 @@ extension GlassLabView {
         let goldenFlag = arguments.firstIndex(of: "--capture-golden")
         let planFlag = arguments.firstIndex(of: "--print-golden-plan")
         let atlasFlag = arguments.firstIndex(of: "--verify-style-atlas")
+        let tintParameterizationFlag = arguments.firstIndex(
+            of: "--capture-tint-parameterization"
+        )
         guard let flagIndex = sizeFlag
                 ?? resizeFlag
                 ?? removalWarmupFlag
                 ?? goldenFlag
                 ?? atlasFlag
+                ?? tintParameterizationFlag
                 ?? planFlag else {
             return
         }
@@ -171,6 +175,22 @@ extension GlassLabView {
 
         var exitCode: Int32 = 0
         do {
+            if tintParameterizationFlag != nil {
+                let document = try await captureTintParameterizationSweep(
+                    into: destination
+                )
+                let report = "== Tint Parameterization Sweep ==\n"
+                    + "Plan: \(document.plan.id)\n"
+                    + "Colors: \(document.completedColorCount)/"
+                    + "\(document.plan.colors.count)\n"
+                    + "Rows: \(document.rows.count)\n"
+                    + "Complete: \(document.complete ? "yes" : "no")"
+                FileHandle.standardError.write(Data(
+                    (report + "\nWrote \(destination.path)\n").utf8
+                ))
+                state.testWindow.tearDown()
+                exit(0)
+            }
             let payload: Data
             let report: String
             if goldenFlag != nil {

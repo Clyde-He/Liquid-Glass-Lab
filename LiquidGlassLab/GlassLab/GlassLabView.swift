@@ -107,6 +107,11 @@ struct GlassLabView: View {
     @State var tintStudyStatus: String?
     @State var tintStudyTask: Task<Void, Never>?
     @State var isCapturingTintStudy = false
+    @State var tintParameterizationDocument:
+        GlassLabTintParameterizationSweepDocument?
+    @State var tintParameterizationStatus: String?
+    @State var tintParameterizationTask: Task<Void, Never>?
+    @State var isCapturingTintParameterization = false
     @State var shaderOverrideBaseline: LiveReadoutSnapshot?
     @State var highlightOverrideBaseline: LiveReadoutSnapshot?
     @State var vibrantMatrixOverrideBaseline:
@@ -249,6 +254,7 @@ struct GlassLabView: View {
             materializeStudyTask?.cancel()
             appKitMaterializeTask?.cancel()
             tintStudyTask?.cancel()
+            tintParameterizationTask?.cancel()
             atlasCaptureTask?.cancel()
             atlasReadbackTask?.cancel()
             tintLockTask?.cancel()
@@ -351,7 +357,9 @@ struct GlassLabView: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .disabled(isCapturingTintStudy)
+            .disabled(
+                isCapturingTintStudy || isCapturingTintParameterization
+            )
             .padding(.horizontal, 20)
             .padding(.top, 10)
             .padding(.bottom, 10)

@@ -73,7 +73,9 @@ extension GlassLabView {
             Button("Capture Full Tint Study") {
                 captureFullTintStudy()
             }
-            .disabled(isCapturingTintStudy)
+            .disabled(
+                isCapturingTintStudy || isCapturingTintParameterization
+            )
 
             if isCapturingTintStudy {
                 ProgressView(tintStudyStatus ?? "Capturing Tint study…")
@@ -84,6 +86,8 @@ extension GlassLabView {
                     .foregroundStyle(.secondary)
             }
         }
+
+        tintParameterizationSweepSection()
 
         if let tintStudyDocument {
             Section("Latest Study") {
@@ -136,10 +140,13 @@ extension GlassLabView {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .disabled(isCapturingTintParameterization)
     }
 
     func captureFullTintStudy() {
-        guard !isCapturingTintStudy else { return }
+        guard !isCapturingTintStudy, !isCapturingTintParameterization else {
+            return
+        }
         guard !state.hasActiveOverrides else {
             tintStudyStatus =
                 "Disable Filter, Rim, and Color Matrix overrides before capturing."
