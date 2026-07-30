@@ -64,7 +64,17 @@ public final class GlassMaterialAtlasProvider {
     private let probeWidth: Double
     private var probeContainer: NSView?
     private var captureTask: Task<Void, Never>?
+    private var tintCaptureTask: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
+
+    /// Whether probes in the host window currently resolve Main-On. Checked
+    /// before every accepted read, not just at batch start: participation can
+    /// change mid-settle, and two stable Main-Off reads would otherwise pass
+    /// the consecutive-equal settle into a Main-On cell.
+    private var hostParticipates: Bool {
+        guard let window = hostWindow else { return false }
+        return (window.isMainWindow || window.isKeyWindow) && NSApp.isActive
+    }
 
     /// - Parameters:
     ///   - hostWindow: a window that is genuinely main while the user works
@@ -123,16 +133,26 @@ public final class GlassMaterialAtlasProvider {
         for color: NSColor,
         completion: @escaping @MainActor (Bool) -> Void
     ) {
-        guard let window = hostWindow, window.isMainWindow || window.isKeyWindow,
-              NSApp.isActive else {
+        guard hostParticipates else {
             completion(false)
             return
         }
-        Task { @MainActor [weak self] in
+        // Latest pick wins: a superseded batch would only capture a hue the
+        // HUD no longer shows, and letting it run would let two quick picks
+        // interleave their merges.
+        tintCaptureTask?.cancel()
+        tintCaptureTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            let needed = Self.mainOnCells.filter {
+                self.atlas.tintMatrix(for: $0, matching: color) == nil
+            }
+            guard !needed.isEmpty else {
+                completion(true)
+                return
+            }
             let referenceSide = min(200, self.shortSides.max() ?? 200)
             var probes: [(GlassMaterialStyleAtlas.Cell, NSGlassEffectView)] = []
-            for cell in Self.mainOnCells {
+            for cell in needed {
                 let probe = self.makeProbe(
                     cell: cell,
                     shortSide: referenceSide
@@ -142,25 +162,34 @@ public final class GlassMaterialAtlasProvider {
             }
             defer { probes.forEach { $0.1.removeFromSuperview() } }
 
-            var updated = self.atlas
-            var allCaptured = true
-            for _ in 0..<20 {
+            // Collect locally and merge into the *current* atlas on
+            // completion. A snapshot-and-replace would discard whatever a
+            // concurrently running base-cell batch added during this settle
+            // window — and the base capture computes its missing set once,
+            // so a discarded cell would never be revisited.
+            var collected: [(GlassMaterialStyleAtlas.Cell,
+                             GlassMaterialStyleAtlas.TintMatrix)] = []
+            for _ in 0..<20 where collected.count < probes.count {
                 try? await Task.sleep(for: .milliseconds(150))
-                allCaptured = true
-                for (cell, probe) in probes
-                where updated.tintMatrix(for: cell, matching: color) == nil {
+                guard !Task.isCancelled, self.hostParticipates else {
+                    completion(false)
+                    return
+                }
+                collected = []
+                for (cell, probe) in probes {
                     if let matrix = GlassMaterialStyleAtlas.captureTintMatrix(
                         from: probe
                     ), matrix.matrix.count == 20 {
-                        updated.addTintMatrix(matrix, for: cell)
-                    } else {
-                        allCaptured = false
+                        collected.append((cell, matrix))
                     }
                 }
-                if allCaptured { break }
             }
+            let allCaptured = collected.count == probes.count
+                && self.hostParticipates
             if allCaptured {
-                self.atlas = updated
+                for (cell, matrix) in collected {
+                    self.atlas.addTintMatrix(matrix, for: cell)
+                }
                 self.persist()
                 self.onAtlasUpdated?(self.atlas)
             }
@@ -220,9 +249,7 @@ public final class GlassMaterialAtlasProvider {
         state = .capturing(completed: 0, total: total)
 
         for (cell, sizes) in missing {
-            guard let window = hostWindow,
-                  window.isMainWindow || window.isKeyWindow,
-                  NSApp.isActive else {
+            guard hostParticipates else {
                 state = .waitingForMainWindow
                 return
             }
@@ -240,6 +267,13 @@ public final class GlassMaterialAtlasProvider {
             for _ in 0..<24 {
                 try? await Task.sleep(for: .milliseconds(150))
                 if Task.isCancelled { return }
+                // Participation lost mid-settle: discard the whole batch —
+                // nothing accepted so far is provably Main-On anymore — and
+                // let the main/active notifications restart it.
+                guard hostParticipates else {
+                    state = .waitingForMainWindow
+                    return
+                }
                 for (shortSide, probe) in probes
                 where captured[shortSide] == nil {
                     guard let sample = GlassMaterialStyleSample.capture(
@@ -255,6 +289,12 @@ public final class GlassMaterialAtlasProvider {
                     }
                 }
                 if captured.count == probes.count { break }
+            }
+            // Belt to the per-iteration check: never commit a batch into a
+            // Main-On cell unless the host still participates right now.
+            guard hostParticipates else {
+                state = .waitingForMainWindow
+                return
             }
             guard captured.count == probes.count else {
                 state = .failed(
