@@ -408,8 +408,8 @@ public final class GlassHUDMaterialController {
             }
         }
 
-        if osMajorVersion
-            == GlassMaterialTintMatrixSynthesizer.supportedOSMajorVersion,
+        if GlassMaterialTintMatrixSynthesizer.supportedOSMajorVersions
+            .contains(osMajorVersion),
            let sourceColor = GlassMaterialColorValue(color) {
             var parameterized = atlas
             // Do not let an older persisted overlay win over the accepted

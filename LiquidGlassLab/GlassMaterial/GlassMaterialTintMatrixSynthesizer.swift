@@ -16,9 +16,17 @@ enum GlassMaterialTintMatrixSynthesizer {
         case pastel
         case neutralSuppression
         case achromatic
+        /// macOS 26's achromatic Main-On grade: a saturation-complement
+        /// `I − s(x)·(1⊗w)` with a linear bias ramp, shared by all four
+        /// Main-On cells. macOS 27 replaced it with the channel-affine form.
+        case achromaticSaturationBoost
     }
 
-    static let supportedOSMajorVersion = 27
+    /// Majors whose complete selection table and endpoint transforms are
+    /// certified by an accepted Golden sweep. The chromatic transforms are
+    /// bit-identical across both majors; the majors differ only in context
+    /// selection and the achromatic family.
+    static let supportedOSMajorVersions: Set<Int> = [26, 27]
 
     // The accepted boundary probes resolve chroma 0.0003 as achromatic and
     // 0.0004 as chromatic. Keep the decision between those observations
@@ -45,7 +53,9 @@ enum GlassMaterialTintMatrixSynthesizer {
         cell: GlassMaterialStyleAtlas.Cell,
         osMajorVersion: Int
     ) -> [Float]? {
-        guard osMajorVersion == supportedOSMajorVersion else { return nil }
+        guard supportedOSMajorVersions.contains(osMajorVersion) else {
+            return nil
+        }
         let rgb = [source.red, source.green, source.blue]
         guard rgb.allSatisfy({
             $0.isFinite && $0 >= 0 && $0 <= 1
@@ -54,7 +64,11 @@ enum GlassMaterialTintMatrixSynthesizer {
             return nil
         }
 
-        switch family(for: rgb, cell: cell) {
+        switch family(
+            for: rgb,
+            cell: cell,
+            osMajorVersion: osMajorVersion
+        ) {
         case .standard:
             return lumaEndpointMatrix(
                 bright: rgb,
@@ -77,29 +91,47 @@ enum GlassMaterialTintMatrixSynthesizer {
                 value: rgb.reduce(0, +) / 3,
                 alpha: source.alpha
             )
+        case .achromaticSaturationBoost:
+            return achromaticSaturationBoostMatrix(
+                value: rgb.reduce(0, +) / 3,
+                alpha: source.alpha
+            )
         }
     }
 
     static func family(
         for sourceRGB: [Double],
-        cell: GlassMaterialStyleAtlas.Cell
+        cell: GlassMaterialStyleAtlas.Cell,
+        osMajorVersion: Int
     ) -> Family {
         precondition(sourceRGB.count == 3)
+        precondition(supportedOSMajorVersions.contains(osMajorVersion))
 
-        // Regular Main-Off is color-independent neutral suppression on 27.
-        if !cell.isClear && !cell.hasMainParticipation {
+        // Regular Main-Off suppresses on both certified majors; macOS 26
+        // additionally suppresses Clear Main-Off (the accepted 26 sweep shows
+        // all four Main-Off cells resolving the same neutral coefficients).
+        let mainOffSuppresses = osMajorVersion == 26
+            ? !cell.hasMainParticipation
+            : !cell.isClear && !cell.hasMainParticipation
+        if mainOffSuppresses {
             return .neutralSuppression
         }
 
         let chroma = (sourceRGB.max() ?? 0) - (sourceRGB.min() ?? 0)
         if chroma <= achromaticChromaThreshold {
-            return .achromatic
+            return osMajorVersion == 26
+                ? .achromaticSaturationBoost
+                : .achromatic
         }
 
-        // Dark Regular Main-On is the sole pastel context on macOS 27.
-        if !cell.isLightAppearance
-            && !cell.isClear
-            && cell.hasMainParticipation {
+        // Pastel contexts: Dark Regular Main-On on macOS 27; both Dark
+        // Main-On variants on macOS 26 (Dark Clear switched to standard in 27).
+        let isPastel = osMajorVersion == 26
+            ? !cell.isLightAppearance && cell.hasMainParticipation
+            : !cell.isLightAppearance
+                && !cell.isClear
+                && cell.hasMainParticipation
+        if isPastel {
             return .pastel
         }
         return .standard
@@ -255,6 +287,35 @@ enum GlassMaterialTintMatrixSynthesizer {
         var matrix = [Float](repeating: 0, count: 20)
         for row in 0..<3 {
             matrix[row * 5 + row] = Float(diagonal)
+            matrix[row * 5 + 4] = Float(bias)
+        }
+        matrix[18] = Float(alpha)
+        return matrix
+    }
+
+    /// The macOS 26 achromatic Main-On grade, shared by all four Main-On
+    /// cells: `I − s(x)·(1⊗w)` with `s(x) = 0.9 + 0.05x` and `bias = 0.95x`.
+    /// `w` is the system's color-space-adjusted luminance vector fitted from
+    /// all 24 accepted gray rows (worst coefficient residual 6.6e-5).
+    private static let achromaticSaturationBoostLuma = [
+        0.2126134, 0.7152094, 0.0721772,
+    ]
+
+    private static func achromaticSaturationBoostMatrix(
+        value: Double,
+        alpha: Double
+    ) -> [Float] {
+        let strength = 0.9 + 0.05 * value
+        let bias = 0.95 * value
+        var matrix = [Float](repeating: 0, count: 20)
+        for row in 0..<3 {
+            for column in 0..<3 {
+                let identity = row == column ? 1.0 : 0.0
+                matrix[row * 5 + column] = Float(
+                    identity - strength
+                        * achromaticSaturationBoostLuma[column]
+                )
+            }
             matrix[row * 5 + 4] = Float(bias)
         }
         matrix[18] = Float(alpha)

@@ -271,14 +271,30 @@ Provider Atlas or persist a color-bound cache, and a legacy cached matrix
 cannot override the closed form.
 
 The original grid capture, structure classification, and endpoint fitting
-steps are complete. Remaining work is:
+steps are complete. The cross-version check has since been executed in full:
+the complete Full Grid, Phase 2b, and Phase 2c plans were re-captured on a
+macOS 26.6 host (`Golden/macOS-26/tint-parameterization-*.json`, 3,496 rows).
 
-1. **Cross-version check.** Run a reduced macOS 26 certification grid to test
-   whether it shares the endpoint formulas with a different context-selection
-   table. Keep the synthesizer major-scoped until that passes.
-2. **Fallback retention.** Keep runtime Tint capture for unsupported majors or
-   colors outside the certified synthesis input domain, not for normal macOS
-   27 color-picker changes.
+**macOS 26 certification result.** The chromatic transforms were fitted on
+macOS 27 data only, so every 26 row is out-of-sample — and the standard and
+pastel closed forms hold at float precision (worst chromatic residual
+3.9e-7; reserved rgb-holdouts 2.4e-7). The achromatic/chromatic boundary is
+identical (chroma 0.0003 achromatic, 0.0004 chromatic), and the neutral
+suppression coefficients are bit-identical to 27's. The majors differ only
+in:
+
+- **Context selection**: on 26 both Dark Main-On variants are pastel and all
+  four Main-Off cells suppress; 27 moved Dark Clear Main-On to standard and
+  stopped suppressing Clear Main-Off.
+- **Achromatic family**: 26 resolves `I − s(x)·(1⊗w)` with
+  `s(x) = 0.9 + 0.05x`, `bias = 0.95x`, and a color-space-adjusted `w`
+  (fitted residual 6.6e-5, held by the reserved gray-holdouts); 27 replaced
+  it with the channel-affine rational form.
+
+`GlassMaterialTintMatrixSynthesizer.supportedOSMajorVersions` is therefore
+`{26, 27}`, with per-major family selection. Runtime Tint capture remains the
+fallback for unsupported majors or colors outside the certified input
+domain, not for normal color-picker changes on a certified major.
 
 ## Constraints and gotchas
 

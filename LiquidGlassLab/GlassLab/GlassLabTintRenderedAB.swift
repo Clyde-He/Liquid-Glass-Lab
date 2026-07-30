@@ -505,8 +505,8 @@ extension GlassLabView {
         -> GlassLabTintRenderedABDocument {
         let majorVersion =
             ProcessInfo.processInfo.operatingSystemVersion.majorVersion
-        guard majorVersion
-                == GlassMaterialTintMatrixSynthesizer.supportedOSMajorVersion
+        guard GlassMaterialTintMatrixSynthesizer.supportedOSMajorVersions
+                .contains(majorVersion)
         else {
             throw GlassLabTintRenderedABError.unsupportedOSMajor(majorVersion)
         }
@@ -710,8 +710,8 @@ extension GlassLabView {
             GlassMaterialTintMatrixSynthesizer.matrix(
                 for: resolvedColor,
                 cell: cell,
-                osMajorVersion:
-                    GlassMaterialTintMatrixSynthesizer.supportedOSMajorVersion
+                osMajorVersion: ProcessInfo.processInfo
+                    .operatingSystemVersion.majorVersion
             ) else {
             throw GlassLabTintRenderedABError.missingTintMatrix
         }
@@ -721,7 +721,9 @@ extension GlassLabView {
                 resolvedColor.green,
                 resolvedColor.blue,
             ],
-            cell: cell
+            cell: cell,
+            osMajorVersion: ProcessInfo.processInfo
+                .operatingSystemVersion.majorVersion
         )
         let matrixResidual = Self.maximumDifference(
             capturedMatrix,

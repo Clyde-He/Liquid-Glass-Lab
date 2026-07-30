@@ -59,7 +59,7 @@
         "overridesEnabled": false
       },
       "notes": [
-        "Canonical active-session Main × Subdued × Variant × Subvariant × representative-Height sweep.",
+        "Canonical active-session Main \u00d7 Subdued \u00d7 Variant \u00d7 Subvariant \u00d7 representative-Height sweep.",
         "Captured at 2026-07-21T07:59:51Z and validated as 1,008 unique rows.",
         "Every row is appActive=true and actual key=false; requested and actual Main match.",
         "inputMaxHeadroom is retained raw and classified as display/runtime-volatile by compare.mjs."
@@ -137,7 +137,7 @@
         ],
         "tint": [
           "None",
-          "Coral · 50%"
+          "Coral \u00b7 50%"
         ],
         "direction": [
           "Insertion",
@@ -205,6 +205,140 @@
         "Endpoints remain correct per size and are read, not computed: inputBleedAmount 16.8/70/140 = 0.35 * shortSide.",
         "Residual worst case is bounded by c/4 = min(5%, 4/shortSide) and is a mid-transition rate error only; all shapes stay strictly monotonic with exact 0 and 1 endpoints.",
         "Captured unattended via LiquidGlassLab --capture-size-study."
+      ],
+      "role": "canonical"
+    },
+    {
+      "id": "tint-parameterization-sweep",
+      "file": "tint-parameterization-sweep.json",
+      "sha256": "bd31a68e354b2d12b6f064e0d4c005b429b96e00ad412a8bc9d0ed2d3dc953a6",
+      "formatVersion": 1,
+      "entryCount": 1360,
+      "platform": {
+        "product": "macOS",
+        "version": "26.6",
+        "build": "25G70",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-30T10:02:09Z",
+      "axes": {
+        "sourceColors": {
+          "hsvGrid": "12 hues \u00d7 4 saturations \u00d7 3 brightnesses",
+          "achromatic": 6,
+          "veryDarkHueRing": 12,
+          "historicalAnchors": [
+            "Coral",
+            "Cyan"
+          ],
+          "fixedRGBAlphaSweep": 6
+        },
+        "appearance": [
+          "Light",
+          "Dark"
+        ],
+        "material": [
+          "Regular",
+          "Clear"
+        ],
+        "mainParticipation": [
+          false,
+          true
+        ]
+      },
+      "environment": {
+        "displaySignature": "Built-in Retina Display @2.0x",
+        "atlasSchemaVersion": 2
+      },
+      "notes": [
+        "macOS 26 certification counterpart of the accepted macOS 27 fixture; same plan, colors, and hard gates.",
+        "Chromatic transforms were fitted on macOS 27 data only, so every 26 row is out-of-sample evidence.",
+        "The 26 achromatic Main-On family is the saturation-complement form I - s(x)*(ones x w); Main-Off suppresses for both variants."
+      ],
+      "role": "canonical"
+    },
+    {
+      "id": "tint-parameterization-focused-phase-2b",
+      "file": "tint-parameterization-focused-phase-2b.json",
+      "sha256": "60852a4bcb47695b75617f95f584887d8103fcb05a1acd54cca884ff131a2ffb",
+      "formatVersion": 1,
+      "entryCount": 1048,
+      "platform": {
+        "product": "macOS",
+        "version": "26.6",
+        "build": "25G70",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-30T10:11:24Z",
+      "axes": {
+        "sourceColors": {
+          "highBrightness": 80,
+          "lowSaturation": 40,
+          "grayHoldouts": 5,
+          "rgbHoldouts": 6
+        },
+        "appearance": [
+          "Light",
+          "Dark"
+        ],
+        "material": [
+          "Regular",
+          "Clear"
+        ],
+        "mainParticipation": [
+          false,
+          true
+        ]
+      },
+      "environment": {
+        "displaySignature": "Built-in Retina Display @2.0x",
+        "atlasSchemaVersion": 2
+      },
+      "notes": [
+        "macOS 26 certification counterpart of the accepted macOS 27 fixture; same plan, colors, and hard gates.",
+        "Chromatic transforms were fitted on macOS 27 data only, so every 26 row is out-of-sample evidence.",
+        "The 26 achromatic Main-On family is the saturation-complement form I - s(x)*(ones x w); Main-Off suppresses for both variants."
+      ],
+      "role": "canonical"
+    },
+    {
+      "id": "tint-parameterization-hue-phase-2c",
+      "file": "tint-parameterization-hue-phase-2c.json",
+      "sha256": "98aa87ea512fde217e006f06495e04008f1b55920935903868616e79ba20bee6",
+      "formatVersion": 1,
+      "entryCount": 1088,
+      "platform": {
+        "product": "macOS",
+        "version": "26.6",
+        "build": "25G70",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-30T10:09:33Z",
+      "axes": {
+        "sourceColors": {
+          "hueFractionGrid": 128,
+          "nearGrayBoundary": 8
+        },
+        "appearance": [
+          "Light",
+          "Dark"
+        ],
+        "material": [
+          "Regular",
+          "Clear"
+        ],
+        "mainParticipation": [
+          false,
+          true
+        ]
+      },
+      "environment": {
+        "displaySignature": "Built-in Retina Display @2.0x",
+        "atlasSchemaVersion": 2
+      },
+      "notes": [
+        "macOS 26 certification counterpart of the accepted macOS 27 fixture; same plan, colors, and hard gates.",
+        "Chromatic transforms were fitted on macOS 27 data only, so every 26 row is out-of-sample evidence.",
+        "The 26 achromatic Main-On family is the saturation-complement form I - s(x)*(ones x w); Main-Off suppresses for both variants."
       ],
       "role": "canonical"
     }

@@ -521,3 +521,24 @@ At the time of this handoff update, these files are intentionally uncommitted.
 formatting-only worktree diff and must not be included with the research.
 The dedicated branch is pushed independently; `main` must not be updated by
 this workflow.
+
+## Postscript: macOS 26 Certification
+
+The cross-version investigation recommended above was subsequently executed
+in full on a macOS 26.6 host. The complete Full Grid, Phase 2b, and Phase 2c
+plans (3,496 rows, registered under `Golden/macOS-26/`) confirmed:
+
+- the standard and pastel endpoint transforms are unchanged at float
+  precision (all 26 rows are out-of-sample for the 27-fitted formulas;
+  reserved rgb-holdouts resolve within 2.5e-7);
+- the achromatic/chromatic boundary is identical (0.0003 vs 0.0004);
+- the neutral suppression coefficients are bit-identical, and on 26 they
+  additionally apply to Clear Main-Off;
+- macOS 26 selects pastel for both Dark Main-On variants and resolves a
+  distinct achromatic family, the saturation complement
+  `I − (0.9 + 0.05x)·(1⊗w)` with `bias = 0.95x` (gray-holdout residual
+  6.6e-5).
+
+`GlassMaterialTintMatrixSynthesizer` now carries both majors with per-major
+context selection; see `Documentation/TintParameterizationStudy.md` for the
+certified model statement.
