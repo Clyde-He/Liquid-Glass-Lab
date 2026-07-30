@@ -23,6 +23,8 @@ For prioritized unknowns and future experiments across both renderers, see
 | [GlassLabTintStudy.swift](../LiquidGlassLab/GlassLab/GlassLabTintStudy.swift) | Deterministic Tint presets plus cross-renderer static and Materialize export models |
 | [GlassLabView.swift](../LiquidGlassLab/GlassLab/GlassLabView.swift) | Section/page controls, the tweaking Inspectors, and refresh scheduling |
 | `GlassLabBench*.swift` | The Bench: capture drivers, probes, studies, exports, and the headless CLI harness, split per area (`Materialize`, `TintStudy`, `Probes`, `Headless`, `Tools`) as `GlassLabView` extensions |
+| [GlassHUDMaterialController.swift](../LiquidGlassLab/GlassMaterial/GlassHUDMaterialController.swift) | Product-facing Regular/Clear, visibility, appearance, tint, and deterministic Normal/Muted ownership |
+| [GlassMaterialAtlasCatalog.swift](../LiquidGlassLab/GlassMaterial/GlassMaterialAtlasCatalog.swift) | Discovers one certified JSON snapshot per macOS major; build/display metadata is diagnostic |
 
 ## Two renderer spaces
 
@@ -210,10 +212,19 @@ task's controls are mounted:
 - Bench: `Atlas`, `Exports`, `Materialize`, `Tint Study`, `Transition`, and
   `Probes` — every capture, study, probe, and export lives here, off the
   tweaking pages. Atlas is the frozen-baseline acceptance page: it captures
-  the `GlassMaterialStyleAtlas` probe sweep, persists it, drives a real
-  non-activating HUD panel frozen from it, and quantifies the
+  a separate visible reference sweep and the product Provider calibration.
+  The Provider pairs every hidden Main-On sample with a same-context Main-Off
+  witness, commits only after full payload proof plus frozen-destination
+  readback for both product semantics, and persists to a file isolated from the
+  reference artifact. The page then drives a real non-activating HUD panel
+  through Normal (verified Main-On) and Muted (verified Main-Off), as well as
+  appearance, variant, visibility, tint, and size. It also quantifies the
   size-interpolation error against live resolutions
   (`--verify-style-atlas` runs its automatable core headless).
+  `Export Major Catalog` writes the verified atlas using the
+  `glass-macos-<major>.json` convention. Product loading shares that snapshot
+  across minor/beta builds and displays within the major, while complete
+  frozen readback remains the structural compatibility gate.
 
 Bench is not a renderer: each Bench page steers `rendererMode` (and the
 hidden context pages the capture drivers still key on) to whatever its

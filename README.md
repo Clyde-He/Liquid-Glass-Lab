@@ -43,6 +43,22 @@ xcodebuild \
   build
 ```
 
+The reusable product module and its independent consumer compile as a Swift
+Package:
+
+```sh
+swift test
+xcodebuild \
+  -project LiquidGlassLab.xcodeproj \
+  -scheme GlassHUDConsumerDemo \
+  -destination 'platform=macOS' \
+  build
+```
+
+`GlassHUDConsumerDemo` imports only the public `GlassHUDMaterial` product. The
+macOS-major Catalog is carried by the package resource bundle; consuming apps
+do not run the Lab's Capture workflow.
+
 ## Private API warning
 
 This repository intentionally probes private AppKit, SwiftUI, SwiftUICore, and

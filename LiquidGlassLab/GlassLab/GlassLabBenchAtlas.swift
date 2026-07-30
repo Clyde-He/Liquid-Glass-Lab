@@ -12,6 +12,7 @@
 #if os(macOS)
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 extension GlassLabView {
     enum AtlasBenchError: LocalizedError {
@@ -61,13 +62,19 @@ extension GlassLabView {
                         startAtlasProvider()
                     }
                     .disabled(isCapturingAtlas)
+                    if atlasProvider != nil {
+                        Button("Recalibrate") {
+                            atlasProvider?.recalibrate()
+                        }
+                        .disabled(isCapturingAtlas)
+                    }
                     if let providerStatus {
                         Text(providerStatus)
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.secondary)
                     }
                 }
-                Text("The product-shaped path: invisible probes clipped inside this control window — already genuinely main while you work in it — fill the four Main-On cells in parallel batches, a few seconds in the background, persisted per environment. This is what a real app would ship.")
+                Text("The product path calibrates paired hidden probes: Main-On inside this active control window and a same-context Main-Off witness inside a transparent nonactivating panel. It publishes and persists nothing until every appearance × Regular/Clear × size pair proves the active rim gate plus an independent render-margin or shader-vector branch difference.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -84,10 +91,16 @@ extension GlassLabView {
                     if isCapturingAtlas {
                         Button("Cancel") { atlasCaptureTask?.cancel() }
                     }
-                    Button("Load Saved Atlas") { loadSavedAtlas() }
+                    Button("Load Provider") { loadSavedProviderAtlas() }
                         .disabled(isCapturingAtlas)
+                    Button("Load Reference") { loadSavedReferenceAtlas() }
+                        .disabled(isCapturingAtlas)
+                    Button("Export Major Catalog") {
+                        exportMajorCatalog()
+                    }
+                    .disabled(isCapturingAtlas || atlasDocument == nil)
                 }
-                Text("The reference sweep drives the visible test window through appearance × Regular/Clear × Main On/Off at short sides \(Self.atlasProbeShortSides.map { String(Int($0)) }.joined(separator: "/")) — \(8 * Self.atlasProbeShortSides.count) samples including the Main-Off cells the provider skips. Slower and visible; kept as the ground truth the provider is verified against.")
+                Text("The reference sweep separately drives the visible test window through appearance × Regular/Clear × Main On/Off at short sides \(Self.atlasProbeShortSides.map { String(Int($0)) }.joined(separator: "/")) — \(8 * Self.atlasProbeShortSides.count) samples. Provider and reference artifacts are deliberately isolated so one can never mask or overwrite the other.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -111,7 +124,7 @@ extension GlassLabView {
             Toggle(isOn: hudVisibleBinding) {
                 LabRowLabel(
                     "Show HUD Panel",
-                    description: "A borderless non-activating floating panel rendering a GlassMaterialEffectView frozen from the atlas with Main-On participation. It never becomes key or main; everything it shows beyond the flat material is the frozen restamp."
+                    description: "A borderless non-activating floating panel rendering a GlassMaterialEffectView frozen from the paired atlas. Normal holds verified Main-On; Muted holds verified Main-Off. The panel itself never becomes key or main."
                 )
             }
             .disabled(atlasDocument == nil && !hudPanelVisible)
@@ -129,13 +142,19 @@ extension GlassLabView {
             }
             .pickerStyle(.segmented)
 
+            Picker("Emphasis", selection: hudMutedBinding) {
+                Text("Normal").tag(false)
+                Text("Muted").tag(true)
+            }
+            .pickerStyle(.segmented)
+
             labeledSlider("Glass Visibility", value: hudStrengthBinding, in: 0...1)
 
             VStack(alignment: .leading, spacing: 6) {
                 Toggle(isOn: hudTintEnabledBinding) {
                     LabRowLabel(
                         "Tint",
-                        description: "Applies immediately; the Main-On hue auto-locks about half a second after you settle on a color — you are picking it in this window, which is exactly the main-participation moment the capture needs."
+                        description: "Applies immediately; the paired Normal/Muted hue matrices auto-lock about half a second after you settle on a color — this main window supplies the genuine active side of the proof."
                     )
                 }
                 ColorPicker(
@@ -208,8 +227,10 @@ extension GlassLabView {
 
     private var atlasSummary: String {
         guard let atlas = atlasDocument else {
-            return "No atlas in memory. Saved file: "
-                + ((try? Self.atlasStorageURL().path) ?? "unavailable")
+            return "No atlas in memory.\nProvider: "
+                + ((try? Self.providerAtlasStorageURL().path) ?? "unavailable")
+                + "\nReference: "
+                + ((try? Self.referenceAtlasStorageURL().path) ?? "unavailable")
         }
         var lines: [String] = []
         if let environment = atlas.environment {
@@ -220,6 +241,10 @@ extension GlassLabView {
         } else {
             lines.append("environment: not stamped — freeze will refuse this atlas")
         }
+        lines.append(
+            "Main-On paired proof: "
+                + (atlas.hasVerifiedMainOnPayload() ? "VERIFIED" : "INVALID")
+        )
         for main in [true, false] {
             for isLight in [true, false] {
                 for isClear in [false, true] {
@@ -245,6 +270,7 @@ extension GlassLabView {
     }
 
     private var hudStatusSummary: String {
+        _ = hudStatusRevision
         guard let hud = hudPanelController, hudPanelVisible else {
             return "HUD hidden."
         }
@@ -268,10 +294,14 @@ extension GlassLabView {
             hudPanelVisible = visible
             if visible {
                 let controller = hudPanelController ?? GlassLabHUDPanelController()
+                controller.onStatusChanged = {
+                    hudStatusRevision &+= 1
+                }
                 hudPanelController = controller
                 controller.setAtlas(atlasDocument)
                 controller.setAppearance(hudAppearance)
                 controller.setClear(hudIsClear)
+                controller.setMuted(hudIsMuted)
                 controller.setStrength(hudStrength)
                 controller.setTint(currentHUDTintColor())
                 controller.setContentSize(CGSize(
@@ -296,6 +326,13 @@ extension GlassLabView {
         Binding { hudIsClear } set: { isClear in
             hudIsClear = isClear
             hudPanelController?.setClear(isClear)
+        }
+    }
+
+    private var hudMutedBinding: Binding<Bool> {
+        Binding { hudIsMuted } set: { isMuted in
+            hudIsMuted = isMuted
+            hudPanelController?.setMuted(isMuted)
         }
     }
 
@@ -353,10 +390,9 @@ extension GlassLabView {
         }
     }
 
-    /// Capture-on-pick, debounced: the tint applies immediately (live
-    /// suppressed hue at the chosen opacity), and the Main-On hue matrices
-    /// lock through the in-window provider about half a second after the
-    /// user settles on a color — no button, no visible session.
+    /// Capture-on-pick, debounced: the tint applies immediately in this lab
+    /// vehicle, and the paired Normal/Muted hue matrices lock through the
+    /// provider about half a second after the user settles on a color.
     func scheduleTintAutoLock() {
         tintLockTask?.cancel()
         guard currentHUDTintColor() != nil else { return }
@@ -367,20 +403,27 @@ extension GlassLabView {
             }
             if atlasProvider == nil { startAtlasProvider() }
             guard let provider = atlasProvider else { return }
-            if provider.atlas.tintMatrix(
-                for: .init(
-                    isLightAppearance: true,
-                    isClear: false,
-                    hasMainParticipation: true
-                ),
-                matching: tint
-            ) != nil { return }
-            atlasStatus = "Locking tint hue…"
+            let hasPairedTintCoverage = [true, false].allSatisfy { hasMain in
+                [true, false].allSatisfy { isLight in
+                    [false, true].allSatisfy { isClear in
+                        provider.atlas.tintMatrix(
+                            for: .init(
+                                isLightAppearance: isLight,
+                                isClear: isClear,
+                                hasMainParticipation: hasMain
+                            ),
+                            matching: tint
+                        ) != nil
+                    }
+                }
+            }
+            if hasPairedTintCoverage { return }
+            atlasStatus = "Locking Normal/Muted tint hue…"
             provider.captureTintMatrices(for: tint) { success in
                 if success {
                     atlasDocument = provider.atlas
                     hudPanelController?.setAtlas(provider.atlas)
-                    atlasStatus = "Tint hue locked."
+                    atlasStatus = "Normal/Muted tint hue locked."
                 } else {
                     atlasStatus = "Tint lock needs this window main and the "
                         + "app active; it retries on your next change."
@@ -391,7 +434,7 @@ extension GlassLabView {
 
     // MARK: - Persistence
 
-    static func atlasStorageURL() throws -> URL {
+    private static func atlasStorageDirectoryURL() throws -> URL {
         let base = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -406,25 +449,80 @@ extension GlassLabView {
             at: directory,
             withIntermediateDirectories: true
         )
-        return directory.appendingPathComponent("glass-style-atlas.json")
+        return directory
+    }
+
+    static func providerAtlasStorageURL() throws -> URL {
+        try atlasStorageDirectoryURL().appendingPathComponent(
+            "glass-main-on-provider-v2.json"
+        )
+    }
+
+    static func referenceAtlasStorageURL() throws -> URL {
+        try atlasStorageDirectoryURL().appendingPathComponent(
+            "glass-reference-sweep-v2.json"
+        )
+    }
+
+    func exportMajorCatalog() {
+        guard let atlas = atlasDocument,
+              atlas.hasVerifiedMainOnPayload(),
+              let major = atlas.environment?.resolvedOSMajorVersion
+        else {
+            atlasStatus = "Catalog export requires a verified paired atlas."
+            return
+        }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "glass-macos-\(major).json"
+        guard panel.runModal() == .OK, let destinationURL = panel.url else {
+            return
+        }
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            try encoder.encode(atlas).write(
+                to: destinationURL,
+                options: .atomic
+            )
+            atlasStatus = "Exported macOS \(major) catalog to "
+                + destinationURL.path
+        } catch {
+            atlasStatus = "Catalog export failed: \(error.localizedDescription)"
+        }
     }
 
     private func saveAtlasToDisk(_ atlas: GlassMaterialStyleAtlas) throws -> URL {
+        guard atlas.hasVerifiedMainOnPayload() else {
+            throw AtlasBenchError.captureFailed(
+                "paired Main-On participation proof"
+            )
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let url = try Self.atlasStorageURL()
+        let url = try Self.referenceAtlasStorageURL()
         try encoder.encode(atlas).write(to: url, options: .atomic)
         return url
     }
 
     static func loadAtlasFromDisk() throws -> GlassMaterialStyleAtlas {
-        let data = try Data(contentsOf: atlasStorageURL())
+        let data = try Data(contentsOf: referenceAtlasStorageURL())
         return try JSONDecoder().decode(GlassMaterialStyleAtlas.self, from: data)
     }
 
-    func loadSavedAtlas() {
+    func loadSavedProviderAtlas() {
+        loadSavedAtlas(at: try? Self.providerAtlasStorageURL())
+    }
+
+    func loadSavedReferenceAtlas() {
+        loadSavedAtlas(at: try? Self.referenceAtlasStorageURL())
+    }
+
+    private func loadSavedAtlas(at url: URL?) {
         do {
-            let url = try Self.atlasStorageURL()
+            guard let url else {
+                throw AtlasBenchError.captureFailed("atlas storage URL")
+            }
             let data = try Data(contentsOf: url)
             let atlas = try JSONDecoder().decode(
                 GlassMaterialStyleAtlas.self,
@@ -435,10 +533,16 @@ extension GlassLabView {
                 for: state.testWindow.liveWindow?.screen ?? NSScreen.main
             )
             let compatible = atlas.environment?.isCompatible(with: current) ?? false
+            let exactBuild = atlas.environment?
+                .isExactBuildMatch(with: current) ?? false
+            let sameDisplay = atlas.environment?.displaySignature
+                == current.displaySignature
+            let verified = atlas.hasVerifiedMainOnPayload()
             atlasStatus = "Loaded \(url.lastPathComponent)"
-                + (compatible
-                    ? " · environment compatible"
-                    : " · ENVIRONMENT STALE — recapture before freezing")
+                + (compatible ? " · major compatible" : " · MAJOR INCOMPATIBLE")
+                + (exactBuild ? " · exact build" : " · different build")
+                + (sameDisplay ? "" : " · display advisory mismatch")
+                + (verified ? " · paired proof verified" : " · PAIRED PROOF INVALID")
             hudPanelController?.setAtlas(atlasDocument)
         } catch {
             atlasStatus = "Load failed: \(error.localizedDescription)"
@@ -490,10 +594,15 @@ extension GlassLabView {
             provider = GlassMaterialAtlasProvider(
                 hostWindow: window,
                 shortSides: Self.atlasProbeShortSides,
-                storageURL: try? Self.atlasStorageURL()
+                storageURL: try? Self.providerAtlasStorageURL(),
+                certifiedAtlasURLs:
+                    GlassMaterialAtlasCatalog.bundledAtlasURLs()
             )
             provider.onStateChanged = { newState in
                 providerStatus = Self.describeProviderState(newState)
+                    + (newState == .ready
+                        ? " · \(provider.atlasSource.rawValue)"
+                        : "")
             }
             provider.onAtlasUpdated = { updated in
                 atlasDocument = updated
@@ -512,7 +621,7 @@ extension GlassLabView {
         case .waitingForMainWindow:
             "waiting for this window to be main and the app active"
         case let .capturing(completed, total): "capturing \(completed)/\(total)"
-        case .ready: "ready — Main-On coverage complete"
+        case .ready: "ready — paired Normal/Muted coverage complete"
         case let .failed(reason): "failed: \(reason)"
         }
     }
@@ -613,6 +722,11 @@ extension GlassLabView {
         atlas.environment = .current(
             for: state.testWindow.liveWindow?.screen
         )
+        guard atlas.hasVerifiedMainOnPayload() else {
+            throw AtlasBenchError.captureFailed(
+                "paired Main-On participation proof"
+            )
+        }
         return atlas
     }
 
@@ -1042,7 +1156,8 @@ extension GlassLabView {
         if let saved = try? Self.loadAtlasFromDisk(),
            saved.environment?.isCompatible(
             with: .current(for: state.testWindow.liveWindow?.screen)
-           ) == true {
+           ) == true,
+           saved.hasVerifiedMainOnPayload() {
             atlas = saved
             step("atlas-source", true, "reused saved atlas")
         } else {
@@ -1078,6 +1193,11 @@ extension GlassLabView {
             "codable-round-trip",
             decodedCellsOK,
             "all 8 cells re-validate after decode"
+        )
+        step(
+            "decoded-main-on-proof",
+            decoded.hasVerifiedMainOnPayload(),
+            "every Main-On sample retains a paired Main-Off witness"
         )
 
         // Informational: the sampled margin per Main-On cell and size, so a
@@ -1633,6 +1753,13 @@ extension GlassLabView {
                 provider.isMainOnCoverageComplete,
                 Self.describeProviderState(provider.state)
                     + " after \(waitedMs)ms"
+            )
+            step(
+                "provider-paired-proof",
+                provider.atlas.hasVerifiedMainOnCoverage(
+                    shortSides: providerSides
+                ),
+                "runtime calibration committed only paired samples"
             )
             if provider.isMainOnCoverageComplete {
                 var worstRelative = 0.0

@@ -5,8 +5,8 @@
 //  Bench: the frozen-baseline acceptance vehicle — a real non-activating HUD
 //  panel that is never key or main, rendering a GlassMaterialEffectView
 //  frozen from a captured style atlas. This is the product contract under
-//  test: Light/Dark/Auto, Regular/Clear, Glass Visibility, Tint, and
-//  content-driven size with no recapture.
+//  test: Light/Dark/Auto, Regular/Clear, Normal/Muted participation, Glass
+//  Visibility, Tint, and content-driven size with no recapture.
 //
 
 #if os(macOS)
@@ -38,9 +38,13 @@ final class GlassLabHUDPanelController {
     private var atlas: GlassMaterialStyleAtlas?
     private var appearance: Appearance = .auto
     private var isClear = false
+    private var isMuted = false
     private var strengthValue = 1.0
     private var tintColor: NSColor?
     private var contentSize = CGSize(width: 320, height: 120)
+    private var freezeRetryTask: Task<Void, Never>?
+
+    var onStatusChanged: (() -> Void)?
 
     /// The result of the most recent freeze attempt, for the Bench readout.
     private(set) var lastFreezeSucceeded = false
@@ -63,15 +67,21 @@ final class GlassLabHUDPanelController {
 
     func show() {
         buildPanelIfNeeded()
-        applyEverything()
         panel?.orderFront(nil)
+        panel?.contentView?.layoutSubtreeIfNeeded()
+        applyEverything()
+        scheduleFreezeRetryIfNeeded()
+        onStatusChanged?()
     }
 
     func hide() {
         panel?.orderOut(nil)
+        onStatusChanged?()
     }
 
     func tearDown() {
+        freezeRetryTask?.cancel()
+        freezeRetryTask = nil
         panel?.orderOut(nil)
         panel = nil
         glassView = nil
@@ -82,17 +92,9 @@ final class GlassLabHUDPanelController {
     // MARK: Controls (the product contract)
 
     func setAtlas(_ atlas: GlassMaterialStyleAtlas?) {
-        let previous = self.atlas
         self.atlas = atlas
         refreeze()
-        // A refused replacement (stale environment, incomplete coverage)
-        // leaves the glass rendering the previously frozen atlas — keep the
-        // sizing source on that same atlas so the panel insets stay
-        // consistent with what is actually displayed. `lastFreezeSucceeded`
-        // still reports the refusal to the Bench readout.
-        if atlas != nil, !lastFreezeSucceeded {
-            self.atlas = previous
-        }
+        scheduleFreezeRetryIfNeeded()
         layoutPanel()
     }
 
@@ -106,29 +108,29 @@ final class GlassLabHUDPanelController {
         guard self.isClear != isClear else { return }
         self.isClear = isClear
         if let glassView {
-            GlassLabTuning.setGuarded(
-                isClear ? 2 : 1,
-                forKey: "_variant",
-                on: glassView
-            )
-            // The variant write rebuilds the private tree; the effect view's
-            // own hooks re-apply the frozen style, but the rebuild does not
-            // always end in a layout pass, so nudge one refresh here too.
-            glassView.materialStrength.refresh()
+            glassView.materialStyle = isClear ? .clear : .regular
         }
+        updateLabels()
+    }
+
+    func setMuted(_ isMuted: Bool) {
+        guard self.isMuted != isMuted else { return }
+        self.isMuted = isMuted
+        refreeze()
+        scheduleFreezeRetryIfNeeded()
+        layoutPanel()
         updateLabels()
     }
 
     func setStrength(_ value: Double) {
         strengthValue = value
-        glassView?.materialStrength.value = value
+        glassView?.materialVisibility = value
         updateLabels()
     }
 
     func setTint(_ color: NSColor?) {
         tintColor = color
-        glassView?.tintColor = color
-        glassView?.materialStrength.tintColor = color
+        glassView?.materialTint = color
     }
 
     func setContentSize(_ size: CGSize) {
@@ -194,15 +196,10 @@ final class GlassLabHUDPanelController {
     private func applyEverything() {
         guard let panel, let glassView else { return }
         panel.appearance = appearance.nsAppearance
-        GlassLabTuning.setGuarded(
-            isClear ? 2 : 1,
-            forKey: "_variant",
-            on: glassView
-        )
-        glassView.tintColor = tintColor
+        glassView.materialStyle = isClear ? .clear : .regular
+        glassView.materialTint = tintColor
         refreeze()
-        glassView.materialStrength.value = strengthValue
-        glassView.materialStrength.tintColor = tintColor
+        glassView.materialVisibility = strengthValue
         layoutPanel()
         updateLabels()
     }
@@ -210,13 +207,41 @@ final class GlassLabHUDPanelController {
     private func refreeze() {
         guard let glassView else { return }
         if let atlas {
-            lastFreezeSucceeded = glassView.materialStrength.freeze(
+            let installed = glassView.materialStrength.freeze(
                 atlas: atlas,
-                mainParticipation: true
+                mainParticipation: !isMuted
             )
+            lastFreezeSucceeded = installed
+                && glassView.materialStrength.frozenStyleIsCurrentlyApplied
         } else {
             lastFreezeSucceeded = false
             glassView.materialStrength.unfreeze()
+        }
+        onStatusChanged?()
+    }
+
+    /// `NSGlassEffectView` can expose the background pass before its grade and
+    /// rim topology has materialized. A product HUD must not interpret that
+    /// transient refusal as an invalid atlas, and must not require an unrelated
+    /// user event to try again after the panel becomes visible.
+    private func scheduleFreezeRetryIfNeeded() {
+        freezeRetryTask?.cancel()
+        guard atlas != nil, !lastFreezeSucceeded else { return }
+        freezeRetryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            for delay in [0, 80, 160, 320, 640, 1000] {
+                if delay > 0 {
+                    try? await Task.sleep(for: .milliseconds(delay))
+                } else {
+                    await Task.yield()
+                }
+                guard !Task.isCancelled, self.isVisible else { return }
+                self.refreeze()
+                if self.lastFreezeSucceeded {
+                    self.layoutPanel()
+                    return
+                }
+            }
         }
     }
 
@@ -263,19 +288,20 @@ final class GlassLabHUDPanelController {
         }
     }
 
-    /// The widest sampled `marginWidth` across the Main-On cells at this
-    /// short side, so appearance/variant switches never outgrow the room.
+    /// The widest sampled `marginWidth` across the selected participation's
+    /// cells at this short side, so appearance/variant switches never outgrow
+    /// the room.
     /// Falls back to the measured `max(16, 0.35 · shortSide)` shape before an
     /// atlas exists.
     private func requiredInset(for shortSide: Double) -> CGFloat {
         var margin = max(16.0, 0.35 * shortSide)
-        if let atlas {
+        if let atlas = glassView?.materialStrength.frozenAtlas {
             for isLight in [true, false] {
                 for isClear in [true, false] {
                     let cell = GlassMaterialStyleAtlas.Cell(
                         isLightAppearance: isLight,
                         isClear: isClear,
-                        hasMainParticipation: true
+                        hasMainParticipation: !isMuted
                     )
                     if let sampled = atlas.sample(
                         for: cell,
@@ -292,10 +318,12 @@ final class GlassLabHUDPanelController {
     private func updateLabels() {
         guard let detailLabel else { return }
         let material = isClear ? "Clear" : "Regular"
+        let emphasis = isMuted ? "Muted" : "Normal"
         detailLabel.stringValue = String(
-            format: "%@ · %@ · G %.2f · %.0f×%.0f",
+            format: "%@ · %@ · %@ · G %.2f · %.0f×%.0f",
             material,
             appearance.rawValue,
+            emphasis,
             strengthValue,
             contentSize.width,
             contentSize.height

@@ -87,7 +87,7 @@ import AppKit
 /// ordinary bound and deliberately left unmodelled — see
 /// `gated-blur-overshoots-by-its-saturation-deficit`.
 @MainActor
-public final class GlassMaterialStrength {
+final class GlassMaterialStrength {
     private weak var glass: NSGlassEffectView?
     private var baseline: GlassMaterialBaseline?
     private var appliedValue: Double = 1
@@ -153,6 +153,20 @@ public final class GlassMaterialStrength {
             ) != nil
         }
         return baseline != nil
+    }
+
+    /// A readback assertion for product calibration and diagnostics. `true`
+    /// means the complete currently selected frozen sample — shader, grades,
+    /// render bounds, rim, and any installed tint matrix — is present on the
+    /// destination tree now. It does not trigger a write.
+    public var frozenStyleIsCurrentlyApplied: Bool {
+        guard let frozenAtlas, let glass,
+              let sample = frozenAtlas.sample(
+                for: currentCell(for: glass),
+                at: min(glass.bounds.width, glass.bounds.height)
+              )
+        else { return false }
+        return frozenStateHolds(sample, on: glass)
     }
 
     private func currentCell(
@@ -248,9 +262,10 @@ public final class GlassMaterialStrength {
 
     /// Locks the glass to the captured atlas and stamps it immediately.
     /// Returns false — installing nothing — unless the atlas was captured
-    /// under the current schema and OS build and covers the complete
-    /// appearance × variant cell space for the frozen participation. An
-    /// incompatible atlas is a stale cache: discard it and recapture.
+    /// under the current schema and macOS major and covers the complete
+    /// appearance × variant cell space for the frozen participation. A
+    /// destination that cannot accept the snapshot fails complete readback;
+    /// the product controller then falls back to runtime calibration.
     ///
     /// Coverage is validated here rather than discovered at a later context
     /// switch: appearance and variant change at runtime by design, and a
@@ -276,6 +291,14 @@ public final class GlassMaterialStrength {
                 with: .current(for: glass.window?.screen)
               )
         else { return false }
+        // Main-On is a semantic claim about the resolved payload, not a label
+        // the producer is trusted to attach. Refuse a frozen HUD atlas unless
+        // every served sample proves itself against a paired Main-Off witness.
+        // This makes an incorrectly captured Provider cache fail closed rather
+        // than render the flat material under a Main-On key.
+        if mainParticipation, !atlas.hasVerifiedMainOnPayload() {
+            return false
+        }
         // Every sample is re-validated, not merely counted: a persisted atlas
         // decodes without running `capture`'s completeness guard, so a stale
         // or hand-edited file could otherwise install cells the restamp
@@ -802,9 +825,55 @@ public final class GlassMaterialStrength {
 /// the end of layout is what makes the authored strength the final writer.
 @MainActor
 public final class GlassMaterialEffectView: NSGlassEffectView {
-    public private(set) lazy var materialStrength = GlassMaterialStrength(glass: self)
+    public enum MaterialStyle: Equatable, Sendable {
+        case regular
+        case clear
+    }
+
+    private(set) lazy var materialStrength = GlassMaterialStrength(glass: self)
 
     private var isRefreshing = false
+    /// Internal product-controller hook. `NSView` has no did-move-to-window
+    /// notification a separate owner can reliably observe.
+    var materialWindowDidChange: (() -> Void)?
+
+    /// Product-facing discrete customization. Switching style selects the
+    /// already verified Main-On atlas cell; it never starts a calibration.
+    public var materialStyle: MaterialStyle = .regular {
+        didSet {
+            guard materialStyle != oldValue else { return }
+            GlassMaterialAccess.setVariant(
+                materialStyle == .clear ? 2 : 1,
+                on: self
+            )
+            materialStrength.refresh()
+        }
+    }
+
+    /// Product-facing continuous glass visibility (`G`), not view opacity.
+    public var materialVisibility: Double {
+        get { materialStrength.value }
+        set { materialStrength.value = newValue }
+    }
+
+    /// Keeps the public glass tint and the frozen material controller in sync.
+    public var materialTint: NSColor? {
+        get { tintColor }
+        set {
+            tintColor = newValue
+            materialStrength.tintColor = newValue
+        }
+    }
+
+    /// Installs a verified atlas for the HUD's only supported frozen
+    /// participation. Returns false without changing the current freeze when
+    /// the candidate is stale, incomplete, or lacks paired Main-On proof.
+    @discardableResult
+    func installFrozenMainOnAtlas(
+        _ atlas: GlassMaterialStyleAtlas
+    ) -> Bool {
+        materialStrength.freeze(atlas: atlas, mainParticipation: true)
+    }
 
     override public func layout() {
         super.layout()
@@ -828,6 +897,7 @@ public final class GlassMaterialEffectView: NSGlassEffectView {
         super.viewDidMoveToWindow()
         observeContext(of: window)
         refreshNowAndAfterSystemRestamp()
+        materialWindowDidChange?()
     }
 
     override public func viewDidChangeEffectiveAppearance() {

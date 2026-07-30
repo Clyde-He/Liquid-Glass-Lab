@@ -31,7 +31,7 @@ import AppKit
 /// 48pt face grade is additionally a measured dual-endpoint exception; macOS 27
 /// resolves one endpoint at every captured size. Discrete gates are handled
 /// separately from this continuous shape vocabulary.
-public enum GlassMaterialShape: Sendable {
+enum GlassMaterialShape: Sendable {
     /// `g`. The majority of channels.
     case linear
     /// `0.2g + 0.8g²`. Blur opacity 1/2 without Main participation.
@@ -56,7 +56,7 @@ public enum GlassMaterialShape: Sendable {
     }
 }
 
-public struct GlassMaterialChannel: Sendable {
+struct GlassMaterialChannel: Sendable {
     /// The resolved value at `g = 0`. Exactly 0 or 1 on every macOS 26 channel;
     /// macOS 27's key fill highlight added measured starts that are neither.
     public let start: Double
@@ -83,7 +83,7 @@ public struct GlassMaterialChannel: Sendable {
 /// Reading endpoints instead of authoring them is what lets a single scalar
 /// follow size, appearance, Variant, participation, and subvariant with no
 /// per-axis table: `g = 1` reproduces the captured Recipe by construction.
-public struct GlassMaterialBaseline: Equatable, Sendable {
+struct GlassMaterialBaseline: Equatable, Sendable {
     public let numeric: [String: Double]
     public let colors: [String: NSColor]
     public let rimOpacity: Double?
@@ -110,7 +110,7 @@ public struct GlassMaterialBaseline: Equatable, Sendable {
     }
 }
 
-public enum GlassMaterialCurve {
+enum GlassMaterialCurve {
     /// Fill colors interpolate alpha and keep the system-resolved RGB, so the
     /// Aqua-white / DarkAqua-black split needs no appearance branch.
     public static let colorKeys = [

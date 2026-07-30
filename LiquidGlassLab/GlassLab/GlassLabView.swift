@@ -137,9 +137,11 @@ struct GlassLabView: View {
     @State var atlasProvider: GlassMaterialAtlasProvider?
     @State var providerStatus: String?
     @State var hudPanelController: GlassLabHUDPanelController?
+    @State var hudStatusRevision = 0
     @State var hudPanelVisible = false
     @State var hudAppearance = GlassLabHUDPanelController.Appearance.auto
     @State var hudIsClear = false
+    @State var hudIsMuted = false
     @State var hudStrength = 1.0
     @State var hudTintEnabled = false
     @State var hudTint = Color(red: 1, green: 0.45, blue: 0.35).opacity(0.6)

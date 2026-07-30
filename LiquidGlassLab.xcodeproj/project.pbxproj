@@ -6,14 +6,24 @@
 	objectVersion = 90;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		000000000000000000000220 /* GlassHUDMaterial in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000000000320 /* GlassHUDMaterial */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* LiquidGlassLab.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LiquidGlassLab.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000121 /* GlassHUDConsumerDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GlassHUDConsumerDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		000000000000000000000010 /* LiquidGlassLab */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = LiquidGlassLab;
+			sourceTree = "<group>";
+		};
+		000000000000000000000011 /* ConsumerDemo */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ConsumerDemo;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -24,6 +34,12 @@
 			files = (
 			);
 		};
+		000000000000000131000000 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+				000000000000000000000220 /* GlassHUDMaterial in Frameworks */,
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -31,6 +47,7 @@
 			isa = PBXGroup;
 			children = (
 				000000000000000000000010 /* LiquidGlassLab */,
+				000000000000000000000011 /* ConsumerDemo */,
 				000000000000000000000020 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -39,6 +56,7 @@
 			isa = PBXGroup;
 			children = (
 				000000000000000000000120 /* LiquidGlassLab.app */,
+				000000000000000000000121 /* GlassHUDConsumerDemo.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -64,6 +82,29 @@
 			productReference = 000000000000000000000120 /* LiquidGlassLab.app */;
 			productType = "com.apple.product-type.application";
 		};
+		000000000000000101000000 /* GlassHUDConsumerDemo */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 000000000000000113000000 /* Build configuration list for PBXNativeTarget "GlassHUDConsumerDemo" */;
+			buildPhases = (
+				000000000000000121000000 /* Sources */,
+				000000000000000131000000 /* Frameworks */,
+				000000000000000141000000 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				000000000000000000000011 /* ConsumerDemo */,
+			);
+			name = GlassHUDConsumerDemo;
+			packageProductDependencies = (
+				000000000000000000000320 /* GlassHUDMaterial */,
+			);
+			productName = GlassHUDConsumerDemo;
+			productReference = 000000000000000000000121 /* GlassHUDConsumerDemo.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -77,6 +118,9 @@
 					000000000000000100000000 = {
 						CreatedOnToolsVersion = 26.3;
 					};
+					000000000000000101000000 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 				};
 			};
 			buildConfigurationList = 000000000000000010000000 /* Build configuration list for PBXProject "LiquidGlassLab" */;
@@ -88,12 +132,16 @@
 			);
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				000000000000000000000300 /* XCLocalSwiftPackageReference "." */,
+			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				000000000000000100000000 /* LiquidGlassLab */,
+				000000000000000101000000 /* GlassHUDConsumerDemo */,
 			);
 		};
 /* End PBXProject section */
@@ -104,10 +152,20 @@
 			files = (
 			);
 		};
+		000000000000000141000000 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		000000000000000120000000 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		000000000000000121000000 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
 			);
@@ -305,6 +363,56 @@
 			};
 			name = Release;
 		};
+		000000000000000114000000 /* Debug configuration for PBXNativeTarget "GlassHUDConsumerDemo" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = CH75XA8LVR;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Glass HUD Consumer Demo";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = design.specos.glasshudconsumerdemo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		000000000000000115000000 /* Release configuration for PBXNativeTarget "GlassHUDConsumerDemo" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = CH75XA8LVR;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Glass HUD Consumer Demo";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = design.specos.glasshudconsumerdemo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -324,7 +432,30 @@
 			);
 			defaultConfigurationName = Release;
 		};
+		000000000000000113000000 /* Build configuration list for PBXNativeTarget "GlassHUDConsumerDemo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				000000000000000114000000 /* Debug configuration for PBXNativeTarget "GlassHUDConsumerDemo" */,
+				000000000000000115000000 /* Release configuration for PBXNativeTarget "GlassHUDConsumerDemo" */,
+			);
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		000000000000000000000300 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ".";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		000000000000000000000320 /* GlassHUDMaterial */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 000000000000000000000300 /* XCLocalSwiftPackageReference "." */;
+			productName = GlassHUDMaterial;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 000000000000000000000000 /* Project object */;
 }

@@ -7,26 +7,70 @@ for `alphaValue` when you want "how much glass", not "how opaque".
 refraction, edge lighting, and contrast together. This coordinates the
 underlying passes instead, so intermediate values still read as glass.
 
-## Use it
+## Product integration
+
+Add this repository as a Swift Package and link the `GlassHUDMaterial` library.
+The product-facing surface is deliberately small:
+
+- `GlassMaterialEffectView`
+- `GlassHUDMaterialController`
+
+The product owns semantic choices; the controller owns packaged-catalog
+loading, app-scoped runtime caching, calibration, retries, tint locking, and
+fail-closed fallback:
 
 ```swift
-let strength = GlassMaterialStrength(glass: glassView)
-strength.value = 0.5
+import AppKit
+import GlassHUDMaterial
+
+let hudGlassView = GlassMaterialEffectView()
+let material = GlassHUDMaterialController(
+    hostWindow: settingsWindow,
+    configuration: .init(
+        variant: .clear,
+        visibility: 0.72,              // material G, not alphaValue
+        appearance: .system,           // or .light / .dark
+        tint: pickedColor,
+        emphasis: .normal              // verified Main-On
+    )
+)
+material.onStatusChanged = { status in
+    // .ready / .calibrating / .waitingForMainWindow / .fallback
+}
+material.attach(to: hudGlassView)
+
+// Deterministic product switches; neither follows HUD focus.
+material.configuration.emphasis = .muted  // paired, verified Main-Off
+material.configuration.variant = .regular
 ```
 
-Call `refresh()` after any layout pass, or use the provided subclass and forget
-about it:
+Keep the controller alive for as long as the HUD is alive. The packaged
+`glass-macos-<major>.json` is discovered from the Swift Package resource bundle
+automatically. Runtime calibration and tint matrices are cached under the
+consumer app's Caches directory; the product does not supply or coordinate JSON
+files.
 
-```swift
-let glassView = GlassMaterialEffectView()
-glassView.materialStrength.value = 0.5
+`normal` and `muted` are product semantics, not trusted labels in a JSON file.
+Both are installed from the same paired atlas transaction. A requested tint is
+withheld until its exact RGB has verified matrices for the selected
+participation; the product never presents a hue-suppressed live fallback as a
+successfully configured tint.
+
+Run the independent `GlassHUDConsumerDemo` app scheme from Xcode. To compile it
+from the command line:
+
+```sh
+xcodebuild \
+  -project LiquidGlassLab.xcodeproj \
+  -scheme GlassHUDConsumerDemo \
+  -destination 'platform=macOS' \
+  build
 ```
 
-If the glass has a public tint, hand it over so the tint branch tracks too:
+That app target links the local package product and imports only
+`GlassHUDMaterial`; it has no Atlas or Capture API.
 
-```swift
-strength.tintColor = glassView.tintColor
-```
+## Lab internals
 
 ## Freeze a style atlas
 
@@ -35,31 +79,44 @@ endpoints. To lock a glass to a participation its window never has — a HUD
 panel that should always render the Main-On material — capture a
 `GlassMaterialStyleAtlas` and freeze it.
 
-The product-shaped capture path is `GlassMaterialAtlasProvider`: point it at
-a window that is genuinely main while the user works in it (the app's own
-settings or main window), and it fills the four Main-On cells with invisible
-probes clipped inside that window — parallel batches, a few seconds in the
-background on first run, persisted per environment, byte-identical to a
-visible probe sweep by measurement:
+`GlassMaterialAtlasProvider` is the controller's internal calibration engine.
+It remains available to the Lab target for capture and diagnostics but is not
+part of the Swift Package's public product API. Point it
+at a window that is genuinely main while the user works in it (the app's own
+Settings or main window). It calibrates Main-On probes clipped inside that
+window against same-context Main-Off witnesses in a transparent nonactivating
+panel. Window flags schedule the attempt but never certify it: every appearance
+× Regular/Clear × size pair must prove the active rim gate plus an independent
+render-margin or shader-vector branch difference, then both Normal and Muted
+consumers must pass frozen readback before anything is published or persisted.
 
 ```swift
 let provider = GlassMaterialAtlasProvider(
     hostWindow: settingsWindow,
-    shortSides: [48, 64, 96, 160, 240],   // bracket your HUD's range + gates
-    storageURL: atlasFileURL
+    shortSides: [48, 64, 96, 128, 160, 200, 320],
+    storageURL: runtimeAtlasFileURL,
+    certifiedAtlasURLs:
+        GlassMaterialAtlasCatalog.bundledAtlasURLs()
 )
 provider.onAtlasUpdated = { atlas in
     hudGlass.materialStrength.freeze(atlas: atlas)
 }
-provider.ensureCaptured()                  // loads from disk when compatible
+provider.ensureCaptured()  // certified → verified cache → runtime calibration
 
-// Capture-on-pick, about a second, at the moment the user chooses a color:
+// Capture-on-pick while Settings is genuinely active:
 provider.captureTintMatrices(for: pickedColor) { locked in ... }
 ```
 
-The manual sweep below remains the reference path — it also captures the
-Main-Off cells the provider skips — and is what the provider is verified
-against:
+`onAtlasUpdated` never receives a partial base calibration. `ready` means the
+entire paired atlas has evidence and both participation branches passed a
+frozen-destination round-trip. `atlasSource` distinguishes bundled
+certification, a runtime cache, and a fresh calibration. Product code normally
+observes the higher-level controller status instead of coordinating these
+callbacks itself.
+
+The manual sweep below remains the separate laboratory reference. Provider and
+reference artifacts must not share a file: otherwise one path can mask or
+overwrite the other during acceptance.
 
 ```swift
 // One key-window opportunity yields the whole atlas: participation is the
@@ -79,15 +136,26 @@ hudGlass.materialStrength.freeze(atlas: atlas)   // false if stale or partial
 hudGlass.materialStrength.value = 0.5            // interpolates the frozen style
 ```
 
-An atlas is a **disposable cache**, not a portable document. `freeze` installs
-nothing unless the atlas was stamped under the current capture schema and OS
-build and covers the complete appearance × variant cell space for the frozen
-participation — appearance and variant switch at runtime by design, and a cell
-miss after a switch would strand the previous cell's values with nothing
-tracking `value`. When schema or OS build change, discard the whole atlas and
-recapture at the next key-window opportunity; the display signature is stored
-for the same decision but is advisory, since its known sensitivity is three
-small resolved fields.
+An atlas is a **disposable, proven cache**, not a universal document. `freeze`
+installs nothing unless the requested cells have supported topology; a
+Main-On freeze additionally requires every served sample to carry a
+same-context Main-Off witness and pass both participation signals. The product
+controller admits either semantic branch only after the whole paired provider
+transaction passes. A bundled certified catalog is keyed by capture schema and
+macOS major: `glass-macos-26.json`, `glass-macos-27.json`, and so on. Minor,
+patch, and beta builds within that major intentionally share the accepted
+snapshot. Display signature and exact build remain encoded for diagnostics but
+are not admission gates.
+
+Certified JSON is an acceleration and release-certification path, not something
+the consuming product coordinates and not a promise of cross-version
+compatibility.
+On an unknown macOS major the controller automatically calibrates, validates,
+caches, and reports readiness. If a same-major catalog no longer fits the live
+private topology, full frozen readback stays false; after materialization
+retries the controller discards that candidate and runs paired calibration.
+This makes the catalog a pinned major-version look without making structural
+incompatibility look ready.
 
 Only participation is frozen. Appearance and variant stay live — Light/Dark/
 Auto and Regular/Clear switch by selecting atlas cells with no recapture — and
@@ -102,11 +170,11 @@ Each sample carries the restampable transplant groups: every typed shader
 input including captured nils, the render-bounds group, both untinted color
 grades with their scalar inputs, and the full rim payload — a flat context
 resolves zero-alpha rim colors, so the gate alone would open onto an invisible
-highlight. The atlas is `Codable`: capture once, persist, and recapture only
-when the display configuration or OS build changes. Capture on the running
-machine rather than burning in fixture values — a handful of resolved fields
-are display-sensitive, which is why the `Golden/` archives are regression
-references, not a runtime source.
+highlight. The atlas is `Codable`: capture once, certify one snapshot per
+macOS major, and retain exact-build/display metadata only for diagnostics.
+The chosen product policy values a stable major-version look over following
+minor Recipe drift; a handful of resolved fields are display-sensitive, but a
+display change alone does not invalidate the catalog.
 
 One transplant group cannot be restamped and falls on the host layout:
 **window room**. The backing surface hard-clips everything at the window
@@ -131,16 +199,15 @@ acceptance HUD: contexts and drag bursts converge within ~200ms; the flash of
 system-resolved material during that window is the residual cost, corrected
 at the next beat.
 
-Tint under a frozen Main-On lock needs one extra capture: a non-main window
-resolves the hue-suppressed tint matrix, so store Main-context matrices per
-cell with `addTintMatrix(_:for:)`, captured via
-`GlassMaterialStyleAtlas.captureTintMatrix(from:)` at tint-selection time —
-the user picks the color in an active window, which is exactly the
-participation the matrix needs. Tint accumulates independently of the size
-samples and is keyed by source RGB: a new color captures four matrices (one
-per Main-On cell), never a new size atlas, and alpha stays a runtime
-coefficient (`sourceAlpha × value²`) on the captured hue. Until a color's
-matrix is captured, its hue falls back to the live (suppressed) resolution.
+Tint under a frozen participation needs one extra calibration. The Provider
+captures and stores both Main-On and Main-Off matrices per appearance ×
+variant cell, admits them only while the same tinted probes pass the paired
+base-style proof, then requires all eight frozen consumers to read back before
+commit. Tint accumulates independently of the size samples and is keyed by
+source RGB: a new color calibrates eight matrices, never a new size atlas, and
+alpha stays a runtime coefficient (`sourceAlpha × value²`) on the captured hue.
+The product controller keeps the requested tint offscreen until that
+transaction verifies.
 
 `unfreeze()` returns to live behavior at the next rebuild. One caveat is
 inherited from an open research question: whether AppKit writes an
@@ -153,15 +220,23 @@ deterministic final writer until that question is settled by capture.
 ## Take it
 
 Copy this directory. It has no dependency on the rest of Liquid Glass Lab —
-five files, AppKit only:
+seven Swift files plus any certified JSON catalogs, AppKit only:
 
 | File | Role |
 |---|---|
 | `GlassMaterialAccess.swift` | The minimum private-API surface: layer lookup, filter read/write, render bounds, rim gate/payload, color matrices |
 | `GlassMaterialCurve.swift` | The measured curve: shapes, channel table, baseline |
 | `GlassMaterialAtlas.swift` | The captured style atlas: appearance × variant × participation × size samples, Codable, interpolated |
-| `GlassMaterialAtlasProvider.swift` | The product capture path: invisible in-window probes, opportunistic Main-On batches, persistence |
+| `GlassMaterialAtlasCatalog.swift` | Discovers conventionally named `glass-macos-<major>.json` resources |
+| `GlassMaterialAtlasProvider.swift` | Product calibration: certified catalog loading, paired On/Off proof, atomic persistence, tint-on-pick |
 | `GlassMaterialStrength.swift` | The controller and the `NSGlassEffectView` subclass |
+| `GlassHUDMaterialController.swift` | Product API: configuration, Normal/Muted selection, provider ownership, retries, tint gating, status/fallback |
+
+The current lab ships `Catalog/glass-macos-27.json`. Its raw JSON is about
+199 KB and compresses to about 6.5 KB; adding one catalog per macOS major is
+therefore negligible compared with ordinary app assets. Arbitrary user tint
+colors remain runtime-calibrated and cached because they cannot be exhaustively
+pre-bundled.
 
 ## How it works
 
