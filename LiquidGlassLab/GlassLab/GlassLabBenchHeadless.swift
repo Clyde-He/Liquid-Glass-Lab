@@ -145,12 +145,16 @@ extension GlassLabView {
         let tintRenderedABFlag = arguments.firstIndex(
             of: "--verify-tint-rendered-ab"
         )
+        let tintSyncFlag = arguments.firstIndex(
+            of: "--verify-tint-sync-resolution"
+        )
         let captureFlagIndices = [
             sizeFlag,
             resizeFlag,
             removalWarmupFlag,
             goldenFlag,
             atlasFlag,
+            tintSyncFlag,
             tintRenderedABFlag,
             tintParameterizationHueFlag,
             tintParameterizationFocusedFlag,
@@ -190,6 +194,30 @@ extension GlassLabView {
 
         var exitCode: Int32 = 0
         do {
+            if tintSyncFlag != nil {
+                let document = try await performTintSyncResolutionCheck()
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let payload = try encoder.encode(document)
+                var written = destination
+                do {
+                    try payload.write(to: destination, options: .atomic)
+                } catch {
+                    written = URL(fileURLWithPath: NSTemporaryDirectory())
+                        .appendingPathComponent(destination.lastPathComponent)
+                    try payload.write(to: written, options: .atomic)
+                }
+                FileHandle.standardError.write(Data(
+                    (
+                        document.report
+                            + "\n"
+                            + document.failureReport
+                            + "\nWrote \(written.path)\n"
+                    ).utf8
+                ))
+                state.testWindow.tearDown()
+                exit(document.passed ? 0 : 2)
+            }
             if tintRenderedABFlag != nil {
                 let document = try await performTintRenderedABAcceptance()
                 let encoder = JSONEncoder()

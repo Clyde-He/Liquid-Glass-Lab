@@ -389,3 +389,40 @@ disassembling `SDFLayer.updateSDFEffects` to recover the endpoint arithmetic
 (a bounded reverse-engineering task, and `maxColorComponent` is the thread to
 pull). The synchronous-capture route needs no symbol at all, covers every
 present and future gamut by construction, and is the cheaper permanent fix.
+
+### Confirmed under genuine Main-On: commit-time resolution is exact
+
+`--verify-tint-sync-resolution` (implemented in
+`LiquidGlassLab/GlassLab/GlassLabTintSyncResolution.swift`, evidence in
+`Golden/macOS-26/tint-sync-resolution.json`) repeats the flush measurement
+inside the bundled app with a genuinely main/key host window and a
+nonparticipating witness, over three in-domain colors and three Display P3
+colors that leave the certified domain once converted to extended sRGB
+(including the reported `#C7CD28`).
+
+Result on macOS 26.6: **48/48 rows pass, and the value read immediately after
+`CATransaction.flush()` is bit-identical (maximum difference exactly `0`) to
+the value the settled stable-read procedure accepts.** The paired Main-On
+proof already holds at flush time for every row, so participation can be
+verified in the same commit rather than over a multi-second settle.
+
+The same fixture also quantifies why the input-domain guard exists: against
+the certified closed form, the flush-resolved matrices agree to 1.7e-7
+(coral), 9.2e-8 (teal) and 6.5e-5 (gray 0.5) in domain, but differ by 0.24,
+0.25 and 0.57 for the three P3 colors. Extrapolating synthesis past the
+certified domain would have rendered visibly wrong hues; the system resolver
+is right by construction.
+
+**Implication for the gamut axis.** The permanent fix is not to extend the
+fitted formulas gamut by gamut (sRGB → P3 → Rec. 2020), but to resolve
+unsupported colors through one synchronous commit against real probes. Closed
+form stays the fast path where it is certified; commit-time resolution covers
+every color in every present and future gamut. Neither path needs the current
+multi-second lock.
+
+Open items before changing the product path: the probes must live in a
+window that is genuinely main at the moment of the pick (true while a user
+picks a color in the app's own window, false for a background app), the
+eight-cell probe set has a one-time materialization cost that should be
+measured, and the rendered A/B harness should gate the new path exactly as it
+gates synthesis today.

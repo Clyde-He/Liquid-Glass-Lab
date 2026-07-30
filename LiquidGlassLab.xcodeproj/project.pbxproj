@@ -92,8 +92,6 @@
 			);
 			buildRules = (
 			);
-			dependencies = (
-			);
 			fileSystemSynchronizedGroups = (
 				000000000000000000000011 /* ConsumerDemo */,
 			);
@@ -445,7 +443,7 @@
 /* Begin XCLocalSwiftPackageReference section */
 		000000000000000000000300 /* XCLocalSwiftPackageReference "." */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ".";
+			relativePath = .;
 		};
 /* End XCLocalSwiftPackageReference section */
 

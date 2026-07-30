@@ -1,0 +1,507 @@
+//
+//  GlassLabTintSyncResolution.swift
+//  LiquidGlassLab
+//
+//  Bench: does the Tint matrix resolve synchronously at CA commit under
+//  genuine Main-On participation? The exploratory measurement that motivated
+//  this ran on a plain CLI binary, which can never become main or key, so it
+//  could only observe the suppressed branch. This experiment repeats it inside
+//  the bundled app with a real active host window and a nonparticipating
+//  witness, and compares the value read immediately after
+//  `CATransaction.flush()` against the value the settled stable-read
+//  procedure accepts for the same probe.
+//
+//  A pass means product Tint no longer needs a multi-second lock: the system
+//  computes the matrix in-process, so any color in any gamut can be resolved
+//  in one commit instead of captured over several seconds.
+//
+
+#if os(macOS)
+import AppKit
+import QuartzCore
+import SwiftUI
+
+private final class GlassLabTintSyncWitnessWindow: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
+struct GlassLabTintSyncResolutionRow: Codable, Sendable {
+    var colorID: String
+    var sourceColor: GlassMaterialColorValue
+    /// Whether every requested component sits inside the certified
+    /// synthesis domain. Out-of-domain rows are the point of the experiment.
+    var isInCertifiedDomain: Bool
+    var cell: GlassLabTintSweepCell
+    /// Read immediately after `layout` + `CATransaction.flush()`.
+    var flushMatrix: [Float]?
+    /// Read after the ordinary settle plus consecutive-stable-read procedure.
+    var settledMatrix: [Float]?
+    var maximumDifference: Double?
+    /// Whether the paired Main-On proof held at flush time.
+    var pairedProofAtFlush: Bool
+    var pairedProofWhenSettled: Bool
+    var passed: Bool
+    var failure: String?
+}
+
+struct GlassLabTintSyncResolutionDocument: Codable, Sendable {
+    var formatVersion: Int
+    var capturedAt: String
+    var operatingSystem: String
+    var environment: GlassLabTintParameterizationSweepDocument.Environment
+    var rows: [GlassLabTintSyncResolutionRow]
+    var passed: Bool
+
+    var report: String {
+        let compared = rows.filter { $0.maximumDifference != nil }
+        let worst = compared.compactMap(\.maximumDifference).max() ?? 0
+        let outOfDomain = compared.filter { !$0.isInCertifiedDomain }
+        let worstOutOfDomain = outOfDomain
+            .compactMap(\.maximumDifference).max() ?? 0
+        return [
+            "== Tint Synchronous Resolution ==",
+            "Rows: \(rows.count) · compared: \(compared.count)",
+            "Passed: \(rows.filter(\.passed).count)/\(rows.count)",
+            "Worst flush-vs-settled difference: \(worst)",
+            "Out-of-domain rows: \(outOfDomain.count) · worst: "
+                + "\(worstOutOfDomain)",
+            "Paired proof at flush: "
+                + "\(rows.filter(\.pairedProofAtFlush).count)/\(rows.count)",
+        ].joined(separator: "\n")
+    }
+
+    var failureReport: String {
+        let failures = rows.filter { !$0.passed }
+        guard !failures.isEmpty else { return "No failures." }
+        return failures.map {
+            "FAIL \($0.colorID) \($0.cell): "
+                + ($0.failure ?? "unspecified")
+        }.joined(separator: "\n")
+    }
+}
+
+extension GlassLabView {
+    /// Colors chosen to separate the two questions: in-domain colors check
+    /// that a flush read agrees with today's accepted procedure, and P3
+    /// colors (which leave the certified domain once converted to extended
+    /// sRGB) check that the system resolver covers what synthesis cannot.
+    private static var tintSyncResolutionColors: [GlassLabTintSweepColor] {
+        func color(
+            _ id: String,
+            _ nsColor: NSColor,
+            alpha: Double = 0.8
+        ) -> GlassLabTintSweepColor? {
+            guard let value = GlassMaterialColorValue(
+                nsColor.withAlphaComponent(alpha)
+            ) else { return nil }
+            return GlassLabTintSweepColor(
+                id: id,
+                label: id,
+                red: value.red,
+                green: value.green,
+                blue: value.blue,
+                alpha: value.alpha
+            )
+        }
+        return [
+            color("srgb-coral", NSColor(
+                srgbRed: 0.92, green: 0.18, blue: 0.38, alpha: 1
+            )),
+            color("srgb-teal", NSColor(
+                srgbRed: 0.10, green: 0.72, blue: 0.55, alpha: 1
+            )),
+            color("srgb-gray-500", NSColor(
+                srgbRed: 0.5, green: 0.5, blue: 0.5, alpha: 1
+            )),
+            color("p3-c7cd28", NSColor(
+                displayP3Red: 199 / 255.0,
+                green: 205 / 255.0,
+                blue: 40 / 255.0,
+                alpha: 1
+            )),
+            color("p3-pure-red", NSColor(
+                displayP3Red: 1, green: 0, blue: 0, alpha: 1
+            )),
+            color("p3-vivid-green", NSColor(
+                displayP3Red: 0.1, green: 0.95, blue: 0.2, alpha: 1
+            )),
+        ].compactMap { $0 }
+    }
+
+    func performTintSyncResolutionCheck() async throws
+        -> GlassLabTintSyncResolutionDocument {
+        guard let hostWindow = state.testWindow.liveControlWindow else {
+            throw GlassLabTintSweepError.noHostWindow
+        }
+        guard let probeHost = state.testWindow.liveControlProbeHost,
+              probeHost.window === hostWindow else {
+            throw GlassLabTintSweepError.probeHostUnavailable
+        }
+        let session = GlassLabTintSyncSession(
+            hostWindow: hostWindow,
+            mainProbeHost: probeHost
+        )
+        let rows = try await session.run(colors: Self.tintSyncResolutionColors)
+        let current = GlassMaterialStyleAtlas.Environment.current(
+            for: hostWindow.screen
+        )
+        return GlassLabTintSyncResolutionDocument(
+            formatVersion: 1,
+            capturedAt: ISO8601DateFormatter().string(from: Date()),
+            operatingSystem: ProcessInfo.processInfo
+                .operatingSystemVersionString,
+            environment: .init(
+                osMajorVersion: current.resolvedOSMajorVersion
+                    ?? ProcessInfo.processInfo
+                        .operatingSystemVersion.majorVersion,
+                displaySignature: current.displaySignature,
+                atlasSchemaVersion: GlassMaterialStyleAtlas
+                    .currentSchemaVersion
+            ),
+            rows: rows,
+            passed: rows.allSatisfy(\.passed)
+        )
+    }
+}
+
+@MainActor
+private final class GlassLabTintSyncSession {
+    private struct ProbePair {
+        var mainOnCell: GlassMaterialStyleAtlas.Cell
+        var mainOn: NSGlassEffectView
+        var mainOff: NSGlassEffectView
+    }
+
+    private weak var hostWindow: NSWindow?
+    private weak var mainProbeHost: NSView?
+    private var mainContainer: NSView?
+    private var witnessWindow: GlassLabTintSyncWitnessWindow?
+    private var witnessContainer: NSView?
+
+    init(hostWindow: NSWindow, mainProbeHost: NSView) {
+        self.hostWindow = hostWindow
+        self.mainProbeHost = mainProbeHost
+    }
+
+    func run(
+        colors: [GlassLabTintSweepColor]
+    ) async throws -> [GlassLabTintSyncResolutionRow] {
+        guard let hostWindow, let mainProbeHost else {
+            throw GlassLabTintSweepError.noHostWindow
+        }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        hostWindow.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for: .milliseconds(250))
+        guard hostParticipates else {
+            throw GlassLabTintSweepError.hostNotParticipating
+        }
+
+        let container = makeClippedContainer()
+        mainProbeHost.addSubview(container)
+        mainContainer = container
+        guard prepareWitnessWindow(), let witnessContainer else {
+            tearDown()
+            throw GlassLabTintSweepError.witnessUnavailable
+        }
+        let pairs = makeProbePairs(
+            mainContainer: container,
+            witnessContainer: witnessContainer
+        )
+        defer {
+            pairs.forEach {
+                $0.mainOn.removeFromSuperview()
+                $0.mainOff.removeFromSuperview()
+            }
+            tearDown()
+        }
+
+        mainProbeHost.layoutSubtreeIfNeeded()
+        witnessWindow?.contentView?.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(600))
+        guard hostParticipates, witnessIsMainOff else {
+            throw GlassLabTintSweepError.witnessParticipated
+        }
+
+        var rows: [GlassLabTintSyncResolutionRow] = []
+        for color in colors {
+            try Task.checkCancellation()
+            guard hostParticipates else {
+                throw GlassLabTintSweepError.hostNotParticipating
+            }
+            guard witnessIsMainOff else {
+                throw GlassLabTintSweepError.witnessParticipated
+            }
+            rows += try await measure(color: color, pairs: pairs)
+        }
+        return rows
+    }
+
+    private func measure(
+        color: GlassLabTintSweepColor,
+        pairs: [ProbePair]
+    ) async throws -> [GlassLabTintSyncResolutionRow] {
+        guard let mainProbeHost else { return [] }
+        let inDomain = [color.red, color.green, color.blue]
+            .allSatisfy { $0 >= 0 && $0 <= 1 }
+
+        // Clear first so a stale matrix from the previous color cannot be
+        // mistaken for a synchronous resolution of this one.
+        for pair in pairs {
+            pair.mainOn.tintColor = nil
+            pair.mainOff.tintColor = nil
+        }
+        mainProbeHost.layoutSubtreeIfNeeded()
+        witnessWindow?.contentView?.layoutSubtreeIfNeeded()
+        CATransaction.flush()
+
+        for pair in pairs {
+            pair.mainOn.tintColor = color.nsColor
+            pair.mainOff.tintColor = color.nsColor
+        }
+        mainProbeHost.layoutSubtreeIfNeeded()
+        witnessWindow?.contentView?.layoutSubtreeIfNeeded()
+        // The whole claim under test: one commit, no sleeping.
+        CATransaction.flush()
+
+        var flushMatrices: [GlassMaterialStyleAtlas.Cell: [Float]] = [:]
+        var flushProof: [GlassMaterialStyleAtlas.Cell: Bool] = [:]
+        for pair in pairs {
+            let mainOffCell = Self.mainOffCell(for: pair.mainOnCell)
+            if let matrix = GlassMaterialStyleAtlas.captureTintMatrix(
+                from: pair.mainOn
+            ) {
+                flushMatrices[pair.mainOnCell] = matrix.matrix
+            }
+            if let matrix = GlassMaterialStyleAtlas.captureTintMatrix(
+                from: pair.mainOff
+            ) {
+                flushMatrices[mainOffCell] = matrix.matrix
+            }
+            let proof: Bool
+            if let onStyle = GlassMaterialStyleSample.capture(from: pair.mainOn),
+               let offStyle = GlassMaterialStyleSample.capture(
+                from: pair.mainOff
+               ) {
+                proof = GlassMaterialStyleAtlas.verifiesMainOn(
+                    onStyle,
+                    against: offStyle
+                )
+            } else {
+                proof = false
+            }
+            flushProof[pair.mainOnCell] = proof
+            flushProof[mainOffCell] = proof
+        }
+
+        // Now the accepted procedure, for the reference value.
+        try await Task.sleep(for: .milliseconds(350))
+        var settled: [GlassMaterialStyleAtlas.Cell: [Float]] = [:]
+        var settledProof: [GlassMaterialStyleAtlas.Cell: Bool] = [:]
+        var previous: [GlassMaterialStyleAtlas.Cell: [Float]] = [:]
+        var stable: [GlassMaterialStyleAtlas.Cell: Int] = [:]
+        for _ in 0..<24 where settled.count < pairs.count * 2 {
+            try await Task.sleep(for: .milliseconds(100))
+            try Task.checkCancellation()
+            guard hostParticipates else {
+                throw GlassLabTintSweepError.hostNotParticipating
+            }
+            guard witnessIsMainOff else {
+                throw GlassLabTintSweepError.witnessParticipated
+            }
+            for pair in pairs {
+                let mainOffCell = Self.mainOffCell(for: pair.mainOnCell)
+                guard let onStyle = GlassMaterialStyleSample.capture(
+                    from: pair.mainOn
+                ), let offStyle = GlassMaterialStyleSample.capture(
+                    from: pair.mainOff
+                ), let onMatrix = GlassMaterialStyleAtlas.captureTintMatrix(
+                    from: pair.mainOn
+                ), let offMatrix = GlassMaterialStyleAtlas.captureTintMatrix(
+                    from: pair.mainOff
+                ) else {
+                    stable[pair.mainOnCell] = 0
+                    continue
+                }
+                let proof = GlassMaterialStyleAtlas.verifiesMainOn(
+                    onStyle,
+                    against: offStyle
+                )
+                if previous[pair.mainOnCell] == onMatrix.matrix,
+                   previous[mainOffCell] == offMatrix.matrix {
+                    let count = (stable[pair.mainOnCell] ?? 0) + 1
+                    stable[pair.mainOnCell] = count
+                    if count >= 2 {
+                        settled[pair.mainOnCell] = onMatrix.matrix
+                        settled[mainOffCell] = offMatrix.matrix
+                        settledProof[pair.mainOnCell] = proof
+                        settledProof[mainOffCell] = proof
+                    }
+                } else {
+                    previous[pair.mainOnCell] = onMatrix.matrix
+                    previous[mainOffCell] = offMatrix.matrix
+                    stable[pair.mainOnCell] = 0
+                }
+            }
+        }
+
+        var rows: [GlassLabTintSyncResolutionRow] = []
+        for pair in pairs {
+            for cell in [pair.mainOnCell, Self.mainOffCell(for: pair.mainOnCell)] {
+                let flush = flushMatrices[cell]
+                let reference = settled[cell]
+                var difference: Double?
+                if let flush, let reference, flush.count == reference.count {
+                    difference = zip(flush, reference)
+                        .map { abs(Double($0) - Double($1)) }
+                        .max() ?? 0
+                }
+                var failure: String?
+                if flush == nil {
+                    failure = "no matrix present after CATransaction.flush()"
+                } else if reference == nil {
+                    failure = "the settled procedure never accepted a value"
+                } else if let difference, difference > 0.0002 {
+                    failure = "flush and settled values differ by \(difference)"
+                }
+                rows.append(GlassLabTintSyncResolutionRow(
+                    colorID: color.id,
+                    sourceColor: GlassMaterialColorValue(
+                        red: color.red,
+                        green: color.green,
+                        blue: color.blue,
+                        alpha: color.alpha
+                    ),
+                    isInCertifiedDomain: inDomain,
+                    cell: GlassLabTintSweepCell(cell),
+                    flushMatrix: flush,
+                    settledMatrix: reference,
+                    maximumDifference: difference,
+                    pairedProofAtFlush: flushProof[cell] ?? false,
+                    pairedProofWhenSettled: settledProof[cell] ?? false,
+                    passed: failure == nil,
+                    failure: failure
+                ))
+            }
+        }
+        return rows
+    }
+
+    private var hostParticipates: Bool {
+        guard let hostWindow else { return false }
+        return (hostWindow.isMainWindow || hostWindow.isKeyWindow)
+            && NSApp.isActive
+    }
+
+    private var witnessIsMainOff: Bool {
+        guard let window = witnessWindow else { return false }
+        return window.isVisible
+            && !window.isMainWindow
+            && !window.isKeyWindow
+            && NSApp.mainWindow !== window
+            && NSApp.keyWindow !== window
+    }
+
+    private func prepareWitnessWindow() -> Bool {
+        let frame = hostWindow?.screen?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1, height: 1)
+        let window = GlassLabTintSyncWitnessWindow(
+            contentRect: NSRect(
+                x: frame.minX,
+                y: frame.minY,
+                width: 1,
+                height: 1
+            ),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.ignoresMouseEvents = true
+        window.isReleasedWhenClosed = false
+        window.hidesOnDeactivate = false
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
+        content.wantsLayer = true
+        let container = makeClippedContainer()
+        content.addSubview(container)
+        window.contentView = content
+        witnessWindow = window
+        witnessContainer = container
+        window.orderFrontRegardless()
+        return true
+    }
+
+    private func tearDown() {
+        witnessWindow?.orderOut(nil)
+        witnessWindow = nil
+        witnessContainer = nil
+        mainContainer?.removeFromSuperview()
+        mainContainer = nil
+    }
+
+    private func makeClippedContainer() -> NSView {
+        let container = NSView(frame: .zero)
+        container.wantsLayer = true
+        container.layer?.masksToBounds = true
+        return container
+    }
+
+    private func makeProbePairs(
+        mainContainer: NSView,
+        witnessContainer: NSView
+    ) -> [ProbePair] {
+        var pairs: [ProbePair] = []
+        for isLight in [true, false] {
+            for isClear in [false, true] {
+                let mainOnCell = GlassMaterialStyleAtlas.Cell(
+                    isLightAppearance: isLight,
+                    isClear: isClear,
+                    hasMainParticipation: true
+                )
+                pairs.append(ProbePair(
+                    mainOnCell: mainOnCell,
+                    mainOn: makeProbe(cell: mainOnCell, in: mainContainer),
+                    mainOff: makeProbe(
+                        cell: Self.mainOffCell(for: mainOnCell),
+                        in: witnessContainer
+                    )
+                ))
+            }
+        }
+        return pairs
+    }
+
+    private func makeProbe(
+        cell: GlassMaterialStyleAtlas.Cell,
+        in container: NSView
+    ) -> NSGlassEffectView {
+        let probe = NSGlassEffectView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: 480,
+            height: 200
+        ))
+        probe.appearance = NSAppearance(
+            named: cell.isLightAppearance ? .aqua : .darkAqua
+        )
+        GlassMaterialAccess.setVariant(cell.isClear ? 2 : 1, on: probe)
+        container.addSubview(probe)
+        return probe
+    }
+
+    private static func mainOffCell(
+        for mainOn: GlassMaterialStyleAtlas.Cell
+    ) -> GlassMaterialStyleAtlas.Cell {
+        GlassMaterialStyleAtlas.Cell(
+            isLightAppearance: mainOn.isLightAppearance,
+            isClear: mainOn.isClear,
+            hasMainParticipation: false
+        )
+    }
+}
+#endif
