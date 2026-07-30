@@ -277,14 +277,19 @@ struct GlassLabView: View {
         switch selectedBenchPage {
         case .atlas:
             state.rendererMode = .recipe
-            if selectedRecipePage == .materialize || selectedRecipePage == .tint {
+            // `.passes` counts as a research page here too: leaving Probes
+            // for this page must disarm the recursive pass audit, which
+            // only the Probes (or Recipe Passes) UI consumes.
+            if selectedRecipePage == .materialize || selectedRecipePage == .tint
+                || selectedRecipePage == .passes {
                 selectedRecipePage = .general
             }
             if selectedSemanticPage == .transition {
                 selectedSemanticPage = .general
             }
         case .exports:
-            if selectedRecipePage == .materialize || selectedRecipePage == .tint {
+            if selectedRecipePage == .materialize || selectedRecipePage == .tint
+                || selectedRecipePage == .passes {
                 selectedRecipePage = .general
             }
             if selectedSemanticPage == .transition {

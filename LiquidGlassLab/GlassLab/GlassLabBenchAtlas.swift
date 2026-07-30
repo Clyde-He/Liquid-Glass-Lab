@@ -80,7 +80,7 @@ extension GlassLabView {
                     ) {
                         captureStyleAtlas()
                     }
-                    .disabled(isCapturingAtlas)
+                    .disabled(isCapturingAtlas || isRunningAtlasReadback)
                     if isCapturingAtlas {
                         Button("Cancel") { atlasCaptureTask?.cancel() }
                     }
@@ -152,8 +152,14 @@ extension GlassLabView {
                     .foregroundStyle(.secondary)
             }
 
+            // Height caps at the atlas's top sampled short side (320pt):
+            // `sample(for:at:)` clamps above the final capture, so exposing a
+            // larger short side would silently serve the 320pt payload —
+            // wrong for size-dependent fields like `marginWidth`. The width
+            // may exceed it freely: only `min(width, height)` selects the
+            // sample, so the short side never exceeds 320 in these ranges.
             labeledSlider("Content Width", value: hudContentWidthBinding, in: 120...560)
-            labeledSlider("Content Height", value: hudContentHeightBinding, in: 48...340)
+            labeledSlider("Content Height", value: hudContentHeightBinding, in: 48...320)
 
             Text(hudStatusSummary)
                 .font(.system(size: 11, design: .monospaced))
@@ -514,7 +520,11 @@ extension GlassLabView {
     // MARK: - Atlas capture
 
     func captureStyleAtlas() {
-        guard !isCapturingAtlas else { return }
+        // Mutually exclusive with the interpolation readback: both drive the
+        // same renderer, appearance, variant, and geometry state between
+        // their sleeps, so running them together would let each label
+        // samples under the other's context.
+        guard !isCapturingAtlas, !isRunningAtlasReadback else { return }
         guard !state.hasActiveOverrides else {
             atlasStatus = AtlasBenchError.overridesActive.errorDescription
             return
@@ -935,6 +945,23 @@ extension GlassLabView {
                         Double(values.1)
                     )
                 }
+                for (key, liveValue) in pair.0.inputs {
+                    guard let atlasValue = pair.1.inputs[key] else {
+                        offenders.append(
+                            "matrix\(slot).\(key): missing from atlas"
+                        )
+                        continue
+                    }
+                    note("matrix\(slot).\(key)", liveValue, atlasValue)
+                }
+                if pair.0.nilInputKeys != pair.1.nilInputKeys {
+                    let delta = pair.0.nilInputKeys
+                        .symmetricDifference(pair.1.nilInputKeys)
+                    offenders.append(
+                        "matrix\(slot) nilInputKeys differ: "
+                            + delta.sorted().joined(separator: ", ")
+                    )
+                }
             }
         } else {
             offenders.append("matrix slot count mismatch")
@@ -942,12 +969,29 @@ extension GlassLabView {
 
         if live.rims.count == interpolated.rims.count {
             for (slot, pair) in zip(live.rims, interpolated.rims).enumerated() {
+                note(
+                    "rim\(slot).layerOpacity",
+                    pair.0.layerOpacity,
+                    pair.1.layerOpacity
+                )
                 for (key, liveValue) in pair.0.values {
                     guard let atlasValue = pair.1.values[key] else {
                         offenders.append("rim\(slot).\(key): missing from atlas")
                         continue
                     }
                     note("rim\(slot).\(key)", liveValue, atlasValue)
+                }
+                for (key, liveValue) in pair.0.colors {
+                    guard let atlasValue = pair.1.colors[key] else {
+                        offenders.append(
+                            "rim\(slot).\(key): color missing from atlas"
+                        )
+                        continue
+                    }
+                    note("rim\(slot).\(key).r", liveValue.red, atlasValue.red)
+                    note("rim\(slot).\(key).g", liveValue.green, atlasValue.green)
+                    note("rim\(slot).\(key).b", liveValue.blue, atlasValue.blue)
+                    note("rim\(slot).\(key).a", liveValue.alpha, atlasValue.alpha)
                 }
             }
         } else {
@@ -982,6 +1026,13 @@ extension GlassLabView {
         var steps: [[String: Any]] = []
         func step(_ name: String, _ passed: Bool, _ detail: String) {
             steps.append(["name": name, "passed": passed, "detail": detail])
+            // Stream each step as it lands: the run takes minutes and stalls
+            // are otherwise invisible until exit. stderr writes are
+            // unbuffered, so a stuck run shows its last completed step.
+            FileHandle.standardError.write(Data(
+                "[\(steps.count)] \(passed ? "PASS" : "FAIL") \(name) — \(detail)\n"
+                    .utf8
+            ))
         }
 
         // Reuse a compatible saved atlas so iterating on the acceptance
@@ -995,6 +1046,9 @@ extension GlassLabView {
             atlas = saved
             step("atlas-source", true, "reused saved atlas")
         } else {
+            FileHandle.standardError.write(Data(
+                "no compatible saved atlas — running the full probe sweep (minutes, needs the app active)\n".utf8
+            ))
             atlas = try await captureStyleAtlasDocument()
             _ = try? saveAtlasToDisk(atlas)
             step("atlas-source", true, "fresh capture")
@@ -1288,25 +1342,35 @@ extension GlassLabView {
                         )
                     )
 
-                    // At G = 1 the written colors and grade matrices equal
-                    // the sample exactly — the appearance axis lives largely
-                    // here, so numeric checks alone would miss a restamp
-                    // that reverts only colors and grades (measured on an
-                    // appearance switch).
+                    // At G = 1 the written payload equals the sample exactly
+                    // — the appearance axis lives largely in the colors and
+                    // grades, so a face-opacity endpoint alone would miss a
+                    // restamp that reverts only part of the transplant. Poll
+                    // every group: the full numeric shader vector, the color
+                    // inputs, both grade matrices, and each rim's gate,
+                    // payload, and colors.
                     hud.setStrength(1)
+                    var numericsOK = false
                     var colorsOK = false
                     var gradesOK = false
+                    var rimsOK = false
                     for _ in 0..<20 {
                         try await Task.sleep(for: .milliseconds(200))
                         if let target =
                             GlassMaterialAccess.glassBackgroundTarget(
                                 under: glass
                             ) {
-                            let colors = GlassMaterialAccess.readTypedInputs(
+                            let inputs = GlassMaterialAccess.readTypedInputs(
                                 from: target
-                            ).colors
+                            )
+                            numericsOK = expected.numeric.allSatisfy {
+                                key, value in
+                                inputs.numeric[key].map {
+                                    abs($0 - value) < 1e-3
+                                } ?? false
+                            }
                             colorsOK = expected.colors.allSatisfy { key, value in
-                                colors[key].map {
+                                inputs.colors[key].map {
                                     GlassMaterialAccess.colorsMatch(
                                         $0,
                                         value.nsColor
@@ -1314,6 +1378,26 @@ extension GlassLabView {
                                 } ?? false
                             }
                         }
+                        let rimLayers = GlassMaterialAccess.rimLayers(
+                            under: glass
+                        )
+                        rimsOK = rimLayers.count == expected.rims.count
+                            && zip(rimLayers, expected.rims).allSatisfy {
+                                layer, rim in
+                                var rimColors: [String: NSColor] = [:]
+                                for (key, color) in rim.colors {
+                                    rimColors[key] = color.nsColor
+                                }
+                                return abs(
+                                    GlassMaterialAccess.rimOpacity(of: layer)
+                                        - rim.layerOpacity
+                                ) < 1e-3
+                                    && GlassMaterialAccess.rimPayloadMatches(
+                                        values: rim.values,
+                                        colors: rimColors,
+                                        on: layer
+                                    )
+                            }
                         let gradeLayers =
                             GlassMaterialAccess.untintedMatrixLayers(
                                 under: glass
@@ -1337,8 +1421,13 @@ extension GlassLabView {
                                 }
                             }
                         }
-                        if colorsOK, gradesOK { break }
+                        if numericsOK, colorsOK, gradesOK, rimsOK { break }
                     }
+                    step(
+                        "shader-tracks-atlas \(context)",
+                        numericsOK,
+                        "\(expected.numeric.count) numeric inputs vs atlas at G=1"
+                    )
                     step(
                         "colors-track-atlas \(context)",
                         colorsOK,
@@ -1348,6 +1437,11 @@ extension GlassLabView {
                         "grades-track-atlas \(context)",
                         gradesOK,
                         "both untinted matrices vs atlas at G=1"
+                    )
+                    step(
+                        "rims-track-atlas \(context)",
+                        rimsOK,
+                        "\(expected.rims.count) rim gates + payloads vs atlas at G=1"
                     )
                 }
             }
@@ -1967,7 +2061,12 @@ extension GlassLabView {
     }
 
     private func restoreProbeContext(_ context: AtlasProbeRestoreContext) {
-        state.rendererMode = context.rendererMode
+        // The sidebar stays usable during a capture. If the user moved to a
+        // section that pins its own renderer, that section wins over the
+        // snapshot — blindly restoring would leave its controls backed by
+        // the wrong test surface until the next navigation change.
+        state.rendererMode = state.selectedSection.requiredRendererMode
+            ?? context.rendererMode
         selectedRecipePage = context.recipePage
         state.variant = context.variant
         state.subvariant = context.subvariant

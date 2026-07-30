@@ -138,10 +138,19 @@ extension GlassLabView {
                 ?? removalWarmupFlag
                 ?? goldenFlag
                 ?? atlasFlag
-                ?? planFlag,
-              arguments.index(after: flagIndex) < arguments.endIndex
-                || planFlag != nil else {
+                ?? planFlag else {
             return
+        }
+        // A capture flag without its output path must fail loudly: silently
+        // falling through leaves a normal GUI app idling in the event loop,
+        // which reads as a hung verification from the outside.
+        guard arguments.index(after: flagIndex) < arguments.endIndex
+                || planFlag != nil else {
+            FileHandle.standardError.write(Data(
+                "\(arguments[flagIndex]) requires an output path argument\n"
+                    .utf8
+            ))
+            exit(64)
         }
         // The plan is pure data, so it can be reported without a window, an
         // activation, or a single private read. Checking the shape of a capture

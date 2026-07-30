@@ -82,8 +82,17 @@ final class GlassLabHUDPanelController {
     // MARK: Controls (the product contract)
 
     func setAtlas(_ atlas: GlassMaterialStyleAtlas?) {
+        let previous = self.atlas
         self.atlas = atlas
         refreeze()
+        // A refused replacement (stale environment, incomplete coverage)
+        // leaves the glass rendering the previously frozen atlas — keep the
+        // sizing source on that same atlas so the panel insets stay
+        // consistent with what is actually displayed. `lastFreezeSucceeded`
+        // still reports the refusal to the Bench readout.
+        if atlas != nil, !lastFreezeSucceeded {
+            self.atlas = previous
+        }
         layoutPanel()
     }
 
