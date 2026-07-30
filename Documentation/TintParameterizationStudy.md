@@ -441,3 +441,56 @@ out-of-domain Display P3 colors resolved at five alphas each (0.15 / 0.4 /
 (color, cell) groups: coefficient 18 equals the requested alpha everywhere,
 and the other nineteen coefficients are **bit-identical** (maximum difference
 exactly `0`). The assumption is now measured where it is used.
+
+### Correction: the narrow write path was not narrow until `086489c`
+
+The first product implementation of commit-time resolution reported a
+per-color install cost that was structurally incomplete, and the record should
+not be read without this correction.
+
+`applyConfiguration` assigned `glassView.materialTint` before calling
+`restampTintOverlay`. That setter assigns `materialStrength.tintColor`, whose
+`didSet` — unlike `value`, it carried no equality guard — ran the ordinary
+`apply()`, which for a frozen material is a complete `applyFrozen`: full
+destination-topology validation, the whole curve over every numeric and color
+key, `writeShader`, every matrix layer's coefficients and scalar inputs, and
+the rim. The narrow restamp then wrote its 20 coefficients on top of that.
+
+So every streamed color paid the whole-style write anyway, and the diagnostic
+that was supposed to measure the narrow path started counting *after* the
+assignment that did the expensive work. The `freeze 2 / restamp 898` counts
+were accurate; the per-color cost they implied was not.
+
+`086489c` separates Tint-branch materialization from the frozen writer's
+controlled color, so a tint-only change no longer triggers `apply()`. A
+strength or appearance change still takes the full path through its own
+`didSet`. The lesson generalizes: a counter placed inside the fast path proves
+nothing about total cost when a slower path runs unconditionally beside it.
+
+### Post-fix drag profile (macOS 26.6, out-of-domain colors)
+
+Measured after that fix, dragging the hue wheel through colors the certified
+closed form cannot cover, so every color required a real commit resolution.
+658 resolutions across the session:
+
+| Quantity | Result |
+| --- | --- |
+| Narrow restamp (`install`) | `0.0 ms`; **0** restamps crossed the 4 ms log threshold |
+| Resolution (asking the system) | median 5.2, p95 7.7, max 10.4 ms |
+| Request → on screen | median 6.7, **p95 9.2**, max 11.9 ms |
+| Resolution cadence | peak 58 per second |
+| Presentation | 61 frames/s, `longestGap` 16.7 ms, `dropped(>2frames)=0`, sustained 20+ s |
+| Full freezes | **1** in the whole session — the Tint branch insertion, `installed=true` in 0.5 ms |
+| Probe warm-up | ready after 1 poll, ~4 ms, on both launches |
+
+Two readings matter. The p95 request-to-screen latency of 9.2 ms is inside a
+single 16.7 ms frame, so a color typically resolves and presents in the frame
+that requested it. And the peak cadence of 58 per second is the design ceiling
+— one resolution per display-link tick at 61 frames/s — which says the path is
+saturating the frame clock rather than being held up behind something else.
+The earlier async-continuation implementation managed 10–20 per second and
+appeared to heal whenever the drag paused.
+
+The one-time probe materialization cost that the previous section left open is
+therefore ~4 ms, paid when a tint first enters the configuration rather than
+during a drag.
