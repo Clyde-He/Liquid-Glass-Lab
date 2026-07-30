@@ -45,12 +45,26 @@ struct GlassLabTintSyncResolutionRow: Codable, Sendable {
     var failure: String?
 }
 
+struct GlassLabTintSyncTiming: Codable, Sendable {
+    var colorID: String
+    /// Two commits: clear-and-flush, then set-and-flush.
+    var clearFlushMilliseconds: Double
+    var setFlushMilliseconds: Double
+    /// Reading the 16 tint matrices back off the private trees.
+    var matrixReadbackMilliseconds: Double
+    /// Full paired style capture plus `verifiesMainOn` for all eight pairs —
+    /// what the product resolver currently repeats for every color.
+    var pairedProofMilliseconds: Double
+    var totalMilliseconds: Double
+}
+
 struct GlassLabTintSyncResolutionDocument: Codable, Sendable {
     var formatVersion: Int
     var capturedAt: String
     var operatingSystem: String
     var environment: GlassLabTintParameterizationSweepDocument.Environment
     var rows: [GlassLabTintSyncResolutionRow]
+    var timings: [GlassLabTintSyncTiming]
     var passed: Bool
 
     var report: String {
@@ -68,7 +82,21 @@ struct GlassLabTintSyncResolutionDocument: Codable, Sendable {
                 + "\(worstOutOfDomain)",
             "Paired proof at flush: "
                 + "\(rows.filter(\.pairedProofAtFlush).count)/\(rows.count)",
+            "-- per-color cost (ms) --",
         ].joined(separator: "\n")
+            + "\n"
+            + timings.map {
+                String(
+                    format: "%-16s clearFlush %6.1f  setFlush %6.1f  "
+                        + "readback %6.1f  pairedProof %6.1f  total %6.1f",
+                    ($0.colorID as NSString).utf8String!,
+                    $0.clearFlushMilliseconds,
+                    $0.setFlushMilliseconds,
+                    $0.matrixReadbackMilliseconds,
+                    $0.pairedProofMilliseconds,
+                    $0.totalMilliseconds
+                )
+            }.joined(separator: "\n")
     }
 
     var failureReport: String {
@@ -143,6 +171,7 @@ extension GlassLabView {
             mainProbeHost: probeHost
         )
         let rows = try await session.run(colors: Self.tintSyncResolutionColors)
+        let timings = session.timings
         let current = GlassMaterialStyleAtlas.Environment.current(
             for: hostWindow.screen
         )
@@ -160,6 +189,7 @@ extension GlassLabView {
                     .currentSchemaVersion
             ),
             rows: rows,
+            timings: timings,
             passed: rows.allSatisfy(\.passed)
         )
     }
@@ -237,6 +267,8 @@ private final class GlassLabTintSyncSession {
         return rows
     }
 
+    private(set) var timings: [GlassLabTintSyncTiming] = []
+
     private func measure(
         color: GlassLabTintSweepColor,
         pairs: [ProbePair]
@@ -245,6 +277,7 @@ private final class GlassLabTintSyncSession {
         let inDomain = [color.red, color.green, color.blue]
             .allSatisfy { $0 >= 0 && $0 <= 1 }
 
+        let tStart = DispatchTime.now().uptimeNanoseconds
         // Clear first so a stale matrix from the previous color cannot be
         // mistaken for a synchronous resolution of this one.
         for pair in pairs {
@@ -254,6 +287,7 @@ private final class GlassLabTintSyncSession {
         mainProbeHost.layoutSubtreeIfNeeded()
         witnessWindow?.contentView?.layoutSubtreeIfNeeded()
         CATransaction.flush()
+        let tAfterClear = DispatchTime.now().uptimeNanoseconds
 
         for pair in pairs {
             pair.mainOn.tintColor = color.nsColor
@@ -263,6 +297,34 @@ private final class GlassLabTintSyncSession {
         witnessWindow?.contentView?.layoutSubtreeIfNeeded()
         // The whole claim under test: one commit, no sleeping.
         CATransaction.flush()
+        let tAfterSet = DispatchTime.now().uptimeNanoseconds
+
+        // Isolate the two readback costs the product resolver pays per color.
+        var readbackMatrixCount = 0
+        for pair in pairs {
+            if GlassMaterialStyleAtlas.captureTintMatrix(from: pair.mainOn) != nil {
+                readbackMatrixCount += 1
+            }
+            if GlassMaterialStyleAtlas.captureTintMatrix(from: pair.mainOff) != nil {
+                readbackMatrixCount += 1
+            }
+        }
+        let tAfterReadback = DispatchTime.now().uptimeNanoseconds
+        for pair in pairs {
+            _ = GlassMaterialStyleSample.capture(from: pair.mainOn)
+            _ = GlassMaterialStyleSample.capture(from: pair.mainOff)
+        }
+        let tAfterProof = DispatchTime.now().uptimeNanoseconds
+        let ms = { (a: UInt64, b: UInt64) in Double(b - a) / 1_000_000 }
+        timings.append(GlassLabTintSyncTiming(
+            colorID: color.id,
+            clearFlushMilliseconds: ms(tStart, tAfterClear),
+            setFlushMilliseconds: ms(tAfterClear, tAfterSet),
+            matrixReadbackMilliseconds: ms(tAfterSet, tAfterReadback),
+            pairedProofMilliseconds: ms(tAfterReadback, tAfterProof),
+            totalMilliseconds: ms(tStart, tAfterProof)
+        ))
+        _ = readbackMatrixCount
 
         var flushMatrices: [GlassMaterialStyleAtlas.Cell: [Float]] = [:]
         var flushProof: [GlassMaterialStyleAtlas.Cell: Bool] = [:]

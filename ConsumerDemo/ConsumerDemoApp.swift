@@ -1,5 +1,54 @@
 import AppKit
 import GlassHUDMaterial
+import OSLog
+
+/// Measures what the logs so far could not: whether frames actually reach the
+/// screen at display cadence while Tint is being dragged. A display link ticks
+/// once per delivered frame, so a drop shows up as a gap here even when every
+/// library-side step is fast.
+@MainActor
+private final class FrameCadenceMonitor {
+    private let log = Logger(
+        subsystem: "design.specos.glasshud",
+        category: "frames"
+    )
+    private var link: CADisplayLink?
+    private var lastTick: CFTimeInterval = 0
+    private var windowStart: CFTimeInterval = 0
+    private var frames = 0
+    private var longestGapMilliseconds = 0.0
+    private var gapsOverTwoFrames = 0
+
+    func start(on view: NSView) {
+        let link = view.displayLink(
+            target: self,
+            selector: #selector(tick(_:))
+        )
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    @objc private func tick(_ sender: CADisplayLink) {
+        let now = sender.timestamp
+        defer { lastTick = now }
+        if windowStart == 0 { windowStart = now }
+        frames += 1
+        if lastTick > 0 {
+            let gap = (now - lastTick) * 1000
+            longestGapMilliseconds = max(longestGapMilliseconds, gap)
+            if gap > 33 { gapsOverTwoFrames += 1 }
+        }
+        let elapsed = now - windowStart
+        guard elapsed >= 1 else { return }
+        log.notice(
+            "presented \(self.frames, privacy: .public) frames/s longestGap=\(self.longestGapMilliseconds, format: .fixed(precision: 1), privacy: .public)ms dropped(>2frames)=\(self.gapsOverTwoFrames, privacy: .public)"
+        )
+        frames = 0
+        longestGapMilliseconds = 0
+        gapsOverTwoFrames = 0
+        windowStart = now
+    }
+}
 
 @main
 @MainActor
@@ -74,6 +123,7 @@ private final class ConsumerDemoAppDelegate:
     private var controlWindow: NSWindow?
     private var hudPanel: ConsumerHUDPanel?
     private var materialController: GlassHUDMaterialController?
+    private let frameMonitor = FrameCadenceMonitor()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let controlWindow = buildControlWindow()
@@ -91,6 +141,9 @@ private final class ConsumerDemoAppDelegate:
         materialController = controller
 
         hudPanel.orderFront(nil)
+        if let hudContent = hudPanel.contentView {
+            frameMonitor.start(on: hudContent)
+        }
         controlWindow.makeKeyAndOrderFront(nil)
         NSApp.activate()
         applyConfiguration()
@@ -351,6 +404,30 @@ private final class ConsumerDemoAppDelegate:
         ].joined(separator: " · ")
     }
 
+    private func tintCostSummary() -> String {
+        guard let d = materialController?.tintDiagnostics,
+              d.resolvedColorCount > 0 || d.warmUpMilliseconds != nil
+        else { return "" }
+        var parts: [String] = []
+        if let warm = d.warmUpMilliseconds {
+            parts.append(String(format: "warmUp %.0fms", warm))
+        }
+        if let latency = d.lastLatencyMilliseconds {
+            parts.append(String(format: "latency %.0fms", latency))
+        }
+        if let resolve = d.lastResolveMilliseconds {
+            parts.append(String(format: "commit %.1fms", resolve))
+        }
+        if let install = d.lastInstallMilliseconds {
+            parts.append(String(format: "install %.1fms", install))
+        }
+        parts.append("freeze \(d.fullFreezeCount)/restamp \(d.tintRestampCount)")
+        parts.append("attempts \(d.attemptsForLastColor)")
+        parts.append("resolved \(d.resolvedColorCount)")
+        parts.append("superseded \(d.supersededRequestCount)")
+        return "\n" + parts.joined(separator: " · ")
+    }
+
     private func render(status: GlassHUDMaterialController.Status) {
         let hudState = hudPanel.map {
             $0.isMainWindow || $0.isKeyWindow ? "yes" : "no"
@@ -374,6 +451,11 @@ private final class ConsumerDemoAppDelegate:
             statusLabel.stringValue =
                 prefix + "Status: fallback · \(describe(reason))"
         }
+        appendCost()
+    }
+
+    private func appendCost() {
+        statusLabel.stringValue += tintCostSummary()
     }
 
     private func describe(

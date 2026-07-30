@@ -55,11 +55,28 @@ JSON files.
 
 `normal` and `muted` are product semantics, not trusted labels in a JSON file.
 Both are installed from the same paired atlas transaction. On a certified
-major a requested Tint is available in the same synchronous configuration
-update. On other system majors — and for extended-range colors outside the
-certified synthesis domain — it is withheld until its exact RGB has verified
-matrices for the selected participation; the product never presents a
-hue-suppressed live fallback as a successfully configured Tint.
+major an in-gamut Tint is available in the same synchronous configuration
+update, resolved from the accepted closed form.
+
+A color the closed form does not cover — a Display P3 or wider-gamut pick,
+whose extended-sRGB components leave the certified `[0, 1]` domain, or any
+uncertified macOS major — is resolved by asking the system instead of
+extrapolating: the controller keeps a warm, invisible probe set in the host
+window plus a nonparticipating witness, sets the color, and reads the matrix
+back in one `CATransaction` commit. The first such color pays a one-time probe
+materialization (status reports `lockingTint`); every later color change costs
+one commit. Extrapolating the closed form past its certified domain would
+render visibly wrong hues, so the domain guard is deliberate, not
+conservative — see `Documentation/TintParameterizationStudy.md`.
+
+Both paths fail closed. The requested color appears only once every cell of
+the selected participation has a verified matrix, proven against the paired
+Main-Off witness; the product never presents a hue-suppressed live fallback as
+a successfully configured Tint. Commit-resolved overlays live on an in-memory
+Atlas copy and are never persisted. Commit resolution needs the host window to
+be genuinely main or key at the moment of the pick, which is true while a user
+picks a color in the app's own window; otherwise the color stays withheld and
+`status` reports `waitingForMainWindow`.
 
 Run the independent `GlassHUDConsumerDemo` app scheme from Xcode. To compile it
 from the command line:

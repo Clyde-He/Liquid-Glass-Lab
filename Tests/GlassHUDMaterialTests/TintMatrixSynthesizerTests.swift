@@ -403,6 +403,47 @@ final class TintMatrixSynthesizerTests: XCTestCase {
     }
 
     @MainActor
+    func testWiderGamutColorsLeaveTheCertifiedSynthesisDomain() throws {
+        // The reported #C7CD28 in Display P3, plus two saturated P3 colors.
+        // Converted to extended sRGB these carry components outside [0, 1],
+        // where the fitted closed form is wrong by 0.24 to 0.57 (see
+        // Golden/macOS-26/tint-sync-resolution.json). Synthesis must refuse
+        // them on every certified major so the commit resolver takes over.
+        let cell = GlassMaterialStyleAtlas.Cell(
+            isLightAppearance: true,
+            isClear: false,
+            hasMainParticipation: true
+        )
+        let wideGamut = [
+            NSColor(
+                displayP3Red: 199 / 255.0,
+                green: 205 / 255.0,
+                blue: 40 / 255.0,
+                alpha: 0.8
+            ),
+            NSColor(displayP3Red: 1, green: 0, blue: 0, alpha: 0.8),
+            NSColor(displayP3Red: 0.1, green: 0.95, blue: 0.2, alpha: 0.8),
+        ]
+        for color in wideGamut {
+            let source = try XCTUnwrap(GlassMaterialColorValue(color))
+            let components = [source.red, source.green, source.blue]
+            XCTAssertFalse(
+                components.allSatisfy { $0 >= 0 && $0 <= 1 },
+                "expected an out-of-domain component in \(components)"
+            )
+            for major in [26, 27] {
+                XCTAssertNil(
+                    GlassMaterialTintMatrixSynthesizer.matrix(
+                        for: source,
+                        cell: cell,
+                        osMajorVersion: major
+                    )
+                )
+            }
+        }
+    }
+
+    @MainActor
     func testControllerRequiresCompleteCapturedFallbackOnUnsupportedMajor()
         throws {
         let catalogURL = try XCTUnwrap(

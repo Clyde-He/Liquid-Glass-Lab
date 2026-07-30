@@ -26,6 +26,26 @@ final class CatalogTests: XCTestCase {
     }
 
     @MainActor
+    func testPackageContainsVerifiedMacOS26Catalog() throws {
+        let url = try XCTUnwrap(
+            GlassMaterialAtlasCatalog.bundledAtlasURL(forMacOSMajor: 26)
+        )
+        let atlas = try JSONDecoder().decode(
+            GlassMaterialStyleAtlas.self,
+            from: Data(contentsOf: url)
+        )
+
+        XCTAssertEqual(atlas.environment?.osMajorVersion, 26)
+        XCTAssertEqual(atlas.environment?.resolvedOSMajorVersion, 26)
+        XCTAssertFalse(atlas.hasTintMatrices)
+        XCTAssertTrue(
+            atlas.hasVerifiedMainOnCoverage(
+                shortSides: [48, 64, 96, 128, 160, 200, 320]
+            )
+        )
+    }
+
+    @MainActor
     func testCertifiedCatalogKeepsCompatibleCachedTintOverlay() throws {
         let catalogURL = try XCTUnwrap(
             GlassMaterialAtlasCatalog.bundledAtlasURL(forMacOSMajor: 27)

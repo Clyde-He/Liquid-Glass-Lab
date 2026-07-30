@@ -10,6 +10,7 @@
 
 #if os(macOS)
 import AppKit
+import OSLog
 
 @MainActor
 public final class GlassHUDMaterialController {
@@ -92,6 +93,33 @@ public final class GlassHUDMaterialController {
         case tintNotYetVerified
     }
 
+    /// Live cost of the commit-resolution path, so a perceived delay can be
+    /// attributed instead of guessed. Resolution itself measures ~7 ms on the
+    /// certification host; anything larger here is orchestration.
+    public struct TintDiagnostics: Equatable, Sendable {
+        /// Request-to-displayed latency for the most recent resolved color.
+        public var lastLatencyMilliseconds: Double?
+        /// Cost of the resolving commit alone.
+        public var lastResolveMilliseconds: Double?
+        /// One-time probe materialization.
+        public var warmUpMilliseconds: Double?
+        /// Commit attempts the most recent color needed.
+        public var attemptsForLastColor: Int = 0
+        /// Colors resolved through the system this session.
+        public var resolvedColorCount: Int = 0
+        /// Requests coalesced away because a newer pick arrived first.
+        public var supersededRequestCount: Int = 0
+        /// Times the full style transaction ran (base validation + whole-style
+        /// write + readback). Should be rare: base changes only.
+        public var fullFreezeCount: Int = 0
+        /// Times only the 20 Tint coefficients were restamped.
+        public var tintRestampCount: Int = 0
+        /// Cost of the most recent install, whichever path it took.
+        public var lastInstallMilliseconds: Double?
+    }
+
+    public private(set) var tintDiagnostics = TintDiagnostics()
+
     public enum Status: Equatable {
         case idle
         case waitingForMainWindow
@@ -113,6 +141,20 @@ public final class GlassHUDMaterialController {
             if configuration.emphasis != oldValue.emphasis
                 || !Self.colorsMatch(configuration.tint, oldValue.tint) {
                 resetTintRetryBudget(cancelInFlightCapture: true)
+            }
+            // A held color is only valid for the emphasis it was verified for,
+            // and clearing the tint must clear it outright.
+            if configuration.emphasis != oldValue.emphasis
+                || configuration.tint == nil {
+                lastVerifiedTintColor = nil
+            }
+            // Materializing probes while the user is already dragging is what
+            // made the first out-of-domain drag stutter: nothing can resolve
+            // until they are ready. Start that work the moment a tint enters
+            // the configuration, so it is over before a drag reaches a color
+            // the closed form cannot cover.
+            if configuration.tint != nil, oldValue.tint == nil {
+                prepareTintCommitResolver()
             }
             applyConfiguration()
         }
@@ -138,6 +180,33 @@ public final class GlassHUDMaterialController {
     private var activeTintCaptureGeneration: Int?
     private var tintRetryGeneration = 0
     private var tintRetryIndex = 0
+    private var tintCommitResolver: GlassMaterialTintCommitResolver?
+    private var tintCommitWarmUpTask: Task<Void, Never>?
+    private var tintCommitCache: [
+        SIMD3<Double>: [GlassMaterialStyleAtlas.Cell: [Float]]
+    ] = [:]
+    private var tintCommitCacheOrder: [SIMD3<Double>] = []
+    private var pendingTintCommitRequest: (
+        color: NSColor,
+        sourceColor: GlassMaterialColorValue
+    )?
+    /// The most recent color whose matrices were verified for the current
+    /// emphasis. Shown while a newer pick is still resolving, so a continuous
+    /// hue drag trails by a turn instead of blinking to untinted glass.
+    private var lastVerifiedTintColor: NSColor?
+    private var pendingTintCommitRequestedAt: UInt64?
+    private var coalescedApplyTask: Task<Void, Never>?
+    /// The matrices behind the color currently on screen, pinned outside the
+    /// LRU. Letting the cache evict them made the displayed color drop out
+    /// mid-drag, because the held-color lookup then found nothing.
+    private var displayedTintMatrices: (
+        key: SIMD3<Double>,
+        matrices: [GlassMaterialStyleAtlas.Cell: [Float]]
+    )?
+    private var tintDisplayLink: CADisplayLink?
+    /// Bumped whenever the provider publishes a different base payload. A
+    /// color-only change reuses the base the writer already validated.
+    private var baseAtlasGeneration = 0
     private var calibrationRetryIndex = 0
     private var requestedCalibrationAfterInstallFailure = false
 
@@ -221,6 +290,19 @@ public final class GlassHUDMaterialController {
         calibrationRetryTask = nil
         calibrationRetryIndex = 0
         resetTintRetryBudget(cancelInFlightCapture: true)
+        tintCommitWarmUpTask?.cancel()
+        tintCommitWarmUpTask = nil
+        coalescedApplyTask?.cancel()
+        coalescedApplyTask = nil
+        stopTintDisplayLink()
+        displayedTintMatrices = nil
+        // Probes and the witness window exist only to serve an attached view.
+        tintCommitResolver?.invalidate()
+        tintCommitResolver = nil
+        pendingTintCommitRequest = nil
+        lastVerifiedTintColor = nil
+        tintCommitCache = [:]
+        tintCommitCacheOrder = []
         glassView?.materialWindowDidChange = nil
         glassView?.materialStrength.invalidate()
         glassView = nil
@@ -248,6 +330,7 @@ public final class GlassHUDMaterialController {
         }
         atlasProvider.onAtlasUpdated = { [weak self] _ in
             guard let self else { return }
+            self.baseAtlasGeneration += 1
             self.calibrationRetryTask?.cancel()
             self.calibrationRetryIndex = 0
             self.applyConfiguration()
@@ -270,6 +353,12 @@ public final class GlassHUDMaterialController {
 
     // MARK: - Applying product semantics
 
+    // Coalescing configuration updates onto a timer was tried and reverted:
+    // while `NSColorPanel` tracks a drag the main runloop runs in event-tracking
+    // mode, where a `Task.sleep` continuation does not resume promptly, so
+    // applications collapsed to roughly one per second and the color visibly
+    // dropped out. Configuration is therefore applied synchronously, and the
+    // per-application cost is kept small instead.
     private func applyConfiguration() {
         guard let glassView else {
             refreshStatus()
@@ -282,20 +371,47 @@ public final class GlassHUDMaterialController {
             : .regular
         glassView.materialVisibility = configuration.visibility
 
-        let resolvedTintAtlas = resolvedTintAtlas(
+        // Fail closed for Tint: an unverified or hue-suppressed matrix is never
+        // presented as the requested color. In-gamut colors resolve from the
+        // certified closed form in this very update; a wider-gamut color needs
+        // one commit on the next runloop turn.
+        let requestedAtlas = resolvedTintAtlas(
             for: configuration.tint,
             emphasis: configuration.emphasis
         )
         let tintIsReady = configuration.tint == nil
-            || (
-                atlasProvider.isPairedCoverageComplete
-                    && resolvedTintAtlas != nil
-            )
-        // Fail closed for Tint too. On macOS 27 the requested RGB is resolved
-        // synchronously into a short-lived in-memory Atlas overlay. On an
-        // unsupported system, the color remains withheld until the legacy
-        // capture path has verified all selected-participation matrices.
-        glassView.materialTint = tintIsReady ? configuration.tint : nil
+            || (atlasProvider.isPairedCoverageComplete && requestedAtlas != nil)
+
+        var installableAtlas = requestedAtlas
+        var displayedTint = tintIsReady ? configuration.tint : nil
+        if tintIsReady {
+            lastVerifiedTintColor = configuration.tint
+        } else if configuration.tint != nil,
+                  let heldColor = lastVerifiedTintColor,
+                  let heldAtlas = resolvedTintAtlas(
+                    for: heldColor,
+                    emphasis: configuration.emphasis,
+                    scheduleResolutionIfMissing: false
+                  ) {
+            // Dropping to no tint for that one turn reads as the color blinking
+            // out and back while a hue drag streams new colors. Hold the most
+            // recently *verified* color instead — still never an unverified
+            // matrix, just one turn behind the request.
+            installableAtlas = heldAtlas
+            displayedTint = heldColor
+        }
+        // Setting a tint for the first time makes AppKit insert the whole Tint
+        // branch into the private tree (five passes become nine). Until that
+        // exists, the narrow restamp has no destination and every color falls
+        // back to the full transaction — which is what made the first drag
+        // after enabling Tint cost tens of milliseconds per color. Request the
+        // branch immediately at alpha 0: the coefficient-18 contract makes that
+        // visually identical to no tint, so nothing unverified is presented.
+        if displayedTint == nil, let requested = configuration.tint {
+            glassView.materialTint = requested.withAlphaComponent(0)
+        } else {
+            glassView.materialTint = displayedTint
+        }
 
         guard atlasProvider.isPairedCoverageComplete else {
             refreshStatus()
@@ -304,9 +420,41 @@ public final class GlassHUDMaterialController {
         }
 
         let hasMainParticipation = configuration.emphasis == .normal
+        // A color change only differs in 20 tint coefficients. Restamping just
+        // that branch skips revalidating and rewriting the whole style, which
+        // is what let a streaming color picker saturate the main thread.
+        let installStart = DispatchTime.now().uptimeNanoseconds
+        if glassView.materialStrength.restampTintOverlay(
+            installableAtlas ?? atlasProvider.atlas,
+            baseGeneration: baseAtlasGeneration,
+            mainParticipation: hasMainParticipation,
+            tintColor: displayedTint
+        ) {
+            tintDiagnostics.tintRestampCount += 1
+            let restampMs = Self.milliseconds(since: installStart)
+            tintDiagnostics.lastInstallMilliseconds = restampMs
+            if restampMs > 4 {
+                GlassMaterialTintLog.signposts.notice(
+                    "slow tint restamp \(restampMs, format: .fixed(precision: 1), privacy: .public)ms"
+                )
+            }
+            installRetryTask?.cancel()
+            refreshStatus()
+            return
+        }
+        tintDiagnostics.fullFreezeCount += 1
+        GlassMaterialTintLog.signposts.notice(
+            "full freeze (base generation \(self.baseAtlasGeneration, privacy: .public))"
+        )
         let installed = glassView.materialStrength.freeze(
-            atlas: resolvedTintAtlas ?? atlasProvider.atlas,
-            mainParticipation: hasMainParticipation
+            atlas: installableAtlas ?? atlasProvider.atlas,
+            mainParticipation: hasMainParticipation,
+            baseGeneration: baseAtlasGeneration
+        )
+        let freezeMs = Self.milliseconds(since: installStart)
+        tintDiagnostics.lastInstallMilliseconds = freezeMs
+        GlassMaterialTintLog.signposts.notice(
+            "freeze install \(freezeMs, format: .fixed(precision: 1), privacy: .public)ms installed=\(installed, privacy: .public)"
         )
         if installed,
            glassView.materialStrength.frozenStyleIsCurrentlyApplied {
@@ -379,15 +527,254 @@ public final class GlassHUDMaterialController {
     /// nil and therefore fail-closed.
     private func resolvedTintAtlas(
         for color: NSColor?,
-        emphasis: Emphasis
+        emphasis: Emphasis,
+        scheduleResolutionIfMissing: Bool = true
     ) -> GlassMaterialStyleAtlas? {
-        Self.resolvedTintAtlas(
+        if let resolved = Self.resolvedTintAtlas(
             atlasProvider.atlas,
             color: color,
             emphasis: emphasis,
             osMajorVersion: ProcessInfo.processInfo
                 .operatingSystemVersion.majorVersion
+        ) {
+            return resolved
+        }
+        // The closed form does not cover this color (a wider-gamut pick leaves
+        // the certified extended-sRGB domain) or this OS major. Ask the system
+        // itself, synchronously, against warm probes.
+        return commitResolvedTintAtlas(
+            for: color,
+            emphasis: emphasis,
+            scheduleResolutionIfMissing: scheduleResolutionIfMissing
         )
+    }
+
+    /// Builds the overlay for a color the closed form does not cover, from
+    /// matrices this controller has already resolved through the system.
+    ///
+    /// This is deliberately pure. Resolution itself needs a CA commit, and
+    /// committing from inside a configuration update runs nested inside the
+    /// attached view's own layout pass, which costs the frozen restamp its
+    /// final-writer position — the material then reads back as not applied and
+    /// the HUD flickers between frozen and native. Resolution therefore happens
+    /// on its own runloop turn in `scheduleTintCommitResolution`, and this only
+    /// serves the result.
+    private func commitResolvedTintAtlas(
+        for color: NSColor?,
+        emphasis: Emphasis,
+        scheduleResolutionIfMissing: Bool
+    ) -> GlassMaterialStyleAtlas? {
+        guard let color,
+              atlasProvider.isPairedCoverageComplete,
+              let sourceColor = GlassMaterialColorValue(color)
+        else { return nil }
+        guard let matrices = cachedCommitMatrices(for: sourceColor) else {
+            // Only the color the product actually requested may enqueue work.
+            // Letting the held-color lookup enqueue too made the resolver
+            // ping-pong between the new pick and the color it was still
+            // showing, so most picks were superseded before resolving.
+            if scheduleResolutionIfMissing {
+                scheduleTintCommitResolution(
+                    for: color,
+                    sourceColor: sourceColor
+                )
+            }
+            return nil
+        }
+
+        let hasMainParticipation = emphasis == .normal
+        var resolved = atlasProvider.atlas
+        // Same discipline as synthesis: a live-resolved overlay lives only on
+        // this value-semantic copy and is never persisted.
+        resolved.removeAllTintMatrices()
+        for (cell, matrix) in matrices {
+            resolved.addTintMatrix(
+                .init(sourceColor: sourceColor, matrix: matrix),
+                for: cell
+            )
+        }
+        // Fail closed: the selected participation must be completely covered.
+        let required = [true, false].flatMap { isLight in
+            [false, true].map { isClear in
+                GlassMaterialStyleAtlas.Cell(
+                    isLightAppearance: isLight,
+                    isClear: isClear,
+                    hasMainParticipation: hasMainParticipation
+                )
+            }
+        }
+        guard required.allSatisfy({
+            resolved.tintMatrix(for: $0, matching: color) != nil
+        }) else { return nil }
+        return resolved
+    }
+
+    /// Materializes the probe set ahead of need. Safe to call repeatedly: the
+    /// resolver keeps one warm-up in flight and reports when it is ready.
+    private func prepareTintCommitResolver() {
+        guard atlasProvider.isPairedCoverageComplete || hostParticipates else {
+            return
+        }
+        let resolver = tintCommitResolver ?? {
+            guard let hostWindow else { return nil }
+            let created = GlassMaterialTintCommitResolver(
+                hostWindow: hostWindow
+            )
+            tintCommitResolver = created
+            return created
+        }()
+        guard let resolver, !resolver.isWarm, tintCommitWarmUpTask == nil
+        else { return }
+        let start = DispatchTime.now().uptimeNanoseconds
+        tintCommitWarmUpTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.tintCommitWarmUpTask = nil }
+            let warm = await resolver.warmUp()
+            guard !Task.isCancelled else { return }
+            self.tintDiagnostics.warmUpMilliseconds = Self.milliseconds(
+                since: start
+            )
+            if warm {
+                if let color = self.configuration.tint {
+                    resolver.prewarmTintBranch(for: color)
+                }
+                if self.pendingTintCommitRequest != nil {
+                    self.startTintDisplayLink()
+                }
+                self.applyConfiguration()
+            }
+        }
+    }
+
+    /// Alpha is coefficient 18 exactly and touches nothing else — established
+    /// by the fixed-RGB alpha sweep in the accepted Golden fixtures. So the
+    /// cache is keyed by RGB and the requested alpha is patched in, which is
+    /// what makes dragging an opacity slider cost no resolution at all.
+    private func cachedCommitMatrices(
+        for sourceColor: GlassMaterialColorValue
+    ) -> [GlassMaterialStyleAtlas.Cell: [Float]]? {
+        let key = Self.rgbKey(for: sourceColor)
+        let entry: [GlassMaterialStyleAtlas.Cell: [Float]]
+        if let pinned = displayedTintMatrices, pinned.key == key {
+            entry = pinned.matrices
+        } else if let cached = tintCommitCache[key] {
+            entry = cached
+        } else {
+            return nil
+        }
+        return entry.mapValues { matrix in
+            var patched = matrix
+            patched[18] = Float(sourceColor.alpha)
+            return patched
+        }
+    }
+
+    /// Resolves one color on its own runloop turn, outside any layout pass,
+    /// then re-applies. Materialization of the probe set is the only remaining
+    /// wait and happens once.
+    /// Requests resolution of one color, serviced by the display link.
+    ///
+    /// The picker emits hundreds of colors a second while the screen can only
+    /// show one per frame, and each resolution costs a few milliseconds of main
+    /// thread. Servicing every request starved the work that actually mattered.
+    /// A display link is the right clock for this: it ticks once per presented
+    /// frame and — unlike a timer continuation — keeps ticking while AppKit
+    /// tracks a drag in event-tracking mode.
+    private func scheduleTintCommitResolution(
+        for color: NSColor,
+        sourceColor: GlassMaterialColorValue
+    ) {
+        if pendingTintCommitRequest != nil {
+            tintDiagnostics.supersededRequestCount += 1
+        }
+        pendingTintCommitRequest = (color, sourceColor)
+        pendingTintCommitRequestedAt = DispatchTime.now().uptimeNanoseconds
+        guard hostParticipates else { return }
+        if tintCommitResolver == nil, let hostWindow {
+            tintCommitResolver = GlassMaterialTintCommitResolver(
+                hostWindow: hostWindow
+            )
+        }
+        guard let resolver = tintCommitResolver else { return }
+        if !resolver.isWarm {
+            prepareTintCommitResolver()
+            return
+        }
+        startTintDisplayLink()
+    }
+
+    private func startTintDisplayLink() {
+        guard tintDisplayLink == nil, let glassView else { return }
+        let link = glassView.displayLink(
+            target: self,
+            selector: #selector(tintDisplayLinkFired(_:))
+        )
+        // Common modes so the link keeps firing while a drag is tracked.
+        link.add(to: .main, forMode: .common)
+        tintDisplayLink = link
+    }
+
+    private func stopTintDisplayLink() {
+        tintDisplayLink?.invalidate()
+        tintDisplayLink = nil
+    }
+
+    @objc private func tintDisplayLinkFired(_ sender: CADisplayLink) {
+        guard let request = pendingTintCommitRequest else {
+            stopTintDisplayLink()
+            return
+        }
+        guard let resolver = tintCommitResolver, resolver.canResolveNow else {
+            return
+        }
+        let start = DispatchTime.now().uptimeNanoseconds
+        guard let matrices = resolver.resolveMatrices(
+            for: request.color,
+            sourceColor: request.sourceColor
+        ) else { return }
+        tintDiagnostics.lastResolveMilliseconds = Self.milliseconds(since: start)
+        tintDiagnostics.resolvedColorCount += 1
+        tintDiagnostics.attemptsForLastColor = 1
+        if let requestedAt = pendingTintCommitRequestedAt {
+            tintDiagnostics.lastLatencyMilliseconds = Self.milliseconds(
+                since: requestedAt
+            )
+        }
+        GlassMaterialTintLog.signposts.notice(
+            "resolved in \(self.tintDiagnostics.lastResolveMilliseconds ?? 0, format: .fixed(precision: 1), privacy: .public)ms latency=\(self.tintDiagnostics.lastLatencyMilliseconds ?? 0, format: .fixed(precision: 1), privacy: .public)ms"
+        )
+        let key = Self.rgbKey(for: request.sourceColor)
+        storeCommitMatrices(matrices, for: key)
+        displayedTintMatrices = (key, matrices)
+        if let newest = pendingTintCommitRequest,
+           Self.rgbKey(for: newest.sourceColor) == key {
+            pendingTintCommitRequest = nil
+        }
+        applyConfiguration()
+    }
+
+    private func storeCommitMatrices(
+        _ matrices: [GlassMaterialStyleAtlas.Cell: [Float]],
+        for key: SIMD3<Double>
+    ) {
+        if tintCommitCacheOrder.count >= 8,
+           let oldest = tintCommitCacheOrder.first {
+            tintCommitCacheOrder.removeFirst()
+            tintCommitCache[oldest] = nil
+        }
+        tintCommitCacheOrder.removeAll { $0 == key }
+        tintCommitCacheOrder.append(key)
+        tintCommitCache[key] = matrices
+    }
+
+    private static func milliseconds(since start: UInt64) -> Double {
+        Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+    }
+
+    private static func rgbKey(
+        for sourceColor: GlassMaterialColorValue
+    ) -> SIMD3<Double> {
+        SIMD3(sourceColor.red, sourceColor.green, sourceColor.blue)
     }
 
     static func resolvedTintAtlas(
@@ -452,14 +839,53 @@ public final class GlassHUDMaterialController {
         return atlas
     }
 
+    /// Cheap predicate for status reporting: answers whether the color could be
+    /// installed right now without building an Atlas copy and — critically —
+    /// without enqueuing resolution work. Doing either here made every status
+    /// refresh duplicate the work of the application that triggered it.
     private func tintCoverageIsComplete(
         for color: NSColor?,
         emphasis: Emphasis
     ) -> Bool {
-        resolvedTintAtlas(for: color, emphasis: emphasis) != nil
+        guard let color else { return true }
+        let hasMainParticipation = emphasis == .normal
+        let cells = [true, false].flatMap { isLight in
+            [false, true].map { isClear in
+                GlassMaterialStyleAtlas.Cell(
+                    isLightAppearance: isLight,
+                    isClear: isClear,
+                    hasMainParticipation: hasMainParticipation
+                )
+            }
+        }
+        guard let sourceColor = GlassMaterialColorValue(color) else {
+            return false
+        }
+        let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        if GlassMaterialTintMatrixSynthesizer.supportedOSMajorVersions
+            .contains(major),
+           cells.allSatisfy({
+               GlassMaterialTintMatrixSynthesizer.matrix(
+                   for: sourceColor,
+                   cell: $0,
+                   osMajorVersion: major
+               ) != nil
+           }) {
+            return true
+        }
+        if cachedCommitMatrices(for: sourceColor) != nil { return true }
+        return cells.allSatisfy {
+            atlasProvider.atlas.tintMatrix(for: $0, matching: color) != nil
+        }
     }
 
     private func scheduleTintLock() {
+        // The legacy multi-second capture is now the last resort: while commit
+        // resolution is warming or already usable, it would only duplicate the
+        // work and contend for a second witness window.
+        guard tintCommitWarmUpTask == nil,
+              tintCommitResolver?.isWarm != true
+        else { return }
         guard tintTask == nil,
               configuration.tint != nil,
               activeTintCaptureGeneration == nil,
@@ -569,6 +995,16 @@ public final class GlassHUDMaterialController {
 
     private func recoveryOpportunityArrived() {
         resetTintRetryBudget()
+        // Regaining participation rebuilds the private trees, which drops the
+        // probes' Tint branch. Re-materialize it now instead of charging the
+        // user's next drag for it.
+        if let color = configuration.tint, let resolver = tintCommitResolver {
+            if resolver.isWarm {
+                resolver.prewarmTintBranch(for: color)
+            } else {
+                prepareTintCommitResolver()
+            }
+        }
         atlasProvider.ensureCaptured()
         applyConfiguration()
     }

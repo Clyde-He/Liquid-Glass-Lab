@@ -109,6 +109,10 @@ final class GlassMaterialStrength {
 
     /// The installed style atlas, if any. See `freeze(atlas:)`.
     public private(set) var frozenAtlas: GlassMaterialStyleAtlas?
+    /// Identifies the base payload that was validated when this material was
+    /// frozen, so a color-only change can skip revalidating it.
+    private var frozenBaseGeneration: Int?
+    private var isRestampingTintOnly = false
 
     /// Material strength, clamped to `0...1`. Defaults to `1`, which leaves the
     /// system Recipe untouched until the first change.
@@ -284,7 +288,8 @@ final class GlassMaterialStrength {
     @discardableResult
     public func freeze(
         atlas: GlassMaterialStyleAtlas,
-        mainParticipation: Bool = true
+        mainParticipation: Bool = true,
+        baseGeneration: Int? = nil
     ) -> Bool {
         guard let glass,
               let environment = atlas.environment,
@@ -317,12 +322,62 @@ final class GlassMaterialStrength {
             }
         }
         frozenAtlas = atlas
+        frozenBaseGeneration = baseGeneration
         frozenMainParticipation = mainParticipation
         baseline = nil
         lastWrittenFilterIdentity = nil
         installPreCommitObserver()
         apply()
         return true
+    }
+
+    /// Fast path for a color change on an already frozen material: swaps only
+    /// the color-bound Tint overlay and restamps just the Tint branch.
+    ///
+    /// A tint color changes 20 coefficients; the base payload — shader, grades,
+    /// geometry, rim — is bit-identical. Running the full `freeze` for every
+    /// color therefore revalidated every sample and rewrote the whole style,
+    /// which saturates the main thread while a color picker streams values.
+    ///
+    /// This refuses unless the caller's `baseGeneration` matches the base that
+    /// was validated at freeze time, so any base change still goes through the
+    /// full transaction.
+    @discardableResult
+    public func restampTintOverlay(
+        _ atlas: GlassMaterialStyleAtlas,
+        baseGeneration: Int,
+        mainParticipation: Bool,
+        tintColor newTintColor: NSColor?
+    ) -> Bool {
+        guard frozenAtlas != nil,
+              frozenBaseGeneration == baseGeneration,
+              frozenMainParticipation == mainParticipation,
+              glass != nil
+        else { return false }
+        frozenAtlas = atlas
+        isRestampingTintOnly = true
+        tintColor = newTintColor
+        isRestampingTintOnly = false
+        return true
+    }
+
+    private func applyFrozenTintOnly() {
+        guard let glass, let atlas = frozenAtlas, let tintColor,
+              let sourceAlpha = tintColor
+                .usingColorSpace(.deviceRGB)?.alphaComponent,
+              let tintLayer = GlassMaterialAccess.tintMatrixLayer(under: glass),
+              var matrix = atlas.tintMatrix(
+                for: currentCell(for: glass),
+                matching: tintColor
+              ),
+              matrix.count == 20
+        else { return }
+        matrix[18] = Float(GlassMaterialCurve.tintMatrixAlpha(
+            at: value,
+            sourceAlpha: Double(sourceAlpha)
+        ))
+        GlassMaterialAccess.setColorMatrix(matrix, on: tintLayer)
+        lastFrozenTintMatrix = matrix
     }
 
     /// The frame-order weapon. The private subtree lays out *after* the
@@ -445,6 +500,10 @@ final class GlassMaterialStrength {
               let target = suppliedTarget
                 ?? GlassMaterialAccess.glassBackgroundTarget(under: glass)
         else { return }
+        if isRestampingTintOnly {
+            applyFrozenTintOnly()
+            return
+        }
         if let frozenAtlas {
             applyFrozen(frozenAtlas, to: target, on: glass)
         } else {
