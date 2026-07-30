@@ -163,11 +163,20 @@ test("rejects alpha variants that change an endpoint coefficient", () => {
   );
 });
 
-test("rejects one contaminated matrix coefficient", () => {
+test("retains a structurally unfamiliar matrix as unclassified evidence", () => {
   const document = makeDocument();
   document.rows[0].matrix[0] += 0.01;
-  assert.throws(
-    () => analyzeTintParameterization(document),
-    /neither luma-endpoint nor neutral suppression/
+  document.rows[0].structure = "unclassified";
+  const result = analyzeTintParameterization(document);
+  assert.equal(result.unclassifiedRowCount, 1);
+  assert.equal(
+    result.cellFamilies["Light · Regular · Main-On"].unclassified,
+    1
   );
+});
+
+test("rejects a row whose stored classification does not match its matrix", () => {
+  const document = makeDocument();
+  document.rows[0].matrix[0] += 0.01;
+  assert.throws(() => analyzeTintParameterization(document), /recomputed/);
 });

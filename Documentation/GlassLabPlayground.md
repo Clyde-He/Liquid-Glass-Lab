@@ -582,11 +582,13 @@ fixed-RGB alpha sweep. This produces 1,360 compact rows containing only source
 extended-sRGB, the eight context cells, and their 20 matrix coefficients.
 
 Every pair must independently pass the same `verifiesMainOn` style proof used
-by the product calibration. Every matrix must then pass the rank-1 Rec.709
-luma/neutral-suppression structure gate. A completed color is written
-atomically to the selected JSON checkpoint, so cancellation or loss of app
-participation can be resumed without repeating accepted colors. This path
-never mutates the product Atlas or its runtime Tint cache.
+by the product calibration. Source-color readback, the alpha row, and 20
+finite coefficients are also hard admission gates. Rank-1 Rec.709 luma and
+neutral suppression are classifications: an unfamiliar matrix is preserved
+as `unclassified`, with both residuals, and the sweep continues. A completed
+color is written atomically to the selected JSON checkpoint, so cancellation
+or loss of app participation can be resumed without repeating accepted
+colors. This path never mutates the product Atlas or its runtime Tint cache.
 
 The same capture can run without the save panel:
 
@@ -602,11 +604,13 @@ node Golden/tools/analyze-tint-parameterization.mjs \
   /path/to/tint-parameterization-sweep.json
 ```
 
-The analyzer re-runs the structural gates, reports the standard/pastel/neutral
-family selected by every cell, verifies coverage, and checks that the alpha
-sweep leaves all coefficients except index 18 unchanged. Accepted complete
-datasets belong under the matching `Golden/macOS-<major>/` directory; formula
-fitting and product synthesis remain downstream of this capture.
+The analyzer re-runs the hard gates, reports the
+standard/pastel/neutral/unclassified family selected by every cell, verifies
+coverage, and checks that the alpha sweep leaves all coefficients except index
+18 unchanged. `Unclassified` rows make the current candidate model incomplete
+but do not make the evidence capture invalid. Accepted complete datasets
+belong under the matching `Golden/macOS-<major>/` directory; formula fitting
+and product synthesis remain downstream of this capture.
 
 ### Full P1 Materialize environment matrix
 

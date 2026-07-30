@@ -140,10 +140,11 @@ function validateRow(row, color) {
     family = "neutral";
     structureResidual = Math.max(neutralResidual, alphaResidual);
   } else {
-    throw new Error(
-      `${row.colorID} · ${cellKey(row.cell)} is neither luma-endpoint nor ` +
-        `neutral suppression (residuals ${endpoint.maximumResidual}, ` +
-        `${neutralResidual})`
+    structure = "unclassified";
+    family = "unclassified";
+    structureResidual = Math.max(
+      Math.min(endpoint.maximumResidual, neutralResidual),
+      alphaResidual
     );
   }
   if (row.structure !== structure) {
@@ -152,12 +153,29 @@ function validateRow(row, color) {
         `recomputed ${structure}`
     );
   }
+  if (
+    Number.isFinite(row.lumaEndpointResidual) &&
+    Math.abs(row.lumaEndpointResidual - endpoint.maximumResidual) > 1e-9
+  ) {
+    throw new Error(
+      `${row.colorID} · ${cellKey(row.cell)} stored luma residual changed`
+    );
+  }
+  if (
+    Number.isFinite(row.neutralSuppressionResidual) &&
+    Math.abs(row.neutralSuppressionResidual - neutralResidual) > 1e-9
+  ) {
+    throw new Error(
+      `${row.colorID} · ${cellKey(row.cell)} stored neutral residual changed`
+    );
+  }
   return {
     family,
     structure,
     structureResidual,
     sourceResidual,
-    endpoint: structure === "lumaEndpoints" ? endpoint : null,
+    endpoint,
+    neutralResidual,
   };
 }
 
@@ -175,8 +193,10 @@ export function analyzeTintParameterization(document) {
   const rowsByColor = new Map();
   const cellFamilies = new Map();
   let maximumStructureResidual = 0;
+  let maximumClassifiedStructureResidual = 0;
   let maximumSourceResidual = 0;
   let maximumStandardBrightResidual = 0;
+  const unclassifiedRows = [];
   const evaluated = [];
 
   for (const row of rows) {
@@ -188,6 +208,19 @@ export function analyzeTintParameterization(document) {
       maximumStructureResidual,
       result.structureResidual
     );
+    if (result.structure !== "unclassified") {
+      maximumClassifiedStructureResidual = Math.max(
+        maximumClassifiedStructureResidual,
+        result.structureResidual
+      );
+    } else {
+      unclassifiedRows.push({
+        colorID: row.colorID,
+        cell: cellKey(row.cell),
+        lumaEndpointResidual: result.endpoint.maximumResidual,
+        neutralSuppressionResidual: result.neutralResidual,
+      });
+    }
     maximumSourceResidual = Math.max(
       maximumSourceResidual,
       result.sourceResidual
@@ -276,9 +309,12 @@ export function analyzeTintParameterization(document) {
     rowCount: rows.length,
     complete: document.complete,
     maximumStructureResidual,
+    maximumClassifiedStructureResidual,
     maximumSourceResidual,
     maximumStandardBrightResidual,
     alphaSweepMaximumNonAlphaDifference,
+    unclassifiedRowCount: unclassifiedRows.length,
+    unclassifiedRows,
     cellFamilies: Object.fromEntries(
       [...cellFamilies.entries()]
         .sort(([left], [right]) => left.localeCompare(right))
@@ -300,12 +336,14 @@ export function formatTintParameterizationReport(result) {
     `Plan: ${result.planID}`,
     `Coverage: ${result.completedColorCount}/${result.colorCount} colors · ` +
       `${result.rowCount} rows · ${result.complete ? "COMPLETE" : "CHECKPOINT"}`,
-    `Maximum structure residual: ${result.maximumStructureResidual.toExponential(6)}`,
+    `Maximum classified structure residual: ` +
+      `${result.maximumClassifiedStructureResidual.toExponential(6)}`,
     `Maximum source-color residual: ${result.maximumSourceResidual.toExponential(6)}`,
     `Maximum standard bright=source residual: ` +
       `${result.maximumStandardBrightResidual.toExponential(6)}`,
     `Alpha sweep maximum non-a18 difference: ` +
       `${result.alphaSweepMaximumNonAlphaDifference.toExponential(6)}`,
+    `Unclassified rows: ${result.unclassifiedRowCount}`,
     "Cell transform families:",
   ];
   for (const [cell, families] of Object.entries(result.cellFamilies)) {
@@ -314,7 +352,23 @@ export function formatTintParameterizationReport(result) {
       .join(", ");
     lines.push(`  ${cell}: ${description}`);
   }
-  lines.push("Structure gate: PASSED");
+  if (result.unclassifiedRows.length > 0) {
+    lines.push("Unclassified observations:");
+    for (const row of result.unclassifiedRows.slice(0, 16)) {
+      lines.push(
+        `  ${row.colorID} · ${row.cell}: ` +
+          `luma=${row.lumaEndpointResidual.toExponential(6)}, ` +
+          `neutral=${row.neutralSuppressionResidual.toExponential(6)}`
+      );
+    }
+    if (result.unclassifiedRows.length > 16) {
+      lines.push(`  … ${result.unclassifiedRows.length - 16} more`);
+    }
+    lines.push("Model structure coverage: REQUIRES ADDITIONAL FAMILY");
+  } else {
+    lines.push("Model structure coverage: ALL ROWS CLASSIFIED");
+  }
+  lines.push("Capture hard gates: PASSED");
   return lines.join("\n");
 }
 

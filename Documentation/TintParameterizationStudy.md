@@ -13,7 +13,7 @@ were already tested and several dead ends are documented.
 All findings below were derived from data already in the repository and are
 reproducible with the commands in *Data provenance*.
 
-### 1. The Tint matrix is rank-1 in Rec.709 luma
+### 1. Nonzero chromatic Tint matrices are rank-1 in Rec.709 luma
 
 Every hue-specific Tint `ColorMatrix4x5` observed so far has RGB rows of the
 exact form
@@ -32,6 +32,14 @@ described by two endpoint colors:
 - **dark endpoint** `bias` — the output color where backdrop luma = 0
 
 The glass maps backdrop luminance onto a two-color gradient.
+
+The first full-grid checkpoint on macOS 27 extended this result to all 144
+nonzero chromatic grid colors across all eight cells. It also found the first
+counterexample to treating the structure as universal: exact black
+`gray-000`, Light Regular Main-On resolved a different structure
+(`rank-1 residual 0.309601`). Exact black is therefore an explicit unknown
+family or zero-color special case until its raw matrix and neighboring gray
+samples are analyzed.
 
 ### 2. The standard transform: bright endpoint = the source color, exactly
 
@@ -154,8 +162,10 @@ product's color-lock path or mutate the runtime Tint cache.
 The plan contains the required 12 × 4 × 3 HSV grid, achromatic and very-dark
 slices, exact Coral/Cyan historical anchors, and a fixed-RGB alpha sweep.
 Each row is rejected unless the paired style samples prove genuine Main-On
-participation and the Tint matrix passes the luma-endpoint or neutral-
-suppression structure gate. Use
+participation and the source, alpha row, and 20 coefficients are complete.
+Structure is evidence, not admission: luma-endpoint and neutral-suppression
+rows are classified, while any unfamiliar matrix is retained verbatim as
+`unclassified` with both residuals. Use
 `Golden/tools/analyze-tint-parameterization.mjs` to re-run those gates and
 summarize per-cell transform selection. No fitted RGB→matrix model is claimed
 until a complete dataset has been captured and analyzed.
@@ -168,10 +178,11 @@ until a complete dataset has been captured and analyzed.
    fixed RGB to confirm alpha touches only coefficient 18. Export
    `(sourceColor → 8 cells × matrix)` as a Golden fixture
    (`Golden/macOS-27/tint-parameterization-sweep.json` + manifest entry).
-2. **Structure gate.** For every captured matrix, verify the rank-1 luma
-   form and the alpha row before using it; a single structural violation
-   invalidates the model for that cell and must be reported, not smoothed
-   over.
+2. **Structure classification.** For every captured matrix, require the alpha
+   row and complete finite payload, then measure the rank-1 luma and neutral
+   residuals. A structural violation invalidates the current candidate model
+   for that row and must be retained and reported as `unclassified`, not
+   smoothed over or used to abort the remaining evidence capture.
 3. **Fit the three endpoint functions** (`d_std`, `p_bright`, `p_dark`).
    Try, in order: linear map in linear-RGB; affine map in linear-RGB;
    hue-preserving HSB scalar model; Oklab/Lab affine. Report residuals in

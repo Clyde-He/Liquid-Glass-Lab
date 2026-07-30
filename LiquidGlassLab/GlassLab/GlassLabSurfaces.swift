@@ -386,14 +386,15 @@ struct GlassLabControlWindowAnchor: NSViewRepresentable {
 
     func makeNSView(context: Context) -> GlassLabWindowAnchorView {
         let view = GlassLabWindowAnchorView()
-        view.windowDidChange = { window in
-            state.testWindow.setControlWindow(window)
+        view.windowDidChange = { [weak view] window in
+            guard let view else { return }
+            state.testWindow.setControlWindow(window, probeHost: view)
         }
         return view
     }
 
     func updateNSView(_ view: GlassLabWindowAnchorView, context: Context) {
-        state.testWindow.setControlWindow(view.window)
+        state.testWindow.setControlWindow(view.window, probeHost: view)
     }
 
     static func dismantleNSView(_ view: GlassLabWindowAnchorView, coordinator: ()) {
@@ -493,6 +494,7 @@ final class GlassLabTestWindowController {
     private weak var semanticHost: GlassLabSemanticHost?
     private weak var state: GlassLabState?
     private weak var controlWindow: NSWindow?
+    private weak var controlProbeHost: NSView?
     private weak var previousKeyWindow: NSWindow?
     private weak var previousMainWindow: NSWindow?
     private var currentHostType: GlassLabWindowHostType?
@@ -509,6 +511,9 @@ final class GlassLabTestWindowController {
     /// The Playground control window — the app's real main window, which the
     /// in-window atlas provider uses as its capture host.
     var liveControlWindow: NSWindow? { controlWindow }
+    /// A supported AppKit island inside the SwiftUI hierarchy. Research
+    /// probes attach here instead of mutating NSHostingController.view.
+    var liveControlProbeHost: NSView? { controlProbeHost }
     var effectiveAppearanceName: String? {
         window?.effectiveAppearance.name.rawValue
     }
@@ -516,7 +521,13 @@ final class GlassLabTestWindowController {
     var isActuallyKey: Bool { window.map { NSApp.keyWindow === $0 } ?? false }
     var isActuallyMain: Bool { window.map { NSApp.mainWindow === $0 } ?? false }
 
-    func setControlWindow(_ window: NSWindow?) {
+    func setControlWindow(
+        _ window: NSWindow?,
+        probeHost: NSView? = nil
+    ) {
+        if let probeHost {
+            controlProbeHost = probeHost
+        }
         guard let window, window !== self.window else { return }
         controlWindow = window
         if previousKeyWindow == nil { previousKeyWindow = window }

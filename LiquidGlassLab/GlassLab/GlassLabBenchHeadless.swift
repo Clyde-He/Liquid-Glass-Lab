@@ -184,6 +184,7 @@ extension GlassLabView {
                     + "Colors: \(document.completedColorCount)/"
                     + "\(document.plan.colors.count)\n"
                     + "Rows: \(document.rows.count)\n"
+                    + "Unclassified: \(document.unclassifiedRowCount)\n"
                     + "Complete: \(document.complete ? "yes" : "no")"
                 FileHandle.standardError.write(Data(
                     (report + "\nWrote \(destination.path)\n").utf8

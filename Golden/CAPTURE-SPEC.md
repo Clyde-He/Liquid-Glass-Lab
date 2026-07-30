@@ -39,7 +39,9 @@ research dataset for deriving a color transform, not an `NSGlassEffectView`
 style catalog consumed at runtime. A complete per-major fixture contains 170
 source colors × eight Light/Dark × Regular/Clear × Main-On/Off cells = 1,360
 rows, each with the source extended-sRGB value, all 20 matrix coefficients,
-and its validated luma-endpoint or neutral-suppression structure.
+and its measured luma-endpoint, neutral-suppression, or `unclassified`
+structure plus residuals. An unfamiliar structure is retained evidence; it
+invalidates the current candidate model for that row, not the capture.
 
 Capture writes an exact-build/display-bound checkpoint after every completed
 color so one dataset never silently mixes sessions. Once complete and

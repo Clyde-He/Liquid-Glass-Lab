@@ -62,6 +62,7 @@ struct GlassLabTintSweepCell: Codable, Hashable, Sendable {
 enum GlassLabTintMatrixStructure: String, Codable, Sendable {
     case lumaEndpoints
     case neutralSuppression
+    case unclassified
 }
 
 struct GlassLabTintSweepRow: Codable, Hashable, Sendable {
@@ -71,6 +72,8 @@ struct GlassLabTintSweepRow: Codable, Hashable, Sendable {
     var matrix: [Float]
     var structure: GlassLabTintMatrixStructure
     var maximumStructureResidual: Double
+    var lumaEndpointResidual: Double?
+    var neutralSuppressionResidual: Double?
 }
 
 struct GlassLabTintSweepPlan: Codable, Equatable, Sendable {
@@ -231,10 +234,15 @@ struct GlassLabTintParameterizationSweepDocument: Codable, Sendable {
     var completedColorCount: Int
     var rows: [GlassLabTintSweepRow]
     var failure: String?
+
+    var unclassifiedRowCount: Int {
+        rows.lazy.filter { $0.structure == .unclassified }.count
+    }
 }
 
 enum GlassLabTintSweepError: LocalizedError {
     case noHostWindow
+    case probeHostUnavailable
     case hostNotParticipating
     case witnessUnavailable
     case witnessParticipated
@@ -247,6 +255,8 @@ enum GlassLabTintSweepError: LocalizedError {
         switch self {
         case .noHostWindow:
             "No active control window is available for the Main-On probes."
+        case .probeHostUnavailable:
+            "The supported in-window probe host is not attached."
         case .hostNotParticipating:
             "Keep the app active and the control window main/key during capture."
         case .witnessUnavailable:
@@ -258,7 +268,7 @@ enum GlassLabTintSweepError: LocalizedError {
         case let .colorFailed(color):
             "Tint never produced eight stable paired matrices for \(color)."
         case let .invalidMatrix(reason):
-            "Tint structure gate failed: \(reason)"
+            "Tint capture validation failed: \(reason)"
         case let .incomplete(expected, actual):
             "Tint sweep is incomplete: expected \(expected) rows, found \(actual)."
         }
@@ -272,6 +282,8 @@ enum GlassLabTintMatrixGate {
     struct Result {
         var structure: GlassLabTintMatrixStructure
         var maximumResidual: Double
+        var lumaEndpointResidual: Double
+        var neutralSuppressionResidual: Double
     }
 
     static func validate(
@@ -325,35 +337,28 @@ enum GlassLabTintMatrixGate {
             matrix,
             isLightAppearance: cell.isLightAppearance
         )
-        if cell.hasMainParticipation {
-            guard rankOneResidual <= tolerance else {
-                throw GlassLabTintSweepError.invalidMatrix(
-                    "\(expectedColor.id) · \(GlassLabTintSweepCell(cell).label) "
-                        + "is not rank-1 Rec.709 luma "
-                        + "(residual \(rankOneResidual))"
-                )
-            }
-            return Result(
-                structure: .lumaEndpoints,
-                maximumResidual: max(rankOneResidual, alphaRowResidual)
-            )
-        }
         if rankOneResidual <= tolerance {
             return Result(
                 structure: .lumaEndpoints,
-                maximumResidual: max(rankOneResidual, alphaRowResidual)
+                maximumResidual: max(rankOneResidual, alphaRowResidual),
+                lumaEndpointResidual: rankOneResidual,
+                neutralSuppressionResidual: neutralResidual
             )
         }
-        guard neutralResidual <= tolerance else {
-            throw GlassLabTintSweepError.invalidMatrix(
-                "\(expectedColor.id) · \(GlassLabTintSweepCell(cell).label) "
-                    + "is neither luma-endpoint nor neutral suppression "
-                    + "(residuals \(rankOneResidual), \(neutralResidual))"
+        if neutralResidual <= tolerance {
+            return Result(
+                structure: .neutralSuppression,
+                maximumResidual: max(neutralResidual, alphaRowResidual),
+                lumaEndpointResidual: rankOneResidual,
+                neutralSuppressionResidual: neutralResidual
             )
         }
         return Result(
-            structure: .neutralSuppression,
-            maximumResidual: max(neutralResidual, alphaRowResidual)
+            structure: .unclassified,
+            maximumResidual:
+                max(min(rankOneResidual, neutralResidual), alphaRowResidual),
+            lumaEndpointResidual: rankOneResidual,
+            neutralSuppressionResidual: neutralResidual
         )
     }
 
@@ -411,13 +416,19 @@ private final class GlassLabTintSweepCaptureSession {
     }
 
     private weak var hostWindow: NSWindow?
+    private weak var mainProbeHost: NSView?
     private let plan: GlassLabTintSweepPlan
     private var mainContainer: NSView?
     private var witnessWindow: GlassLabTintSweepWitnessWindow?
     private var witnessContainer: NSView?
 
-    init(hostWindow: NSWindow, plan: GlassLabTintSweepPlan) {
+    init(
+        hostWindow: NSWindow,
+        mainProbeHost: NSView,
+        plan: GlassLabTintSweepPlan
+    ) {
         self.hostWindow = hostWindow
+        self.mainProbeHost = mainProbeHost
         self.plan = plan
     }
 
@@ -428,8 +439,11 @@ private final class GlassLabTintSweepCaptureSession {
             _ rows: [GlassLabTintSweepRow]
         ) async throws -> Void
     ) async throws {
-        guard let hostWindow, let contentView = hostWindow.contentView else {
+        guard let hostWindow else {
             throw GlassLabTintSweepError.noHostWindow
+        }
+        guard let mainProbeHost, mainProbeHost.window === hostWindow else {
+            throw GlassLabTintSweepError.probeHostUnavailable
         }
         NSApplication.shared.activate(ignoringOtherApps: true)
         hostWindow.makeKeyAndOrderFront(nil)
@@ -439,7 +453,7 @@ private final class GlassLabTintSweepCaptureSession {
         }
 
         let mainContainer = makeClippedContainer()
-        contentView.addSubview(mainContainer)
+        mainProbeHost.addSubview(mainContainer)
         self.mainContainer = mainContainer
         guard prepareWitnessWindow(), let witnessContainer else {
             tearDown()
@@ -457,7 +471,7 @@ private final class GlassLabTintSweepCaptureSession {
             tearDown()
         }
 
-        contentView.layoutSubtreeIfNeeded()
+        mainProbeHost.layoutSubtreeIfNeeded()
         witnessWindow?.contentView?.layoutSubtreeIfNeeded()
         try await Task.sleep(for: .milliseconds(600))
         guard hostParticipates, witnessIsMainOff else {
@@ -477,13 +491,13 @@ private final class GlassLabTintSweepCaptureSession {
                 pair.mainOn.tintColor = nil
                 pair.mainOff.tintColor = nil
             }
-            contentView.layoutSubtreeIfNeeded()
+            mainProbeHost.layoutSubtreeIfNeeded()
             witnessWindow?.contentView?.layoutSubtreeIfNeeded()
             for pair in pairs {
                 pair.mainOn.tintColor = color.nsColor
                 pair.mainOff.tintColor = color.nsColor
             }
-            contentView.layoutSubtreeIfNeeded()
+            mainProbeHost.layoutSubtreeIfNeeded()
             witnessWindow?.contentView?.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(350))
 
@@ -607,7 +621,9 @@ private final class GlassLabTintSweepCaptureSession {
             cell: GlassLabTintSweepCell(cell),
             matrix: tint.matrix,
             structure: result.structure,
-            maximumStructureResidual: result.maximumResidual
+            maximumStructureResidual: result.maximumResidual,
+            lumaEndpointResidual: result.lumaEndpointResidual,
+            neutralSuppressionResidual: result.neutralSuppressionResidual
         )
     }
 
@@ -793,7 +809,8 @@ extension GlassLabView {
                     Text(
                         "\(document.completedColorCount)/"
                             + "\(document.plan.colors.count) colors · "
-                            + "\(document.rows.count) rows"
+                            + "\(document.rows.count) rows · "
+                            + "\(document.unclassifiedRowCount) unclassified"
                     )
                     .monospacedDigit()
                 }
@@ -834,7 +851,9 @@ extension GlassLabView {
                 tintParameterizationStatus =
                     "Captured \(document.completedColorCount)/"
                     + "\(document.plan.colors.count) colors · "
-                    + "\(document.rows.count) rows · \(destination.path)"
+                    + "\(document.rows.count) rows · "
+                    + "\(document.unclassifiedRowCount) unclassified · "
+                    + destination.path
             } catch is CancellationError {
                 tintParameterizationStatus =
                     "Tint sweep cancelled; completed colors remain checkpointed."
@@ -850,9 +869,12 @@ extension GlassLabView {
     func captureTintParameterizationSweep(
         into destination: URL
     ) async throws -> GlassLabTintParameterizationSweepDocument {
-        guard let hostWindow = state.testWindow.liveControlWindow
-                ?? NSApp.mainWindow else {
+        guard let hostWindow = state.testWindow.liveControlWindow else {
             throw GlassLabTintSweepError.noHostWindow
+        }
+        guard let mainProbeHost = state.testWindow.liveControlProbeHost,
+              mainProbeHost.window === hostWindow else {
+            throw GlassLabTintSweepError.probeHostUnavailable
         }
         let plan = GlassLabTintSweepPlan.fullGridV1
         let currentEnvironment = GlassMaterialStyleAtlas.Environment.current(
@@ -897,6 +919,7 @@ extension GlassLabView {
 
         let session = GlassLabTintSweepCaptureSession(
             hostWindow: hostWindow,
+            mainProbeHost: mainProbeHost,
             plan: plan
         )
         let activity = ProcessInfo.processInfo.beginActivity(
