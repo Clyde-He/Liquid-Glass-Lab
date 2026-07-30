@@ -189,6 +189,11 @@ final class GlassMaterialAtlasProvider {
         captureTask?.cancel()
         tintCaptureGeneration += 1
         tintCaptureTask?.cancel()
+        // The cancelled task's own cleanup is generation-guarded and will not
+        // run; clear the handle here so a later `cancelTintCapture` cannot
+        // mistake it for a live transaction and tear down the witness window
+        // out from under the fresh base calibration.
+        tintCaptureTask = nil
         atlas = GlassMaterialStyleAtlas()
         atlasSource = .none
         didLoadCandidates = true
