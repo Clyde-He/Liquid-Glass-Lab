@@ -254,6 +254,50 @@
       "role": "canonical"
     },
     {
+      "id": "tint-parameterization-hue-phase-2c",
+      "file": "tint-parameterization-hue-phase-2c.json",
+      "sha256": "880668e22e1450cc3368a1cac4f169295488aae40b76303fb76ab9dba4fc1d15",
+      "formatVersion": 1,
+      "entryCount": 1088,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-30T05:33:33Z",
+      "axes": {
+        "sourceColors": {
+          "hueFractionGrid": 128,
+          "nearGrayBoundary": 8
+        },
+        "appearance": [
+          "Light",
+          "Dark"
+        ],
+        "material": [
+          "Regular",
+          "Clear"
+        ],
+        "mainParticipation": [
+          false,
+          true
+        ]
+      },
+      "environment": {
+        "displaySignature": "Studio Display XDR @2.0x",
+        "atlasSchemaVersion": 2
+      },
+      "notes": [
+        "Complete 136-color × eight-cell hue-fraction and near-gray follow-up fixture captured in the same build and display environment as the full grid and Phase 2b.",
+        "All 1,088 rows pass the hard gates and every row is structurally classified.",
+        "Twelve repeated Full Grid coordinates cover 96 cell rows with exactly zero matrix-coefficient difference across sessions.",
+        "Absolute chroma 0.0003 selects the achromatic family while 0.0004 selects the chromatic family at both V=0.5 and V=1.0.",
+        "Generic smooth interpolation over the combined high-brightness grid does not certify synthesis; this fixture is retained to investigate the unresolved piecewise gamut/headroom branches."
+      ],
+      "role": "canonical"
+    },
+    {
       "id": "formula-analysis",
       "file": "formula-analysis.json",
       "sha256": "7695ddc86cc277f50b2df370135bbfc0f4b868cd184f32de1db818bf97d6af26",
