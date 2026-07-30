@@ -348,3 +348,44 @@ Open item: the flush behavior above was measured on a non-participating
 window (a plain CLI binary cannot become main/key). Confirming it under
 genuine Main-On requires running the experiment inside the bundled Lab app
 before any product path is changed.
+
+### The writer, located precisely
+
+Swizzling `-[CAFilter setValue:forKey:]` and backtracing the
+`inputColorMatrix` write names the owner exactly — it is **SwiftUICore**, not
+AppKit or CoreUI:
+
+```
+_CAFilterSetInput
+SwiftUI.GraphicsFilter.makeCAFilter()
+SwiftUI.SDFLayer.updateSDFEffects(for:at:in:backdropGroupID:blend:opacity:
+                                  options:gain:maxColorComponent:)
+SwiftUI.SDFLayer.finishUpdatingStyle(_:in:elementCount:backdropGroupID:)
+```
+
+Two parameters of that frame matter for this investigation: `gain` and
+**`maxColorComponent`** — the second is the natural place where an
+out-of-unit-range Tint color is normalized, i.e. the system's own answer to
+the wide-gamut question.
+
+SwiftUI's `_ColorMatrix` algebra is exported and directly callable
+(`init(colorMonochrome:amount:bias:)`, `init(colorMultiply:premultiplied:)`,
+`init(brightness:)`, `init(hueRotation:)`, `*` composition, …).
+`colorMonochrome` was verified to generate exactly the rank-1 luma family:
+with `amount: 1, bias: 0` the bright endpoint equals the source color to
+float precision and the dark endpoint is zero; a nonzero `bias` moves the
+dark endpoint *proportionally* to the source color. The measured glass dark
+endpoint is **not** proportional to the source, and a breakpoint on
+`colorMonochrome` never fires during glass Tint resolution — so the endpoint
+arithmetic is inlined inside `updateSDFEffects` rather than composed from the
+exported initializers.
+
+Also of note: `CAColorMatrixMakeColorSourceOver` and friends in QuartzCore
+take four floats (`s0`–`s3`) and return the struct indirectly via `x8`; they
+implement plain alpha compositing, not the glass form.
+
+**Where this leaves the two routes.** A callable oracle now requires
+disassembling `SDFLayer.updateSDFEffects` to recover the endpoint arithmetic
+(a bounded reverse-engineering task, and `maxColorComponent` is the thread to
+pull). The synchronous-capture route needs no symbol at all, covers every
+present and future gamut by construction, and is the cheaper permanent fix.
