@@ -338,6 +338,16 @@ struct GlassMaterialStyleAtlas: Codable, Sendable {
         tintMatrices[cell] = entries
     }
 
+    /// Certified catalogs carry only the reusable base. Color-bound matrices
+    /// belong to the app-scoped runtime overlay.
+    public mutating func removeAllTintMatrices() {
+        tintMatrices = [:]
+    }
+
+    public var hasTintMatrices: Bool {
+        tintMatrices.values.contains { !$0.isEmpty }
+    }
+
     /// Applies only the reusable tint overlay from a compatible runtime cache
     /// to a newly bundled certified base. The catalog remains authoritative
     /// for every style sample; cache data can only add well-formed color-bound

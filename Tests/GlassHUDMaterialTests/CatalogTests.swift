@@ -16,6 +16,8 @@ final class CatalogTests: XCTestCase {
         )
 
         XCTAssertEqual(atlas.environment?.resolvedOSMajorVersion, 27)
+        XCTAssertEqual(atlas.environment?.osMajorVersion, 27)
+        XCTAssertFalse(atlas.hasTintMatrices)
         XCTAssertTrue(
             atlas.hasVerifiedMainOnCoverage(
                 shortSides: [48, 64, 96, 128, 160, 200, 320]
@@ -29,10 +31,12 @@ final class CatalogTests: XCTestCase {
             GlassMaterialAtlasCatalog.bundledAtlasURL(forMacOSMajor: 27)
         )
         let catalogData = try Data(contentsOf: catalogURL)
-        var cachedAtlas = try JSONDecoder().decode(
+        var certifiedAtlas = try JSONDecoder().decode(
             GlassMaterialStyleAtlas.self,
             from: catalogData
         )
+        certifiedAtlas.environment = .current(for: nil)
+        var cachedAtlas = certifiedAtlas
         let color = NSColor(
             calibratedRed: 0.123,
             green: 0.456,
@@ -57,13 +61,15 @@ final class CatalogTests: XCTestCase {
             withIntermediateDirectories: true
         )
         defer { try? FileManager.default.removeItem(at: directory) }
+        let certifiedURL = directory.appendingPathComponent("certified.json")
         let cacheURL = directory.appendingPathComponent("runtime.json")
+        try JSONEncoder().encode(certifiedAtlas).write(to: certifiedURL)
         try JSONEncoder().encode(cachedAtlas).write(to: cacheURL)
 
         let provider = GlassMaterialAtlasProvider(
             hostWindow: NSWindow(),
             storageURL: cacheURL,
-            certifiedAtlasURLs: [catalogURL]
+            certifiedAtlasURLs: [certifiedURL]
         )
         provider.ensureCaptured()
 

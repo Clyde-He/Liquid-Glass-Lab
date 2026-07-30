@@ -479,9 +479,12 @@ extension GlassLabView {
             return
         }
         do {
+            var catalog = atlas
+            catalog.removeAllTintMatrices()
+            catalog.environment?.osMajorVersion = major
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
-            try encoder.encode(atlas).write(
+            try encoder.encode(catalog).write(
                 to: destinationURL,
                 options: .atomic
             )

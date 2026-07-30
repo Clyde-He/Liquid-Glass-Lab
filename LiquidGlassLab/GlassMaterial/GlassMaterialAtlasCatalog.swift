@@ -10,12 +10,12 @@
 import Foundation
 
 enum GlassMaterialAtlasCatalog {
-    public static let resourcePrefix = "glass-macos-"
+    static let resourcePrefix = "glass-macos-"
 
     /// Finds every conventionally named major catalog in a bundle. The
     /// Provider decodes candidates and admits only the current schema + macOS
-    /// major, so products can pass the complete URL list unchanged.
-    public static func bundledAtlasURLs(
+    /// major.
+    static func bundledAtlasURLs(
         in bundle: Bundle? = nil
     ) -> [URL] {
         let bundles = bundle.map { [$0] } ?? defaultBundles
@@ -34,9 +34,8 @@ enum GlassMaterialAtlasCatalog {
         }
     }
 
-    /// Direct lookup for a known major. Useful when a framework or Swift
-    /// package supplies its own resource bundle instead of `Bundle.main`.
-    public static func bundledAtlasURL(
+    /// Direct lookup for a known major.
+    static func bundledAtlasURL(
         forMacOSMajor major: Int,
         in bundle: Bundle? = nil
     ) -> URL? {

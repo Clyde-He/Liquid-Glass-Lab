@@ -199,6 +199,17 @@ final class GlassMaterialAtlasProvider {
         }
     }
 
+    /// Stops a color-specific transaction when its product consumer goes
+    /// away. Base calibration is deliberately left alone so a later attach can
+    /// still reuse it.
+    public func cancelTintCapture() {
+        guard tintCaptureTask != nil else { return }
+        tintCaptureGeneration += 1
+        tintCaptureTask?.cancel()
+        tintCaptureTask = nil
+        tearDownWitnessWindow()
+    }
+
     /// Captures the paired Main-On and Main-Off tint matrices for one chosen
     /// RGB in all four appearance × variant contexts. The base atlas must
     /// already be verified. Each pair is admitted only while its base styles
@@ -386,6 +397,10 @@ final class GlassMaterialAtlasProvider {
         let cached = storageURL.flatMap(loadVerifiedAtlas(from:))
         for url in certifiedAtlasURLs {
             if var candidate = loadVerifiedAtlas(from: url) {
+                // Certified assets are authoritative only for the reusable
+                // base. Tint is always a color-bound runtime overlay, even if
+                // a hand-authored or legacy catalog accidentally contains it.
+                candidate.removeAllTintMatrices()
                 if let cached {
                     candidate.mergeTintMatrices(from: cached)
                 }

@@ -108,6 +108,10 @@ public final class GlassHUDMaterialController {
                 1
             )
             guard configuration != oldValue else { return }
+            if configuration.emphasis != oldValue.emphasis
+                || !Self.colorsMatch(configuration.tint, oldValue.tint) {
+                resetTintRetryBudget(cancelInFlightCapture: true)
+            }
             applyConfiguration()
         }
     }
@@ -129,13 +133,16 @@ public final class GlassHUDMaterialController {
     private var installRetryTask: Task<Void, Never>?
     private var calibrationRetryTask: Task<Void, Never>?
     private var tintTask: Task<Void, Never>?
-    private var tintCaptureInFlight = false
+    private var activeTintCaptureGeneration: Int?
+    private var tintRetryGeneration = 0
+    private var tintRetryIndex = 0
     private var calibrationRetryIndex = 0
     private var requestedCalibrationAfterInstallFailure = false
 
     private static let calibrationRetryMilliseconds = [
         1_000, 2_000, 5_000, 10_000, 30_000,
     ]
+    private static let tintRetryMilliseconds = [450, 1_000, 2_000, 5_000]
 
     public convenience init(
         hostWindow: NSWindow,
@@ -178,11 +185,16 @@ public final class GlassHUDMaterialController {
 
     /// Attaches product configuration to one material view. Calibration is
     /// lazy but automatic; until verified data is ready the view remains
-    /// native and `status` exposes why.
-    public func attach(to glassView: GlassMaterialEffectView) {
+    /// native and `status` exposes why. Replacing an attached view is accepted
+    /// only after the old view has left its window, because AppKit offers no
+    /// in-place way to restore a privately authored material tree.
+    @discardableResult
+    public func attach(to glassView: GlassMaterialEffectView) -> Bool {
         if self.glassView !== glassView {
+            guard self.glassView?.window == nil else { return false }
             self.glassView?.materialWindowDidChange = nil
             self.glassView?.materialStrength.invalidate()
+            resetTintRetryBudget()
         }
         self.glassView = glassView
         glassView.materialWindowDidChange = { [weak self, weak glassView] in
@@ -191,15 +203,27 @@ public final class GlassHUDMaterialController {
         }
         applyConfiguration()
         atlasProvider.ensureCaptured()
+        return true
     }
 
-    public func detach() {
+    /// Stops controlling the attached view after it has been removed from its
+    /// window. Returns false and keeps control while the view is still on
+    /// screen; silently abandoning a frozen view would leave authored private
+    /// material values visible with no controller maintaining them.
+    @discardableResult
+    public func detach() -> Bool {
+        guard glassView?.window == nil else { return false }
         installRetryTask?.cancel()
-        tintTask?.cancel()
+        installRetryTask = nil
+        calibrationRetryTask?.cancel()
+        calibrationRetryTask = nil
+        calibrationRetryIndex = 0
+        resetTintRetryBudget(cancelInFlightCapture: true)
         glassView?.materialWindowDidChange = nil
         glassView?.materialStrength.invalidate()
         glassView = nil
         refreshStatus()
+        return true
     }
 
     public func ensureReady() {
@@ -362,11 +386,20 @@ public final class GlassHUDMaterialController {
     }
 
     private func scheduleTintLock() {
-        tintTask?.cancel()
-        guard configuration.tint != nil, !tintCaptureInFlight else { return }
+        guard tintTask == nil,
+              configuration.tint != nil,
+              activeTintCaptureGeneration == nil,
+              tintRetryIndex < Self.tintRetryMilliseconds.count
+        else { return }
+        let delay = Self.tintRetryMilliseconds[tintRetryIndex]
+        let generation = tintRetryGeneration
         tintTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(450))
-            guard !Task.isCancelled, let self,
+            try? await Task.sleep(for: .milliseconds(delay))
+            guard let self,
+                  generation == self.tintRetryGeneration
+            else { return }
+            self.tintTask = nil
+            guard !Task.isCancelled,
                   let requestedColor = self.configuration.tint,
                   !self.tintCoverageIsComplete(
                     for: requestedColor,
@@ -378,31 +411,55 @@ public final class GlassHUDMaterialController {
                 return
             }
 
-            self.tintCaptureInFlight = true
+            self.tintRetryIndex += 1
+            self.activeTintCaptureGeneration = generation
             self.status = .lockingTint
             self.atlasProvider.captureTintMatrices(
                 for: requestedColor
             ) { [weak self] success in
                 guard let self else { return }
-                self.tintCaptureInFlight = false
-                guard self.configuration.tint.map({
-                    Self.colorsMatch($0, requestedColor)
-                }) == true else {
-                    self.scheduleTintLock()
+                if self.activeTintCaptureGeneration == generation {
+                    self.activeTintCaptureGeneration = nil
+                }
+                guard generation == self.tintRetryGeneration,
+                      Self.colorsMatch(
+                        self.configuration.tint,
+                        requestedColor
+                      )
+                else {
+                    self.applyConfiguration()
                     return
                 }
                 if success {
-                    self.applyConfiguration()
-                } else {
-                    self.status = .fallback(.tintNotYetVerified)
-                    self.scheduleTintLock()
+                    self.tintRetryIndex = 0
                 }
+                self.applyConfiguration()
             }
         }
     }
 
-    private static func colorsMatch(_ lhs: NSColor, _ rhs: NSColor) -> Bool {
-        lhs.isEqual(rhs)
+    private func resetTintRetryBudget(
+        cancelInFlightCapture: Bool = false
+    ) {
+        tintRetryGeneration += 1
+        tintRetryIndex = 0
+        tintTask?.cancel()
+        tintTask = nil
+        if cancelInFlightCapture {
+            activeTintCaptureGeneration = nil
+            atlasProvider.cancelTintCapture()
+        }
+    }
+
+    private static func colorsMatch(_ lhs: NSColor?, _ rhs: NSColor?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            true
+        case let (lhs?, rhs?):
+            lhs.isEqual(rhs)
+        default:
+            false
+        }
     }
 
     // MARK: - Recovery and status
@@ -437,6 +494,7 @@ public final class GlassHUDMaterialController {
     }
 
     private func recoveryOpportunityArrived() {
+        resetTintRetryBudget()
         atlasProvider.ensureCaptured()
         if configuration.tint != nil {
             scheduleTintLock()
@@ -460,14 +518,28 @@ public final class GlassHUDMaterialController {
     }
 
     private func refreshStatus() {
-        if tintCaptureInFlight {
+        guard glassView != nil else {
+            status = .idle
+            return
+        }
+        if activeTintCaptureGeneration == tintRetryGeneration {
             status = .lockingTint
             return
         }
         if let tint = configuration.tint,
            atlasProvider.isPairedCoverageComplete,
            !tintCoverageIsComplete(for: tint, emphasis: configuration.emphasis) {
-            status = hostParticipates ? .lockingTint : .waitingForMainWindow
+            guard hostParticipates else {
+                status = .waitingForMainWindow
+                return
+            }
+            guard tintRetryIndex < Self.tintRetryMilliseconds.count
+                    || tintTask != nil
+            else {
+                status = .fallback(.tintNotYetVerified)
+                return
+            }
+            status = .lockingTint
             scheduleTintLock()
             return
         }
@@ -480,10 +552,7 @@ public final class GlassHUDMaterialController {
         case let .capturing(completed, total):
             status = .calibrating(completed: completed, total: total)
         case .ready:
-            guard let glassView else {
-                status = .ready(source: source)
-                return
-            }
+            guard let glassView else { return }
             status = glassView.materialStrength.frozenStyleIsCurrentlyApplied
                 ? .ready(source: source)
                 : .fallback(.frozenInstallFailed)
