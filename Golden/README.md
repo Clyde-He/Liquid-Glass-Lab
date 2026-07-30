@@ -335,11 +335,14 @@ node Golden/tools/analyze-tint-parameterization.mjs \
 
 The analyzer revalidates source colors, alpha routing, finite matrix payloads,
 eight-cell coverage, per-cell transform-family selection, and the fixed-RGB
-alpha sweep. Rank-1 luma and neutral suppression are classifications rather
-than admission gates; unfamiliar matrices remain raw `unclassified` evidence
-and are reported as missing model coverage. Promote only a complete,
-hard-gate-passing export into the matching `Golden/macOS-<major>/` directory;
-the raw dataset is evidence for formula fitting, not a runtime catalog.
+alpha sweep. Rank-1 luma, neutral suppression, and achromatic channel-affine
+matrices are classifications rather than admission gates; unfamiliar matrices
+remain raw `unclassified` evidence and are reported as missing model coverage.
+Legacy gray rows originally stored as `unclassified` are accepted and
+reclassified without rewriting their captured matrices. Promote only a
+complete, hard-gate-passing export into the matching `Golden/macOS-<major>/`
+directory; the raw dataset is evidence for formula fitting, not a runtime
+catalog.
 
 ## Core Recipe exporter
 

@@ -62,6 +62,7 @@ struct GlassLabTintSweepCell: Codable, Hashable, Sendable {
 enum GlassLabTintMatrixStructure: String, Codable, Sendable {
     case lumaEndpoints
     case neutralSuppression
+    case achromaticChannelAffine
     case unclassified
 }
 
@@ -74,6 +75,7 @@ struct GlassLabTintSweepRow: Codable, Hashable, Sendable {
     var maximumStructureResidual: Double
     var lumaEndpointResidual: Double?
     var neutralSuppressionResidual: Double?
+    var achromaticChannelAffineResidual: Double?
 }
 
 struct GlassLabTintSweepPlan: Codable, Equatable, Sendable {
@@ -89,6 +91,14 @@ struct GlassLabTintSweepPlan: Codable, Equatable, Sendable {
         referenceShortSide: 200,
         consecutiveStableReads: 2,
         colors: makeFullGridColors()
+    )
+
+    static let focusedPhase2b = GlassLabTintSweepPlan(
+        id: "tint-parameterization-focused-phase-2b",
+        referenceWidth: 480,
+        referenceShortSide: 200,
+        consecutiveStableReads: 2,
+        colors: makeFocusedPhase2bColors()
     )
 
     private static func makeFullGridColors() -> [GlassLabTintSweepColor] {
@@ -176,6 +186,104 @@ struct GlassLabTintSweepPlan: Codable, Equatable, Sendable {
                 green: 0.45,
                 blue: 0.35,
                 alpha: alpha
+            ))
+        }
+        return colors
+    }
+
+    private static func makeFocusedPhase2bColors()
+        -> [GlassLabTintSweepColor] {
+        var colors: [GlassLabTintSweepColor] = []
+        let hues = [17.0, 137.0]
+
+        // The full grid found a separate high-brightness branch. Sample that
+        // region densely at two off-axis hues without repeating the 12-hue
+        // symmetry proof from v1.
+        for hueDegrees in hues {
+            for saturation in [0.1, 0.25, 0.5, 0.75, 1.0] {
+                for brightness in [
+                    0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 0.98, 1.0,
+                ] {
+                    colors.append(hsvColor(
+                        id: String(
+                            format: "high-h%03d-s%03d-v%03d",
+                            Int(hueDegrees),
+                            Int((saturation * 1000).rounded()),
+                            Int((brightness * 1000).rounded())
+                        ),
+                        label: String(
+                            format: "High H%03d S%.3f V%.3f",
+                            Int(hueDegrees),
+                            saturation,
+                            brightness
+                        ),
+                        hue: hueDegrees / 360,
+                        saturation: saturation,
+                        brightness: brightness,
+                        alpha: 0.5
+                    ))
+                }
+            }
+        }
+
+        // Locate the transition between the exact achromatic family and the
+        // hue-carrying endpoint family near S=0.
+        for hueDegrees in hues {
+            for saturation in [0.001, 0.005, 0.01, 0.025, 0.05] {
+                for brightness in [0.25, 0.625, 0.85, 1.0] {
+                    colors.append(hsvColor(
+                        id: String(
+                            format: "low-s-h%03d-s%03d-v%03d",
+                            Int(hueDegrees),
+                            Int((saturation * 1000).rounded()),
+                            Int((brightness * 1000).rounded())
+                        ),
+                        label: String(
+                            format: "Low-S H%03d S%.3f V%.3f",
+                            Int(hueDegrees),
+                            saturation,
+                            brightness
+                        ),
+                        hue: hueDegrees / 360,
+                        saturation: saturation,
+                        brightness: brightness,
+                        alpha: 0.5
+                    ))
+                }
+            }
+        }
+
+        // Held-out gray values validate the closed-form achromatic transform;
+        // none appeared in full-grid-v1.
+        for value in [0.0625, 0.1875, 0.375, 0.625, 0.875] {
+            colors.append(GlassLabTintSweepColor(
+                id: "gray-holdout-\(componentLabel(value))",
+                label: String(format: "Gray Holdout %.4f", value),
+                red: value,
+                green: value,
+                blue: value,
+                alpha: 0.5
+            ))
+        }
+
+        // Independent RGB holdouts are excluded from model fitting and remain
+        // available for end-to-end interpolation error checks.
+        let holdouts: [(String, Double, Double, Double)] = [
+            ("rose", 0.83, 0.31, 0.57),
+            ("green", 0.34, 0.82, 0.29),
+            ("blue", 0.19, 0.47, 0.88),
+            ("amber", 0.96, 0.68, 0.12),
+            ("violet", 0.62, 0.21, 0.91),
+            ("teal", 0.08, 0.78, 0.71),
+        ]
+        for (name, red, green, blue) in holdouts {
+            colors.append(GlassLabTintSweepColor(
+                id: "rgb-holdout-\(name)",
+                label: "RGB Holdout \(name.capitalized)",
+                red: red,
+                green: green,
+                blue: blue,
+                alpha: 0.5
             ))
         }
         return colors
@@ -284,6 +392,7 @@ enum GlassLabTintMatrixGate {
         var maximumResidual: Double
         var lumaEndpointResidual: Double
         var neutralSuppressionResidual: Double
+        var achromaticChannelAffineResidual: Double
     }
 
     static func validate(
@@ -337,12 +446,14 @@ enum GlassLabTintMatrixGate {
             matrix,
             isLightAppearance: cell.isLightAppearance
         )
+        let achromaticResidual = achromaticChannelAffineResidual(matrix)
         if rankOneResidual <= tolerance {
             return Result(
                 structure: .lumaEndpoints,
                 maximumResidual: max(rankOneResidual, alphaRowResidual),
                 lumaEndpointResidual: rankOneResidual,
-                neutralSuppressionResidual: neutralResidual
+                neutralSuppressionResidual: neutralResidual,
+                achromaticChannelAffineResidual: achromaticResidual
             )
         }
         if neutralResidual <= tolerance {
@@ -350,15 +461,32 @@ enum GlassLabTintMatrixGate {
                 structure: .neutralSuppression,
                 maximumResidual: max(neutralResidual, alphaRowResidual),
                 lumaEndpointResidual: rankOneResidual,
-                neutralSuppressionResidual: neutralResidual
+                neutralSuppressionResidual: neutralResidual,
+                achromaticChannelAffineResidual: achromaticResidual
+            )
+        }
+        if achromaticResidual <= tolerance {
+            return Result(
+                structure: .achromaticChannelAffine,
+                maximumResidual: max(achromaticResidual, alphaRowResidual),
+                lumaEndpointResidual: rankOneResidual,
+                neutralSuppressionResidual: neutralResidual,
+                achromaticChannelAffineResidual: achromaticResidual
             )
         }
         return Result(
             structure: .unclassified,
             maximumResidual:
-                max(min(rankOneResidual, neutralResidual), alphaRowResidual),
+                max(
+                    min(
+                        rankOneResidual,
+                        min(neutralResidual, achromaticResidual)
+                    ),
+                    alphaRowResidual
+                ),
             lumaEndpointResidual: rankOneResidual,
-            neutralSuppressionResidual: neutralResidual
+            neutralSuppressionResidual: neutralResidual,
+            achromaticChannelAffineResidual: achromaticResidual
         )
     }
 
@@ -386,6 +514,25 @@ enum GlassLabTintMatrixGate {
         for row in 0..<3 {
             for column in 0..<3 {
                 let expected = (row == column ? 0.7 : 0) + 0.3 * luma[column]
+                maximum = max(
+                    maximum,
+                    abs(matrix[row * 5 + column] - expected)
+                )
+            }
+            maximum = max(maximum, abs(matrix[row * 5 + 4] - bias))
+        }
+        return maximum
+    }
+
+    private static func achromaticChannelAffineResidual(
+        _ matrix: [Double]
+    ) -> Double {
+        let diagonal = (matrix[0] + matrix[6] + matrix[12]) / 3
+        let bias = (matrix[4] + matrix[9] + matrix[14]) / 3
+        var maximum = 0.0
+        for row in 0..<3 {
+            for column in 0..<3 {
+                let expected = row == column ? diagonal : 0
                 maximum = max(
                     maximum,
                     abs(matrix[row * 5 + column] - expected)
@@ -623,7 +770,9 @@ private final class GlassLabTintSweepCaptureSession {
             structure: result.structure,
             maximumStructureResidual: result.maximumResidual,
             lumaEndpointResidual: result.lumaEndpointResidual,
-            neutralSuppressionResidual: result.neutralSuppressionResidual
+            neutralSuppressionResidual: result.neutralSuppressionResidual,
+            achromaticChannelAffineResidual:
+                result.achromaticChannelAffineResidual
         )
     }
 
@@ -776,7 +925,20 @@ extension GlassLabView {
                         isCapturingTintParameterization
                             ? "Capturing…" : "Capture / Resume Full Grid…"
                     ) {
-                        startTintParameterizationSweep()
+                        startTintParameterizationSweep(
+                            plan: .fullGridV1
+                        )
+                    }
+                    .disabled(
+                        isCapturingTintParameterization
+                            || isCapturingTintStudy
+                            || isCapturingAtlas
+                            || isRunningAtlasReadback
+                    )
+                    Button("Capture / Resume Focused Phase 2b…") {
+                        startTintParameterizationSweep(
+                            plan: .focusedPhase2b
+                        )
                     }
                     .disabled(
                         isCapturingTintParameterization
@@ -791,10 +953,12 @@ extension GlassLabView {
                     }
                 }
                 Text(
-                    "\(GlassLabTintSweepPlan.fullGridV1.colors.count) colors × "
-                        + "8 paired cells. One hidden probe session, no runtime "
-                        + "Tint cache writes. Every completed color is atomically "
-                        + "checkpointed and can be resumed."
+                    "\(GlassLabTintSweepPlan.fullGridV1.colors.count)-color "
+                        + "baseline or "
+                        + "\(GlassLabTintSweepPlan.focusedPhase2b.colors.count)"
+                        + "-color high-brightness/low-saturation follow-up, each "
+                        + "across 8 paired cells. No runtime Tint cache writes; "
+                        + "completed colors are atomically checkpointed."
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -818,7 +982,7 @@ extension GlassLabView {
         }
     }
 
-    func startTintParameterizationSweep() {
+    func startTintParameterizationSweep(plan: GlassLabTintSweepPlan) {
         guard !isCapturingTintParameterization,
               !isCapturingTintStudy,
               !isCapturingAtlas,
@@ -829,8 +993,10 @@ extension GlassLabView {
         panel.allowedContentTypes = [.json]
         let majorVersion =
             ProcessInfo.processInfo.operatingSystemVersion.majorVersion
-        panel.nameFieldStringValue =
-            "tint-parameterization-sweep-macos-\(majorVersion).json"
+        panel.nameFieldStringValue = plan == .fullGridV1
+            ? "tint-parameterization-sweep-macos-\(majorVersion).json"
+            : "tint-parameterization-focused-phase-2b-macos-"
+                + "\(majorVersion).json"
         panel.message = "Choose an existing checkpoint to resume or a new file."
         guard panel.runModal() == .OK, let destination = panel.url else {
             return
@@ -845,7 +1011,8 @@ extension GlassLabView {
             }
             do {
                 let document = try await captureTintParameterizationSweep(
-                    into: destination
+                    into: destination,
+                    plan: plan
                 )
                 tintParameterizationDocument = document
                 tintParameterizationStatus =
@@ -867,7 +1034,8 @@ extension GlassLabView {
 
     @MainActor
     func captureTintParameterizationSweep(
-        into destination: URL
+        into destination: URL,
+        plan: GlassLabTintSweepPlan
     ) async throws -> GlassLabTintParameterizationSweepDocument {
         guard let hostWindow = state.testWindow.liveControlWindow else {
             throw GlassLabTintSweepError.noHostWindow
@@ -876,7 +1044,6 @@ extension GlassLabView {
               mainProbeHost.window === hostWindow else {
             throw GlassLabTintSweepError.probeHostUnavailable
         }
-        let plan = GlassLabTintSweepPlan.fullGridV1
         let currentEnvironment = GlassMaterialStyleAtlas.Environment.current(
             for: hostWindow.screen
         )
@@ -928,7 +1095,7 @@ extension GlassLabView {
                 .idleSystemSleepDisabled,
                 .idleDisplaySleepDisabled,
             ],
-            reason: "Capturing the Tint parameterization full-grid sweep"
+            reason: "Capturing Tint parameterization plan \(plan.id)"
         )
         defer { ProcessInfo.processInfo.endActivity(activity) }
 
@@ -1013,7 +1180,10 @@ extension GlassLabView {
                 expectedColor: expectedColor,
                 cell: row.cell.atlasCell
             )
-            guard result.structure == row.structure else {
+            guard tintSweepStructuresMatch(
+                stored: row.structure,
+                measured: result.structure
+            ) else {
                 throw GlassLabTintSweepError.invalidExistingDocument(
                     "\(row.colorID) · \(row.cell.label) structure changed"
                 )
@@ -1065,7 +1235,10 @@ extension GlassLabView {
                     expectedColor: color,
                     cell: row.cell.atlasCell
                 )
-                guard result.structure == row.structure else {
+                guard tintSweepStructuresMatch(
+                    stored: row.structure,
+                    measured: result.structure
+                ) else {
                     throw GlassLabTintSweepError.invalidExistingDocument(
                         "\(row.colorID) · \(row.cell.label) structure changed"
                     )
@@ -1088,6 +1261,17 @@ extension GlassLabView {
                 }
             }
         )
+    }
+
+    private static func tintSweepStructuresMatch(
+        stored: GlassLabTintMatrixStructure,
+        measured: GlassLabTintMatrixStructure
+    ) -> Bool {
+        stored == measured
+            || (
+                stored == .unclassified
+                    && measured == .achromaticChannelAffine
+            )
     }
 
     private static func writeTintSweepCheckpoint(

@@ -36,6 +36,19 @@ function neutralMatrix(color, isLightAppearance) {
   return matrix;
 }
 
+function achromaticMatrix(color) {
+  const value = (color.red + color.green + color.blue) / 3;
+  const denominator = 1 + 0.05 * value * (1 - value);
+  const diagonal = 0.3125 / denominator;
+  const bias = (1.1875 * value - 0.25) / denominator;
+  return [
+    diagonal, 0, 0, 0, bias,
+    0, diagonal, 0, 0, bias,
+    0, 0, diagonal, 0, bias,
+    0, 0, 0, color.alpha, 0,
+  ];
+}
+
 function makeDocument() {
   const color = {
     id: "known-coral",
@@ -172,6 +185,46 @@ test("retains a structurally unfamiliar matrix as unclassified evidence", () => 
   assert.equal(
     result.cellFamilies["Light · Regular · Main-On"].unclassified,
     1
+  );
+});
+
+test("recognizes the achromatic channel-affine family and its formula", () => {
+  const document = makeDocument();
+  const color = document.plan.colors[0];
+  color.red = 0.375;
+  color.green = 0.375;
+  color.blue = 0.375;
+  for (const row of document.rows) {
+    row.sourceColor = {
+      red: color.red,
+      green: color.green,
+      blue: color.blue,
+      alpha: color.alpha,
+    };
+    if (row.cell.hasMainParticipation || row.cell.isClear) {
+      row.matrix = achromaticMatrix(color);
+      // A v1 checkpoint used this value before the family was understood.
+      row.structure = "unclassified";
+    }
+  }
+  const result = analyzeTintParameterization(document);
+  assert.equal(result.unclassifiedRowCount, 0);
+  assert.equal(
+    result.cellFamilies["Light · Regular · Main-On"].achromatic,
+    1
+  );
+  assert.ok(result.maximumAchromaticFormulaResidual < 1e-12);
+  assert.equal(result.achromaticFormulaRowCount, 6);
+});
+
+test("allows Float-to-Number noise in stored residual metadata", () => {
+  const document = makeDocument();
+  document.rows[0].lumaEndpointResidual = 3e-8;
+  analyzeTintParameterization(document);
+  document.rows[0].lumaEndpointResidual = 2e-7;
+  assert.throws(
+    () => analyzeTintParameterization(document),
+    /stored luma residual changed/
   );
 });
 

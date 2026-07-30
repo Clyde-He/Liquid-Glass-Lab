@@ -159,6 +159,55 @@
       "role": "canonical"
     },
     {
+      "id": "tint-parameterization-sweep",
+      "file": "tint-parameterization-sweep.json",
+      "sha256": "16ff4af8dd05a7a975462e2d4806d817201adfe915e23ea408960895534a3120",
+      "formatVersion": 1,
+      "entryCount": 1360,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-30T04:37:49Z",
+      "axes": {
+        "sourceColors": {
+          "hsvGrid": "12 hues × 4 saturations × 3 brightnesses",
+          "achromatic": 6,
+          "veryDarkHueRing": 12,
+          "historicalAnchors": [
+            "Coral",
+            "Cyan"
+          ],
+          "fixedRGBAlphaSweep": 6
+        },
+        "appearance": [
+          "Light",
+          "Dark"
+        ],
+        "material": [
+          "Regular",
+          "Clear"
+        ],
+        "mainParticipation": [
+          false,
+          true
+        ]
+      },
+      "environment": {
+        "displaySignature": "Studio Display XDR @2.0x",
+        "atlasSchemaVersion": 2
+      },
+      "notes": [
+        "Complete 170-color × eight-cell research fixture for RGB-to-Tint-matrix parameterization; not a runtime Atlas catalog.",
+        "The analyzer reclassified all 36 legacy gray rows as achromaticChannelAffine without changing their captured matrices.",
+        "All 1,360 rows pass finite-payload, source-color, alpha-routing, participation, and structural gates; no rows remain unclassified.",
+        "The exact achromatic formula reconstructs all captured gray rows within 6.2e-8; high-brightness chromatic interpolation remains a Phase 2b study."
+      ],
+      "role": "canonical"
+    },
+    {
       "id": "formula-analysis",
       "file": "formula-analysis.json",
       "sha256": "7695ddc86cc277f50b2df370135bbfc0f4b868cd184f32de1db818bf97d6af26",

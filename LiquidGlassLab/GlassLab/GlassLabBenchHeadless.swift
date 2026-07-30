@@ -136,11 +136,15 @@ extension GlassLabView {
         let tintParameterizationFlag = arguments.firstIndex(
             of: "--capture-tint-parameterization"
         )
+        let tintParameterizationFocusedFlag = arguments.firstIndex(
+            of: "--capture-tint-parameterization-focused"
+        )
         guard let flagIndex = sizeFlag
                 ?? resizeFlag
                 ?? removalWarmupFlag
                 ?? goldenFlag
                 ?? atlasFlag
+                ?? tintParameterizationFocusedFlag
                 ?? tintParameterizationFlag
                 ?? planFlag else {
             return
@@ -175,9 +179,15 @@ extension GlassLabView {
 
         var exitCode: Int32 = 0
         do {
-            if tintParameterizationFlag != nil {
+            if tintParameterizationFlag != nil
+                || tintParameterizationFocusedFlag != nil {
+                let plan: GlassLabTintSweepPlan =
+                    tintParameterizationFocusedFlag == nil
+                        ? .fullGridV1
+                        : .focusedPhase2b
                 let document = try await captureTintParameterizationSweep(
-                    into: destination
+                    into: destination,
+                    plan: plan
                 )
                 let report = "== Tint Parameterization Sweep ==\n"
                     + "Plan: \(document.plan.id)\n"

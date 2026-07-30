@@ -164,11 +164,53 @@ slices, exact Coral/Cyan historical anchors, and a fixed-RGB alpha sweep.
 Each row is rejected unless the paired style samples prove genuine Main-On
 participation and the source, alpha row, and 20 coefficients are complete.
 Structure is evidence, not admission: luma-endpoint and neutral-suppression
-rows are classified, while any unfamiliar matrix is retained verbatim as
-`unclassified` with both residuals. Use
+rows are classified alongside the achromatic channel-affine family, while any
+unfamiliar matrix is retained verbatim as `unclassified` with its residuals.
+Legacy full-grid checkpoints that called the gray family `unclassified` remain
+valid and are reclassified during analysis. Use
 `Golden/tools/analyze-tint-parameterization.mjs` to re-run those gates and
 summarize per-cell transform selection. No fitted RGB→matrix model is claimed
 until a complete dataset has been captured and analyzed.
+
+### macOS 27 full-grid result
+
+The accepted `Golden/macOS-27/tint-parameterization-sweep.json` fixture covers
+170 colors and 1,360 rows on build 26A5388g. All rows pass the capture gates and
+all structures are now classified:
+
+- six hue-carrying cells use one shared standard/pastel luma-endpoint matrix
+  family;
+- Regular Main-Off is a color-independent neutral-suppression family;
+- exact grays use a shared channel-affine family in the six non-neutral cells;
+- coefficient 18 carries alpha and the fixed-RGB alpha sweep changes no other
+  coefficient.
+
+For an achromatic extended-sRGB value `x`, the captured channel-affine matrix
+is reconstructed at capture precision by:
+
+```text
+D = 1 + 0.05 × x × (1 - x)
+diagonal = 0.3125 / D
+bias = (1.1875 × x - 0.25) / D
+```
+
+The maximum residual across the 36 gray rows is `6.2e-8`. This is a model
+candidate, not yet a product gate: all six original gray anchors participated
+in deriving it.
+
+### Focused Phase 2b plan
+
+`tint-parameterization-focused-phase-2b` captures 131 new colors rather than
+repeating the full grid: 80 samples densely cover the high-brightness branch,
+40 locate the low-saturation transition at two off-axis hues, five unseen gray
+values validate the closed-form transform, and six arbitrary RGB colors remain
+fit-independent holdouts. Run it from the Tint Study page or headlessly:
+
+```sh
+LiquidGlassLab.app/Contents/MacOS/LiquidGlassLab \
+  --capture-tint-parameterization-focused \
+  /path/to/tint-parameterization-focused-phase-2b.json
+```
 
 1. **Grid sweep.** Reuse the paired-witness capture machinery
    (`GlassMaterialAtlasProvider.captureTintMatrices` and the Bench tint

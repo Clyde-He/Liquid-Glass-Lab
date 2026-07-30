@@ -8,6 +8,11 @@ const STRUCTURE_TOLERANCE = 2e-4;
 const SOURCE_TOLERANCE = 2e-4;
 const STANDARD_TOLERANCE = 2e-3;
 const ALPHA_SWEEP_TOLERANCE = 2e-4;
+// Swift stores the residuals after doing the fit with Float matrix
+// coefficients, while this analyzer repeats it in JavaScript Number. The
+// classification tolerance is unchanged; this looser comparison only checks
+// that optional derived metadata still describes the same measurement.
+const STORED_RESIDUAL_TOLERANCE = 1e-7;
 
 function maximum(values) {
   return values.length === 0 ? 0 : Math.max(...values);
@@ -76,6 +81,53 @@ function neutralSuppressionResidual(matrix, isLightAppearance) {
   return result;
 }
 
+function achromaticChannelAffineInfo(matrix) {
+  const diagonal =
+    (matrix[0] + matrix[6] + matrix[12]) / 3;
+  const bias =
+    (matrix[4] + matrix[9] + matrix[14]) / 3;
+  let maximumResidual = 0;
+  for (let row = 0; row < 3; row += 1) {
+    for (let column = 0; column < 3; column += 1) {
+      maximumResidual = Math.max(
+        maximumResidual,
+        Math.abs(matrix[row * 5 + column] - (
+          row === column ? diagonal : 0
+        ))
+      );
+    }
+    maximumResidual = Math.max(
+      maximumResidual,
+      Math.abs(matrix[row * 5 + 4] - bias)
+    );
+  }
+  return { diagonal, bias, maximumResidual };
+}
+
+function achromaticFormulaResidual(matrix, color, alphaResidual) {
+  const rgb = [color.red, color.green, color.blue];
+  if (maximum(rgb) - Math.min(...rgb) > SOURCE_TOLERANCE) return null;
+  const value = rgb.reduce((sum, component) => sum + component, 0) / 3;
+  const denominator = 1 + 0.05 * value * (1 - value);
+  const diagonal = 0.3125 / denominator;
+  const bias = (1.1875 * value - 0.25) / denominator;
+  let residual = alphaResidual;
+  for (let row = 0; row < 3; row += 1) {
+    for (let column = 0; column < 3; column += 1) {
+      const expected = row === column ? diagonal : 0;
+      residual = Math.max(
+        residual,
+        Math.abs(matrix[row * 5 + column] - expected)
+      );
+    }
+    residual = Math.max(
+      residual,
+      Math.abs(matrix[row * 5 + 4] - bias)
+    );
+  }
+  return residual;
+}
+
 function alphaRowResidual(matrix, alpha) {
   return maximum([
     Math.abs(matrix[3]),
@@ -124,6 +176,12 @@ function validateRow(row, color) {
     row.matrix,
     row.cell.isLightAppearance
   );
+  const achromatic = achromaticChannelAffineInfo(row.matrix);
+  const formulaResidual = achromaticFormulaResidual(
+    row.matrix,
+    color,
+    alphaResidual
+  );
   let family;
   let structure;
   let structureResidual;
@@ -139,6 +197,13 @@ function validateRow(row, color) {
     structure = "neutralSuppression";
     family = "neutral";
     structureResidual = Math.max(neutralResidual, alphaResidual);
+  } else if (achromatic.maximumResidual <= STRUCTURE_TOLERANCE) {
+    structure = "achromaticChannelAffine";
+    family = "achromatic";
+    structureResidual = Math.max(
+      achromatic.maximumResidual,
+      alphaResidual
+    );
   } else {
     structure = "unclassified";
     family = "unclassified";
@@ -147,7 +212,10 @@ function validateRow(row, color) {
       alphaResidual
     );
   }
-  if (row.structure !== structure) {
+  const legacyAchromaticDeclaration =
+    row.structure === "unclassified" &&
+    structure === "achromaticChannelAffine";
+  if (row.structure !== structure && !legacyAchromaticDeclaration) {
     throw new Error(
       `${row.colorID} · ${cellKey(row.cell)} declares ${row.structure}, ` +
         `recomputed ${structure}`
@@ -155,7 +223,8 @@ function validateRow(row, color) {
   }
   if (
     Number.isFinite(row.lumaEndpointResidual) &&
-    Math.abs(row.lumaEndpointResidual - endpoint.maximumResidual) > 1e-9
+    Math.abs(row.lumaEndpointResidual - endpoint.maximumResidual) >
+      STORED_RESIDUAL_TOLERANCE
   ) {
     throw new Error(
       `${row.colorID} · ${cellKey(row.cell)} stored luma residual changed`
@@ -163,10 +232,21 @@ function validateRow(row, color) {
   }
   if (
     Number.isFinite(row.neutralSuppressionResidual) &&
-    Math.abs(row.neutralSuppressionResidual - neutralResidual) > 1e-9
+    Math.abs(row.neutralSuppressionResidual - neutralResidual) >
+      STORED_RESIDUAL_TOLERANCE
   ) {
     throw new Error(
       `${row.colorID} · ${cellKey(row.cell)} stored neutral residual changed`
+    );
+  }
+  if (
+    Number.isFinite(row.achromaticChannelAffineResidual) &&
+    Math.abs(
+      row.achromaticChannelAffineResidual - achromatic.maximumResidual
+    ) > STORED_RESIDUAL_TOLERANCE
+  ) {
+    throw new Error(
+      `${row.colorID} · ${cellKey(row.cell)} stored achromatic residual changed`
     );
   }
   return {
@@ -176,6 +256,8 @@ function validateRow(row, color) {
     sourceResidual,
     endpoint,
     neutralResidual,
+    achromatic,
+    formulaResidual,
   };
 }
 
@@ -196,6 +278,8 @@ export function analyzeTintParameterization(document) {
   let maximumClassifiedStructureResidual = 0;
   let maximumSourceResidual = 0;
   let maximumStandardBrightResidual = 0;
+  let maximumAchromaticFormulaResidual = 0;
+  let achromaticFormulaRowCount = 0;
   const unclassifiedRows = [];
   const evaluated = [];
 
@@ -230,6 +314,16 @@ export function analyzeTintParameterization(document) {
         maximumStandardBrightResidual,
         result.endpoint.brightSourceResidual
       );
+    }
+    if (
+      result.family === "achromatic" &&
+      result.formulaResidual !== null
+    ) {
+      maximumAchromaticFormulaResidual = Math.max(
+        maximumAchromaticFormulaResidual,
+        result.formulaResidual
+      );
+      achromaticFormulaRowCount += 1;
     }
     const key = cellKey(row.cell);
     const families = cellFamilies.get(key) ?? new Map();
@@ -312,6 +406,8 @@ export function analyzeTintParameterization(document) {
     maximumClassifiedStructureResidual,
     maximumSourceResidual,
     maximumStandardBrightResidual,
+    maximumAchromaticFormulaResidual,
+    achromaticFormulaRowCount,
     alphaSweepMaximumNonAlphaDifference,
     unclassifiedRowCount: unclassifiedRows.length,
     unclassifiedRows,
@@ -341,6 +437,9 @@ export function formatTintParameterizationReport(result) {
     `Maximum source-color residual: ${result.maximumSourceResidual.toExponential(6)}`,
     `Maximum standard bright=source residual: ` +
       `${result.maximumStandardBrightResidual.toExponential(6)}`,
+    `Maximum achromatic formula residual: ` +
+      `${result.maximumAchromaticFormulaResidual.toExponential(6)} ` +
+      `(${result.achromaticFormulaRowCount} rows)`,
     `Alpha sweep maximum non-a18 difference: ` +
       `${result.alphaSweepMaximumNonAlphaDifference.toExponential(6)}`,
     `Unclassified rows: ${result.unclassifiedRowCount}`,

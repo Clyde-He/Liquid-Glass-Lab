@@ -583,12 +583,23 @@ extended-sRGB, the eight context cells, and their 20 matrix coefficients.
 
 Every pair must independently pass the same `verifiesMainOn` style proof used
 by the product calibration. Source-color readback, the alpha row, and 20
-finite coefficients are also hard admission gates. Rank-1 Rec.709 luma and
-neutral suppression are classifications: an unfamiliar matrix is preserved
-as `unclassified`, with both residuals, and the sweep continues. A completed
-color is written atomically to the selected JSON checkpoint, so cancellation
-or loss of app participation can be resumed without repeating accepted
-colors. This path never mutates the product Atlas or its runtime Tint cache.
+finite coefficients are also hard admission gates. Rank-1 Rec.709 luma,
+neutral suppression, and achromatic channel-affine matrices are
+classifications: an unfamiliar matrix is preserved as `unclassified`, with
+its residuals, and the sweep continues. A completed color is written
+atomically to the selected JSON checkpoint, so cancellation or loss of app
+participation can be resumed without repeating accepted colors. This path
+never mutates the product Atlas or its runtime Tint cache.
+
+After the baseline, `Capture / Resume Focused Phase 2b` adds 131 non-repeated
+colors concentrated around the high-brightness nonlinearity and the
+low-saturation family boundary, plus five gray and six arbitrary RGB
+holdouts. The headless equivalent is:
+
+```sh
+LiquidGlassLab.app/Contents/MacOS/LiquidGlassLab \
+  --capture-tint-parameterization-focused /path/to/focused-phase-2b.json
+```
 
 The same capture can run without the save panel:
 
@@ -605,12 +616,13 @@ node Golden/tools/analyze-tint-parameterization.mjs \
 ```
 
 The analyzer re-runs the hard gates, reports the
-standard/pastel/neutral/unclassified family selected by every cell, verifies
-coverage, and checks that the alpha sweep leaves all coefficients except index
-18 unchanged. `Unclassified` rows make the current candidate model incomplete
-but do not make the evidence capture invalid. Accepted complete datasets
-belong under the matching `Golden/macOS-<major>/` directory; formula fitting
-and product synthesis remain downstream of this capture.
+standard/pastel/neutral/achromatic/unclassified family selected by every cell,
+verifies coverage, and checks that the alpha sweep leaves all coefficients
+except index 18 unchanged. It also validates the closed-form gray transform.
+`Unclassified` rows make the current candidate model incomplete but do not
+make the evidence capture invalid. Accepted complete datasets belong under the
+matching `Golden/macOS-<major>/` directory; formula fitting and product
+synthesis remain downstream of this capture.
 
 ### Full P1 Materialize environment matrix
 
