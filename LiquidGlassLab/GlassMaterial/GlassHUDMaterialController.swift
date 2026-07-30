@@ -138,6 +138,12 @@ public final class GlassHUDMaterialController {
                 1
             )
             guard configuration != oldValue else { return }
+            if !Self.colorsMatch(configuration.tint, oldValue.tint) {
+                tintConfigurationDidChange(
+                    from: oldValue.tint,
+                    to: configuration.tint
+                )
+            }
             if configuration.emphasis != oldValue.emphasis
                 || !Self.colorsMatch(configuration.tint, oldValue.tint) {
                 resetTintRetryBudget(cancelInFlightCapture: true)
@@ -190,6 +196,11 @@ public final class GlassHUDMaterialController {
         color: NSColor,
         sourceColor: GlassMaterialColorValue
     )?
+    /// A resolver that exhausted the bounded commit path stays disabled until
+    /// the next participation recovery or Tint session. This prevents a color
+    /// drag from recreating the same persistently failing resolver per RGB.
+    private var tintCommitResolutionUnavailable = false
+    private var tintCommitFailureCount = 0
     /// The most recent color whose matrices were verified for the current
     /// emphasis. Shown while a newer pick is still resolving, so a continuous
     /// hue drag trails by a turn instead of blinking to untinted glass.
@@ -214,6 +225,7 @@ public final class GlassHUDMaterialController {
         1_000, 2_000, 5_000, 10_000, 30_000,
     ]
     private static let tintRetryMilliseconds = [450, 1_000, 2_000, 5_000]
+    private static let tintCommitFailureLimit = 3
 
     public convenience init(
         hostWindow: NSWindow,
@@ -300,6 +312,9 @@ public final class GlassHUDMaterialController {
         tintCommitResolver?.invalidate()
         tintCommitResolver = nil
         pendingTintCommitRequest = nil
+        pendingTintCommitRequestedAt = nil
+        tintCommitResolutionUnavailable = false
+        tintCommitFailureCount = 0
         lastVerifiedTintColor = nil
         tintCommitCache = [:]
         tintCommitCacheOrder = []
@@ -381,6 +396,12 @@ public final class GlassHUDMaterialController {
         )
         let tintIsReady = configuration.tint == nil
             || (atlasProvider.isPairedCoverageComplete && requestedAtlas != nil)
+        if tintIsReady, pendingTintCommitRequest != nil {
+            pendingTintCommitRequest = nil
+            pendingTintCommitRequestedAt = nil
+            tintCommitFailureCount = 0
+            stopTintDisplayLink()
+        }
 
         var installableAtlas = requestedAtlas
         var displayedTint = tintIsReady ? configuration.tint : nil
@@ -407,11 +428,12 @@ public final class GlassHUDMaterialController {
         // after enabling Tint cost tens of milliseconds per color. Request the
         // branch immediately at alpha 0: the coefficient-18 contract makes that
         // visually identical to no tint, so nothing unverified is presented.
-        if displayedTint == nil, let requested = configuration.tint {
-            glassView.materialTint = requested.withAlphaComponent(0)
-        } else {
-            glassView.materialTint = displayedTint
-        }
+        let nativeTint = displayedTint
+            ?? configuration.tint?.withAlphaComponent(0)
+        glassView.stageMaterialTint(
+            nativeColor: nativeTint,
+            controlledColor: displayedTint
+        )
 
         guard atlasProvider.isPairedCoverageComplete else {
             refreshStatus()
@@ -569,6 +591,7 @@ public final class GlassHUDMaterialController {
               let sourceColor = GlassMaterialColorValue(color)
         else { return nil }
         guard let matrices = cachedCommitMatrices(for: sourceColor) else {
+            guard !tintCommitResolutionUnavailable else { return nil }
             // Only the color the product actually requested may enqueue work.
             // Letting the held-color lookup enqueue too made the resolver
             // ping-pong between the new pick and the color it was still
@@ -628,12 +651,15 @@ public final class GlassHUDMaterialController {
         let start = DispatchTime.now().uptimeNanoseconds
         tintCommitWarmUpTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.tintCommitWarmUpTask = nil }
             let warm = await resolver.warmUp()
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                self.tintCommitWarmUpTask = nil
+                return
+            }
             self.tintDiagnostics.warmUpMilliseconds = Self.milliseconds(
                 since: start
             )
+            self.tintCommitWarmUpTask = nil
             if warm {
                 if let color = self.configuration.tint {
                     resolver.prewarmTintBranch(for: color)
@@ -641,8 +667,10 @@ public final class GlassHUDMaterialController {
                 if self.pendingTintCommitRequest != nil {
                     self.startTintDisplayLink()
                 }
-                self.applyConfiguration()
+            } else if self.hostParticipates {
+                self.fallBackFromTintCommitResolution()
             }
+            self.applyConfiguration()
         }
     }
 
@@ -684,8 +712,16 @@ public final class GlassHUDMaterialController {
         for color: NSColor,
         sourceColor: GlassMaterialColorValue
     ) {
-        if pendingTintCommitRequest != nil {
+        let key = Self.rgbKey(for: sourceColor)
+        guard !tintCommitResolutionUnavailable else { return }
+        let previousKey = pendingTintCommitRequest.map {
+            Self.rgbKey(for: $0.sourceColor)
+        }
+        if previousKey != nil, previousKey != key {
             tintDiagnostics.supersededRequestCount += 1
+        }
+        if previousKey != key {
+            tintDiagnostics.attemptsForLastColor = 0
         }
         pendingTintCommitRequest = (color, sourceColor)
         pendingTintCommitRequestedAt = DispatchTime.now().uptimeNanoseconds
@@ -728,13 +764,25 @@ public final class GlassHUDMaterialController {
             return
         }
         let start = DispatchTime.now().uptimeNanoseconds
+        tintDiagnostics.attemptsForLastColor += 1
         guard let matrices = resolver.resolveMatrices(
             for: request.color,
             sourceColor: request.sourceColor
-        ) else { return }
+        ) else {
+            tintCommitFailureCount += 1
+            guard tintCommitFailureCount
+                    >= Self.tintCommitFailureLimit
+            else { return }
+            GlassMaterialTintLog.signposts.error(
+                "commit resolution failed \(self.tintCommitFailureCount, privacy: .public) times; using legacy capture"
+            )
+            fallBackFromTintCommitResolution()
+            applyConfiguration()
+            return
+        }
         tintDiagnostics.lastResolveMilliseconds = Self.milliseconds(since: start)
         tintDiagnostics.resolvedColorCount += 1
-        tintDiagnostics.attemptsForLastColor = 1
+        tintCommitFailureCount = 0
         if let requestedAt = pendingTintCommitRequestedAt {
             tintDiagnostics.lastLatencyMilliseconds = Self.milliseconds(
                 since: requestedAt
@@ -744,6 +792,7 @@ public final class GlassHUDMaterialController {
             "resolved in \(self.tintDiagnostics.lastResolveMilliseconds ?? 0, format: .fixed(precision: 1), privacy: .public)ms latency=\(self.tintDiagnostics.lastLatencyMilliseconds ?? 0, format: .fixed(precision: 1), privacy: .public)ms"
         )
         let key = Self.rgbKey(for: request.sourceColor)
+        tintCommitResolutionUnavailable = false
         storeCommitMatrices(matrices, for: key)
         displayedTintMatrices = (key, matrices)
         if let newest = pendingTintCommitRequest,
@@ -751,6 +800,19 @@ public final class GlassHUDMaterialController {
             pendingTintCommitRequest = nil
         }
         applyConfiguration()
+    }
+
+    /// Hands Tint to the bounded legacy path and disables this resolver
+    /// generation. A participation recovery or a new Tint session may try the
+    /// fast path again; a streaming RGB change cannot recreate it immediately.
+    private func fallBackFromTintCommitResolution() {
+        tintCommitResolutionUnavailable = true
+        pendingTintCommitRequest = nil
+        pendingTintCommitRequestedAt = nil
+        tintCommitFailureCount = 0
+        stopTintDisplayLink()
+        tintCommitResolver?.invalidate()
+        tintCommitResolver = nil
     }
 
     private func storeCommitMatrices(
@@ -775,6 +837,27 @@ public final class GlassHUDMaterialController {
         for sourceColor: GlassMaterialColorValue
     ) -> SIMD3<Double> {
         SIMD3(sourceColor.red, sourceColor.green, sourceColor.blue)
+    }
+
+    private func tintConfigurationDidChange(
+        from oldColor: NSColor?,
+        to newColor: NSColor?
+    ) {
+        let oldKey = oldColor.flatMap(GlassMaterialColorValue.init).map(
+            Self.rgbKey
+        )
+        let newKey = newColor.flatMap(GlassMaterialColorValue.init).map(
+            Self.rgbKey
+        )
+        if oldKey != newKey {
+            tintDiagnostics.attemptsForLastColor = 0
+        }
+        if newColor == nil {
+            tintCommitResolutionUnavailable = false
+            pendingTintCommitRequest = nil
+            pendingTintCommitRequestedAt = nil
+            stopTintDisplayLink()
+        }
     }
 
     static func resolvedTintAtlas(
@@ -881,10 +964,11 @@ public final class GlassHUDMaterialController {
 
     private func scheduleTintLock() {
         // The legacy multi-second capture is now the last resort: while commit
-        // resolution is warming or already usable, it would only duplicate the
-        // work and contend for a second witness window.
+        // resolution is warming or has a pending frame request, it would only
+        // duplicate the work and contend for a second witness window. A bounded
+        // commit failure clears both gates so this path can take over.
         guard tintCommitWarmUpTask == nil,
-              tintCommitResolver?.isWarm != true
+              pendingTintCommitRequest == nil
         else { return }
         guard tintTask == nil,
               configuration.tint != nil,
@@ -995,6 +1079,10 @@ public final class GlassHUDMaterialController {
 
     private func recoveryOpportunityArrived() {
         resetTintRetryBudget()
+        if hostParticipates {
+            tintCommitResolutionUnavailable = false
+            tintCommitFailureCount = 0
+        }
         // Regaining participation rebuilds the private trees, which drops the
         // probes' Tint branch. Re-materialize it now instead of charging the
         // user's next drag for it.

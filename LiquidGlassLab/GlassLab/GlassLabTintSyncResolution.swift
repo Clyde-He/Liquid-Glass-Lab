@@ -460,6 +460,10 @@ private final class GlassLabTintSyncSession {
                     failure = "the settled procedure never accepted a value"
                 } else if let difference, difference > 0.0002 {
                     failure = "flush and settled values differ by \(difference)"
+                } else if flushProof[cell] != true {
+                    failure = "paired Main-On proof failed at flush"
+                } else if settledProof[cell] != true {
+                    failure = "paired Main-On proof failed when settled"
                 }
                 rows.append(GlassLabTintSyncResolutionRow(
                     colorID: color.id,

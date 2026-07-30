@@ -112,7 +112,7 @@ final class GlassMaterialStrength {
     /// Identifies the base payload that was validated when this material was
     /// frozen, so a color-only change can skip revalidating it.
     private var frozenBaseGeneration: Int?
-    private var isRestampingTintOnly = false
+    private var isStagingTintColor = false
 
     /// Material strength, clamped to `0...1`. Defaults to `1`, which leaves the
     /// system Recipe untouched until the first change.
@@ -130,7 +130,20 @@ final class GlassMaterialStrength {
     /// too, because a non-main window resolves the hue-suppressed variant. The
     /// matrix may come from verified capture or supported-major synthesis.
     public var tintColor: NSColor? {
-        didSet { apply() }
+        didSet {
+            guard !isStagingTintColor else { return }
+            apply()
+        }
+    }
+
+    /// Updates the controller's requested Tint without applying the complete
+    /// frozen style. The product controller uses this immediately before the
+    /// narrow Tint restamp; public `materialTint` writes still take the ordinary
+    /// full apply path.
+    fileprivate func stageTintColor(_ color: NSColor?) {
+        isStagingTintColor = true
+        tintColor = color
+        isStagingTintColor = false
     }
 
     /// True when the glass currently has a `glassBackground` pass and this
@@ -354,15 +367,24 @@ final class GlassMaterialStrength {
               frozenMainParticipation == mainParticipation,
               glass != nil
         else { return false }
+        stageTintColor(newTintColor)
+        guard applyFrozenTintOnly(
+            from: atlas,
+            tintColor: newTintColor
+        ) else { return false }
         frozenAtlas = atlas
-        isRestampingTintOnly = true
-        tintColor = newTintColor
-        isRestampingTintOnly = false
         return true
     }
 
-    private func applyFrozenTintOnly() {
-        guard let glass, let atlas = frozenAtlas, let tintColor,
+    private func applyFrozenTintOnly(
+        from atlas: GlassMaterialStyleAtlas,
+        tintColor: NSColor?
+    ) -> Bool {
+        guard let tintColor else {
+            lastFrozenTintMatrix = nil
+            return true
+        }
+        guard let glass,
               let sourceAlpha = tintColor
                 .usingColorSpace(.deviceRGB)?.alphaComponent,
               let tintLayer = GlassMaterialAccess.tintMatrixLayer(under: glass),
@@ -371,13 +393,18 @@ final class GlassMaterialStrength {
                 matching: tintColor
               ),
               matrix.count == 20
-        else { return }
+        else { return false }
         matrix[18] = Float(GlassMaterialCurve.tintMatrixAlpha(
             at: value,
             sourceAlpha: Double(sourceAlpha)
         ))
         GlassMaterialAccess.setColorMatrix(matrix, on: tintLayer)
+        guard let written = GlassMaterialAccess.colorMatrix(on: tintLayer),
+              written.count == matrix.count,
+              zip(written, matrix).allSatisfy({ abs($0 - $1) < 1e-5 })
+        else { return false }
         lastFrozenTintMatrix = matrix
+        return true
     }
 
     /// The frame-order weapon. The private subtree lays out *after* the
@@ -500,10 +527,6 @@ final class GlassMaterialStrength {
               let target = suppliedTarget
                 ?? GlassMaterialAccess.glassBackgroundTarget(under: glass)
         else { return }
-        if isRestampingTintOnly {
-            applyFrozenTintOnly()
-            return
-        }
         if let frozenAtlas {
             applyFrozen(frozenAtlas, to: target, on: glass)
         } else {
@@ -923,6 +946,17 @@ public final class GlassMaterialEffectView: NSGlassEffectView {
             tintColor = newValue
             materialStrength.tintColor = newValue
         }
+    }
+
+    /// Separates Tint-branch materialization from the frozen writer's
+    /// controlled color. This avoids the public setter's complete style apply
+    /// when the product controller is about to write only the Tint matrix.
+    func stageMaterialTint(
+        nativeColor: NSColor?,
+        controlledColor: NSColor?
+    ) {
+        tintColor = nativeColor
+        materialStrength.stageTintColor(controlledColor)
     }
 
     /// Installs a verified atlas for the HUD's only supported frozen
