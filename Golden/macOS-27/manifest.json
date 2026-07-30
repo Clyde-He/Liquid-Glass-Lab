@@ -208,6 +208,52 @@
       "role": "canonical"
     },
     {
+      "id": "tint-parameterization-focused-phase-2b",
+      "file": "tint-parameterization-focused-phase-2b.json",
+      "sha256": "37904f0b6911450c8c1876abaf00cf81a9b874c3c5bfbd03a7a2573e66f4bb92",
+      "formatVersion": 1,
+      "entryCount": 1048,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-30T04:59:11Z",
+      "axes": {
+        "sourceColors": {
+          "highBrightness": 80,
+          "lowSaturation": 40,
+          "grayHoldouts": 5,
+          "rgbHoldouts": 6
+        },
+        "appearance": [
+          "Light",
+          "Dark"
+        ],
+        "material": [
+          "Regular",
+          "Clear"
+        ],
+        "mainParticipation": [
+          false,
+          true
+        ]
+      },
+      "environment": {
+        "displaySignature": "Studio Display XDR @2.0x",
+        "atlasSchemaVersion": 2
+      },
+      "notes": [
+        "Complete 131-color × eight-cell follow-up fixture captured in the same build and display environment as the full grid.",
+        "All 1,048 rows pass the hard gates and every row is structurally classified.",
+        "Five fit-independent gray holdouts validate the closed-form achromatic transform within 1.34e-7.",
+        "Two S=0.001, V=0.25 inputs select the achromatic family; the same saturation at V=0.625 selects the chromatic family, bracketing the absolute-chroma boundary between 0.00025 and 0.000625.",
+        "The H17 and H137 slices are channel permutations within 2.7e-7, so a Phase 2c hue-fraction addendum is required before arbitrary RGB synthesis can be certified."
+      ],
+      "role": "canonical"
+    },
+    {
       "id": "formula-analysis",
       "file": "formula-analysis.json",
       "sha256": "7695ddc86cc277f50b2df370135bbfc0f4b868cd184f32de1db818bf97d6af26",

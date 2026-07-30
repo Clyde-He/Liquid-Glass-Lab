@@ -101,6 +101,14 @@ struct GlassLabTintSweepPlan: Codable, Equatable, Sendable {
         colors: makeFocusedPhase2bColors()
     )
 
+    static let hueFractionPhase2c = GlassLabTintSweepPlan(
+        id: "tint-parameterization-hue-fraction-phase-2c",
+        referenceWidth: 480,
+        referenceShortSide: 200,
+        consecutiveStableReads: 2,
+        colors: makeHueFractionPhase2cColors()
+    )
+
     private static func makeFullGridColors() -> [GlassLabTintSweepColor] {
         var colors: [GlassLabTintSweepColor] = []
 
@@ -286,6 +294,72 @@ struct GlassLabTintSweepPlan: Codable, Equatable, Sendable {
                 alpha: 0.5
             ))
         }
+        return colors
+    }
+
+    private static func makeHueFractionPhase2cColors()
+        -> [GlassLabTintSweepColor] {
+        var colors: [GlassLabTintSweepColor] = []
+
+        // Together with Phase 2b's H17 slice, these positions provide
+        // normalized within-sector hue fractions 0, .283, .5, .75, and 1 at
+        // every high-brightness S/V coordinate. H0/H30/H60 at V=1 also repeat
+        // full-grid anchors, so cross-session agreement is measurable.
+        for hueDegrees in [0.0, 30.0, 45.0, 60.0] {
+            for saturation in [0.25, 0.5, 0.75, 1.0] {
+                for brightness in [
+                    0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 0.98, 1.0,
+                ] {
+                    colors.append(hsvColor(
+                        id: String(
+                            format: "sector-h%03d-s%03d-v%03d",
+                            Int(hueDegrees),
+                            Int((saturation * 1000).rounded()),
+                            Int((brightness * 1000).rounded())
+                        ),
+                        label: String(
+                            format: "Sector H%03d S%.3f V%.3f",
+                            Int(hueDegrees),
+                            saturation,
+                            brightness
+                        ),
+                        hue: hueDegrees / 360,
+                        saturation: saturation,
+                        brightness: brightness,
+                        alpha: 0.5
+                    ))
+                }
+            }
+        }
+
+        // Phase 2b bracketed the achromatic switch between absolute chroma
+        // .00025 and .000625. Probe the same four chroma values at two
+        // brightnesses to distinguish an absolute threshold from an HSV
+        // saturation threshold.
+        for brightness in [0.5, 1.0] {
+            for chroma in [0.0003, 0.0004, 0.0005, 0.0006] {
+                let saturation = chroma / brightness
+                colors.append(hsvColor(
+                    id: String(
+                        format: "boundary-c%04d-v%04d",
+                        Int((chroma * 1_000_000).rounded()),
+                        Int((brightness * 1000).rounded())
+                    ),
+                    label: String(
+                        format: "Boundary C%.4f V%.3f",
+                        chroma,
+                        brightness
+                    ),
+                    hue: 17.0 / 360,
+                    saturation: saturation,
+                    brightness: brightness,
+                    alpha: 0.5
+                ))
+            }
+        }
+
+        precondition(colors.count == 136)
+        precondition(Set(colors.map(\.id)).count == colors.count)
         return colors
     }
 
@@ -921,10 +995,7 @@ extension GlassLabView {
         Section("Parameterization Sweep") {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
-                    Button(
-                        isCapturingTintParameterization
-                            ? "Capturing…" : "Capture / Resume Full Grid…"
-                    ) {
+                    Button("Capture / Resume Full Grid…") {
                         startTintParameterizationSweep(
                             plan: .fullGridV1
                         )
@@ -946,6 +1017,19 @@ extension GlassLabView {
                             || isCapturingAtlas
                             || isRunningAtlasReadback
                     )
+                }
+                HStack(spacing: 8) {
+                    Button("Capture / Resume Hue Phase 2c…") {
+                        startTintParameterizationSweep(
+                            plan: .hueFractionPhase2c
+                        )
+                    }
+                    .disabled(
+                        isCapturingTintParameterization
+                            || isCapturingTintStudy
+                            || isCapturingAtlas
+                            || isRunningAtlasReadback
+                    )
                     if isCapturingTintParameterization {
                         Button("Cancel") {
                             tintParameterizationTask?.cancel()
@@ -954,11 +1038,13 @@ extension GlassLabView {
                 }
                 Text(
                     "\(GlassLabTintSweepPlan.fullGridV1.colors.count)-color "
-                        + "baseline or "
+                        + "baseline, "
                         + "\(GlassLabTintSweepPlan.focusedPhase2b.colors.count)"
-                        + "-color high-brightness/low-saturation follow-up, each "
-                        + "across 8 paired cells. No runtime Tint cache writes; "
-                        + "completed colors are atomically checkpointed."
+                        + "-color brightness follow-up, or "
+                        + "\(GlassLabTintSweepPlan.hueFractionPhase2c.colors.count)"
+                        + "-color hue/near-gray addendum. Each uses 8 paired "
+                        + "cells, writes no runtime Tint cache, and checkpoints "
+                        + "every completed color."
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -993,10 +1079,18 @@ extension GlassLabView {
         panel.allowedContentTypes = [.json]
         let majorVersion =
             ProcessInfo.processInfo.operatingSystemVersion.majorVersion
-        panel.nameFieldStringValue = plan == .fullGridV1
-            ? "tint-parameterization-sweep-macos-\(majorVersion).json"
-            : "tint-parameterization-focused-phase-2b-macos-"
+        if plan == .fullGridV1 {
+            panel.nameFieldStringValue =
+                "tint-parameterization-sweep-macos-\(majorVersion).json"
+        } else if plan == .focusedPhase2b {
+            panel.nameFieldStringValue =
+                "tint-parameterization-focused-phase-2b-macos-"
                 + "\(majorVersion).json"
+        } else {
+            panel.nameFieldStringValue =
+                "tint-parameterization-hue-phase-2c-macos-"
+                + "\(majorVersion).json"
+        }
         panel.message = "Choose an existing checkpoint to resume or a new file."
         guard panel.runModal() == .OK, let destination = panel.url else {
             return

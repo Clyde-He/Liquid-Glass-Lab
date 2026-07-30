@@ -198,19 +198,46 @@ The maximum residual across the 36 gray rows is `6.2e-8`. This is a model
 candidate, not yet a product gate: all six original gray anchors participated
 in deriving it.
 
-### Focused Phase 2b plan
+### Focused Phase 2b result
 
-`tint-parameterization-focused-phase-2b` captures 131 new colors rather than
-repeating the full grid: 80 samples densely cover the high-brightness branch,
-40 locate the low-saturation transition at two off-axis hues, five unseen gray
-values validate the closed-form transform, and six arbitrary RGB colors remain
-fit-independent holdouts. Run it from the Tint Study page or headlessly:
+The accepted `tint-parameterization-focused-phase-2b` fixture contains 131
+colors and 1,048 fully classified rows: 80 samples densely cover the
+high-brightness branch, 40 locate the low-saturation transition, five unseen
+gray values validate the closed-form transform, and six arbitrary RGB colors
+remain fit-independent holdouts.
+
+The gray formula holds on all five unseen values with a maximum residual of
+`1.34e-7`. Two `S=.001, V=.25` colors select the achromatic family, while the
+same saturation at `V=.625` selects the chromatic family, bracketing the
+absolute-chroma transition between `.00025` and `.000625`.
+
+H17 and H137 are channel permutations at the same within-sector hue fraction,
+and their luma-endpoint matrices agree after permutation within `2.7e-7`.
+Consequently they prove channel symmetry but do not constrain arbitrary hue
+fraction. Simple interpolation still misses the independent RGB holdouts by as
+much as `8.1e-2`, so Phase 2b does not certify product synthesis.
+
+### Hue-fraction Phase 2c plan
+
+`tint-parameterization-hue-fraction-phase-2c` adds 136 colors. Its main 128
+samples cover H0/H30/H45/H60 × four saturations × the same eight dense
+high-brightness values. Combined with Phase 2b's H17 slice, every S/V
+coordinate has five within-sector hue fractions. Eight additional probes
+resolve the near-gray switch at absolute chroma `.0003...0006` under two
+brightnesses. Run it from the Tint Study page or headlessly:
 
 ```sh
 LiquidGlassLab.app/Contents/MacOS/LiquidGlassLab \
-  --capture-tint-parameterization-focused \
-  /path/to/tint-parameterization-focused-phase-2b.json
+  --capture-tint-parameterization-phase-2c \
+  /path/to/tint-parameterization-hue-phase-2c.json
 ```
+
+This is a decision gate, not the start of another open-ended sweep. The six
+Phase 2b RGB holdouts plus the historical Coral/Cyan/Salmon anchors remain
+excluded from fitting. Synthesis proceeds only if all nine stay within
+`2e-4` maximum matrix-coefficient error and select the captured family;
+otherwise the parameterized path is rejected and the product retains runtime
+Tint locking.
 
 1. **Grid sweep.** Reuse the paired-witness capture machinery
    (`GlassMaterialAtlasProvider.captureTintMatrices` and the Bench tint

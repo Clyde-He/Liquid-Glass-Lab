@@ -594,11 +594,18 @@ never mutates the product Atlas or its runtime Tint cache.
 After the baseline, `Capture / Resume Focused Phase 2b` adds 131 non-repeated
 colors concentrated around the high-brightness nonlinearity and the
 low-saturation family boundary, plus five gray and six arbitrary RGB
-holdouts. The headless equivalent is:
+holdouts. `Capture / Resume Hue Phase 2c` then adds 136 colors across four
+within-sector hues and eight near-gray boundary probes. Combined with Phase
+2b, it supplies five hue fractions at each high-brightness S/V coordinate
+while keeping the arbitrary RGB colors fit-independent. The headless
+equivalents are:
 
 ```sh
 LiquidGlassLab.app/Contents/MacOS/LiquidGlassLab \
   --capture-tint-parameterization-focused /path/to/focused-phase-2b.json
+
+LiquidGlassLab.app/Contents/MacOS/LiquidGlassLab \
+  --capture-tint-parameterization-phase-2c /path/to/hue-phase-2c.json
 ```
 
 The same capture can run without the save panel:
@@ -623,6 +630,12 @@ except index 18 unchanged. It also validates the closed-form gray transform.
 make the evidence capture invalid. Accepted complete datasets belong under the
 matching `Golden/macOS-<major>/` directory; formula fitting and product
 synthesis remain downstream of this capture.
+
+Phase 2c is the terminal synthesis decision gate. Fit the combined fixtures
+without the six arbitrary RGB holdouts or historical Coral/Cyan/Salmon
+anchors. If any of those nine colors exceeds `2e-4` maximum matrix-coefficient
+error or selects a different family, reject parameterized synthesis and keep
+the runtime Tint-lock path rather than expanding the sweep again.
 
 ### Full P1 Materialize environment matrix
 

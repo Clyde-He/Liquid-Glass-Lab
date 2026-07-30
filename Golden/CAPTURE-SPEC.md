@@ -53,6 +53,14 @@ its SHA-256, 1,360 entry count, color/cell axes, and capture environment to
 that directory's manifest. Exact checkpoint identity is research provenance;
 it does not change the product Catalog's major-only compatibility rule.
 
+Follow-up parameterization fixtures use the same admission and provenance
+rules and are registered separately rather than merged into the baseline
+JSON. Phase 2b keeps its arbitrary RGB colors as fit-independent holdouts;
+Phase 2c may constrain the model but must not absorb those holdouts. The
+combined macOS 27 model is accepted only when all nine reserved RGB anchors
+stay within `2e-4` maximum matrix-coefficient error and retain their captured
+family. Failure rejects synthesis and preserves runtime Tint locking.
+
 What the exporter *can* produce is the load-bearing half of that finding: real
 key participation alone selects the active branch. That is the `key` slice
 below, and it is the half `GlassMaterialStrength` depends on, since it reads

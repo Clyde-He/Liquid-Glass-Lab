@@ -344,6 +344,12 @@ complete, hard-gate-passing export into the matching `Golden/macOS-<major>/`
 directory; the raw dataset is evidence for formula fitting, not a runtime
 catalog.
 
+The macOS 27 archive also carries the accepted 131-color focused Phase 2b
+fixture. Phase 2c adds the missing within-sector hue fractions before the
+existing nine fit-independent RGB anchors make the terminal synthesis
+decision at `2e-4` maximum matrix-coefficient error. A failure keeps runtime
+Tint locking; it does not authorize another progressively denser sweep.
+
 ## Core Recipe exporter
 
 The Playground's `Export Recipe Matrix` produces the canonical OS baseline.
