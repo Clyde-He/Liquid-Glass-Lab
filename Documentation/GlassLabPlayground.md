@@ -631,11 +631,30 @@ make the evidence capture invalid. Accepted complete datasets belong under the
 matching `Golden/macOS-<major>/` directory; formula fitting and product
 synthesis remain downstream of this capture.
 
-Phase 2c is the terminal synthesis decision gate. Fit the combined fixtures
-without the six arbitrary RGB holdouts or historical Coral/Cyan/Salmon
-anchors. If any of those nine colors exceeds `2e-4` maximum matrix-coefficient
-error or selects a different family, reject parameterized synthesis and keep
-the runtime Tint-lock path rather than expanding the sweep again.
+Phase 2c is the terminal matrix-space synthesis gate. Fit the combined
+fixtures without the six arbitrary RGB holdouts or historical
+Coral/Cyan/Salmon anchors. All 437 colors and 3,496 context rows now pass the
+`2e-4` complete-matrix gate.
+
+The same page's `Run Rendered A/B` action performs the independent macOS 27
+visual gate. It tests eight risk colors across all eight contexts, records an
+unchanged A/A screenshot control, swaps only the live Tint matrix to the
+synthesized value, verifies matrix readback, and compares the rendered A/B
+through `ScreenCaptureKit`. Up to three pixel attempts reject transient
+WindowServer noise; the `2e-4` matrix gate is never skipped or retried away.
+The headless equivalent is:
+
+```sh
+LiquidGlassLab.app/Contents/MacOS/LiquidGlassLab \
+  --verify-tint-rendered-ab /path/to/tint-rendered-ab.json
+```
+
+The accepted macOS 27 run passed 64/64 rows with zero failures. Maximum live
+matrix residual was `1.963973e-4`; both the unchanged A/A control and the
+synthesized A/B had a maximum RGB code delta of 3. This closes the research
+acceptance gate. The product controller now consumes the closed form
+synchronously on macOS 27 through an in-memory, non-persisted Tint overlay;
+legacy capture remains the fail-closed fallback outside that supported domain.
 
 ### Full P1 Materialize environment matrix
 

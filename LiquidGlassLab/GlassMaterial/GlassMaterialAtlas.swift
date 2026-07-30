@@ -189,8 +189,9 @@ struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
 }
 
 /// The captured style atlas: one entry per context cell, each holding samples
-/// at several short sides plus Main-context tint matrices for the tint colors
-/// captured so far.
+/// at several short sides plus optional color-bound Tint matrices. Persisted
+/// overlays come from verified capture; the product controller may also add a
+/// supported-major synthesized overlay to an in-memory value-semantic copy.
 ///
 /// An atlas is a versioned material snapshot. Product catalogs intentionally
 /// pin one accepted snapshot per macOS major release: minor/beta builds and
@@ -289,7 +290,7 @@ struct GlassMaterialStyleAtlas: Codable, Sendable {
         }
     }
 
-    /// A captured Tint matrix bound to the color it was resolved for. The
+    /// A resolved Tint matrix bound to its source color. The
     /// transition only animates coefficient 18 (alpha); the 19 hue
     /// coefficients are context-resolved constants, and a non-main window
     /// resolves the hue-suppressed variant — so a Main-On lock restamps the
@@ -325,10 +326,10 @@ struct GlassMaterialStyleAtlas: Codable, Sendable {
         cells[cell] = samples
     }
 
-    /// Adds a captured tint matrix for the cell, replacing any entry with the
-    /// same source RGB. Tint accumulates independently of the size samples:
-    /// choosing a new color captures four matrices (one per Main-On cell),
-    /// never a new size atlas.
+    /// Adds a resolved Tint matrix for the cell, replacing any entry with the
+    /// same source RGB. Persisted runtime overlays accumulate independently of
+    /// the size samples; synchronous product synthesis applies this mutation
+    /// only to a short-lived Atlas copy.
     public mutating func addTintMatrix(_ matrix: TintMatrix, for cell: Cell) {
         var entries = tintMatrices[cell] ?? []
         entries.removeAll {

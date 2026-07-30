@@ -8,6 +8,8 @@ const STRUCTURE_TOLERANCE = 2e-4;
 const SOURCE_TOLERANCE = 2e-4;
 const STANDARD_TOLERANCE = 2e-3;
 const ALPHA_SWEEP_TOLERANCE = 2e-4;
+const PARAMETERIZED_MATRIX_TOLERANCE = 2e-4;
+const ACHROMATIC_CHROMA_THRESHOLD = 0.00035;
 // Swift stores the residuals after doing the fit with Float matrix
 // coefficients, while this analyzer repeats it in JavaScript Number. The
 // classification tolerance is unchanged; this looser comparison only checks
@@ -139,6 +141,153 @@ function alphaRowResidual(matrix, alpha) {
     Math.abs(matrix[18] - alpha),
     Math.abs(matrix[19]),
   ]);
+}
+
+function lumaEndpointMatrix(bright, dark, alpha) {
+  const matrix = Array(20).fill(0);
+  for (let row = 0; row < 3; row += 1) {
+    const scale = bright[row] - dark[row];
+    for (let column = 0; column < 3; column += 1) {
+      matrix[row * 5 + column] = scale * LUMA[column];
+    }
+    matrix[row * 5 + 4] = dark[row];
+  }
+  matrix[18] = alpha;
+  return matrix;
+}
+
+function neutralSuppressionMatrix(isLightAppearance, alpha) {
+  const matrix = Array(20).fill(0);
+  [
+    0.76378, 0.21450812, 0.021711912,
+    0.0637902, 0.9145575, 0.021652289,
+    0.06374377, 0.21459627, 0.72166,
+  ].forEach((value, index) => {
+    const row = Math.floor(index / 3);
+    const column = index % 3;
+    matrix[row * 5 + column] = value;
+  });
+  if (isLightAppearance) {
+    matrix[4] = -0.100000024;
+    matrix[9] = -0.100000024;
+    matrix[14] = -0.100000024;
+  } else {
+    matrix[4] = 0.100000024;
+    matrix[9] = 0.099999964;
+    matrix[14] = 0.099999964;
+  }
+  matrix[18] = alpha;
+  return matrix;
+}
+
+function achromaticMatrix(color) {
+  const value = (color.red + color.green + color.blue) / 3;
+  const denominator = 1 + 0.05 * value * (1 - value);
+  const diagonal = 0.3125 / denominator;
+  const bias = (1.1875 * value - 0.25) / denominator;
+  const matrix = Array(20).fill(0);
+  for (let row = 0; row < 3; row += 1) {
+    matrix[row * 5 + row] = diagonal;
+    matrix[row * 5 + 4] = bias;
+  }
+  matrix[18] = color.alpha;
+  return matrix;
+}
+
+function standardDarkEndpoint(source) {
+  const minimum = Math.min(...source);
+  const maximum = Math.max(...source);
+  const lightness = (minimum + maximum) / 2;
+  let chromaScale;
+  if (lightness <= 0.5) {
+    chromaScale = 57 / 85;
+  } else if (lightness <= 5 / 6) {
+    chromaScale =
+      ((87 / 5) * lightness - 3) / (17 * (1 - lightness));
+  } else {
+    chromaScale =
+      (21 / 17 - (57 / 85) * lightness) / (1 - lightness);
+  }
+  const targetLightness = (9 / 17) * lightness;
+  return source.map((component) => {
+    const provisional =
+      targetLightness + chromaScale * (component - lightness);
+    const lowerBound = (-3 / 17) * component;
+    const upperBound = (20 - 3 * component) / 17;
+    return Math.min(Math.max(provisional, lowerBound), upperBound);
+  });
+}
+
+function pastelEndpoint(source, isBright) {
+  const minimum = Math.min(...source);
+  const maximum = Math.max(...source);
+  const chroma = maximum - minimum;
+  const lightness = (minimum + maximum) / 2;
+  let targetLightness;
+  let chromaScale;
+  if (isBright) {
+    targetLightness =
+      lightness <= 10 / 11
+        ? (137 / 120) * lightness
+        : 17 / 12 - (5 / 12) * lightness;
+    if (lightness <= 5 / 11) {
+      chromaScale = 851 / 800;
+    } else if (lightness <= 0.5) {
+      chromaScale = -4553 / 2400 + 323 / 240 / lightness;
+    } else if (lightness <= 10 / 11) {
+      chromaScale =
+        (223 / 240 - (851 / 800) * lightness) / (1 - lightness);
+    } else {
+      chromaScale = -5 / 12;
+    }
+  } else {
+    targetLightness =
+      lightness <= 10 / 11
+        ? (39 / 40) * lightness
+        : (5 / 4) * lightness - 1 / 4;
+    if (lightness <= 5 / 11) {
+      chromaScale = 791 / 800;
+    } else if (lightness <= 0.5) {
+      chromaScale = 1209 / 800 - 19 / 80 / lightness;
+    } else if (lightness <= 10 / 11) {
+      chromaScale =
+        (81 / 80 - (791 / 800) * lightness) / (1 - lightness);
+    } else {
+      chromaScale = 5 / 4;
+    }
+  }
+  return source.map((component) => {
+    const hueFraction = (component - minimum) / chroma;
+    return targetLightness +
+      chroma * chromaScale * (hueFraction - 0.5);
+  });
+}
+
+export function parameterizedTintMatrix(color, cell) {
+  const source = [color.red, color.green, color.blue];
+  if (!cell.isClear && !cell.hasMainParticipation) {
+    return neutralSuppressionMatrix(cell.isLightAppearance, color.alpha);
+  }
+  const chroma = Math.max(...source) - Math.min(...source);
+  if (chroma <= ACHROMATIC_CHROMA_THRESHOLD) {
+    return achromaticMatrix(color);
+  }
+  const isPastel =
+    !cell.isLightAppearance &&
+    !cell.isClear &&
+    cell.hasMainParticipation;
+  if (isPastel) {
+    return lumaEndpointMatrix(
+      pastelEndpoint(source, true),
+      pastelEndpoint(source, false),
+      color.alpha
+    );
+  }
+  return lumaEndpointMatrix(
+    source,
+    standardDarkEndpoint(source),
+    color.alpha
+  );
 }
 
 function validateRow(row, color) {
@@ -280,6 +429,10 @@ export function analyzeTintParameterization(document) {
   let maximumStandardBrightResidual = 0;
   let maximumAchromaticFormulaResidual = 0;
   let achromaticFormulaRowCount = 0;
+  const parameterizationSupported =
+    document.environment?.osMajorVersion === 27;
+  let maximumParameterizedMatrixResidual = 0;
+  let worstParameterizedRow = null;
   const unclassifiedRows = [];
   const evaluated = [];
 
@@ -288,6 +441,18 @@ export function analyzeTintParameterization(document) {
     if (!color) throw new Error(`Unknown color ID ${row.colorID}`);
     const result = validateRow(row, color);
     evaluated.push({ row, color, result });
+    if (parameterizationSupported) {
+      const predicted = parameterizedTintMatrix(color, row.cell);
+      const residual = maximumDifference(predicted, row.matrix);
+      if (residual > maximumParameterizedMatrixResidual) {
+        maximumParameterizedMatrixResidual = residual;
+        worstParameterizedRow = {
+          colorID: row.colorID,
+          cell: cellKey(row.cell),
+          residual,
+        };
+      }
+    }
     maximumStructureResidual = Math.max(
       maximumStructureResidual,
       result.structureResidual
@@ -395,6 +560,17 @@ export function analyzeTintParameterization(document) {
         `${ALPHA_SWEEP_TOLERANCE}`
     );
   }
+  if (
+    parameterizationSupported &&
+    maximumParameterizedMatrixResidual > PARAMETERIZED_MATRIX_TOLERANCE
+  ) {
+    throw new Error(
+      `Parameterized matrix residual ${maximumParameterizedMatrixResidual} ` +
+        `at ${worstParameterizedRow.colorID} · ` +
+        `${worstParameterizedRow.cell} exceeds ` +
+        `${PARAMETERIZED_MATRIX_TOLERANCE}`
+    );
+  }
 
   return {
     planID: document.plan.id,
@@ -408,6 +584,9 @@ export function analyzeTintParameterization(document) {
     maximumStandardBrightResidual,
     maximumAchromaticFormulaResidual,
     achromaticFormulaRowCount,
+    parameterizationSupported,
+    maximumParameterizedMatrixResidual,
+    worstParameterizedRow,
     alphaSweepMaximumNonAlphaDifference,
     unclassifiedRowCount: unclassifiedRows.length,
     unclassifiedRows,
@@ -440,6 +619,12 @@ export function formatTintParameterizationReport(result) {
     `Maximum achromatic formula residual: ` +
       `${result.maximumAchromaticFormulaResidual.toExponential(6)} ` +
       `(${result.achromaticFormulaRowCount} rows)`,
+    result.parameterizationSupported
+      ? `Maximum complete parameterized-matrix residual: ` +
+        `${result.maximumParameterizedMatrixResidual.toExponential(6)} ` +
+        `(${result.worstParameterizedRow.colorID} · ` +
+        `${result.worstParameterizedRow.cell})`
+      : "Complete parameterized-matrix model: NOT CERTIFIED FOR THIS MAJOR",
     `Alpha sweep maximum non-a18 difference: ` +
       `${result.alphaSweepMaximumNonAlphaDifference.toExponential(6)}`,
     `Unclassified rows: ${result.unclassifiedRowCount}`,

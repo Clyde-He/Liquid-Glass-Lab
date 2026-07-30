@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -96,7 +97,7 @@ function makeDocument() {
     capturedAt: "2026-07-29T00:00:00Z",
     operatingSystem: "test",
     environment: {
-      osMajorVersion: 27,
+      osMajorVersion: 0,
       displaySignature: "test",
       atlasSchemaVersion: 3,
     },
@@ -136,6 +137,31 @@ function addAlphaVariant(document, alpha) {
   document.rows.push(...rows);
   document.completedColorCount += 1;
 }
+
+test("macOS 27 Golden sweeps pass the complete parameterized matrix gate", () => {
+  const fixtures = [
+    "tint-parameterization-sweep.json",
+    "tint-parameterization-focused-phase-2b.json",
+    "tint-parameterization-hue-phase-2c.json",
+  ];
+  let rowCount = 0;
+  let maximumResidual = 0;
+  for (const name of fixtures) {
+    const document = JSON.parse(
+      readFileSync(new URL(`../macOS-27/${name}`, import.meta.url), "utf8")
+    );
+    const result = analyzeTintParameterization(document);
+    assert.equal(result.parameterizationSupported, true);
+    assert.ok(result.maximumParameterizedMatrixResidual <= 2e-4);
+    rowCount += result.rowCount;
+    maximumResidual = Math.max(
+      maximumResidual,
+      result.maximumParameterizedMatrixResidual
+    );
+  }
+  assert.equal(rowCount, 3496);
+  assert.ok(maximumResidual > 1.9e-4);
+});
 
 test("accepts a complete eight-cell color group", () => {
   const result = analyzeTintParameterization(makeDocument());

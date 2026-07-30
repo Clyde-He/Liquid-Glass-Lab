@@ -122,8 +122,9 @@ final class GlassMaterialStrength {
 
     /// The public tint currently set on the glass, if any. Tint lives in its
     /// own pass branch and receives `sourceAlpha × value²`. While frozen, the
-    /// atlas cell's captured Main-context matrix supplies the hue coefficients
-    /// too, because a non-main window resolves the hue-suppressed variant.
+    /// atlas cell's resolved Main-context matrix supplies the hue coefficients
+    /// too, because a non-main window resolves the hue-suppressed variant. The
+    /// matrix may come from verified capture or supported-major synthesis.
     public var tintColor: NSColor? {
         didSet { apply() }
     }
@@ -604,8 +605,8 @@ final class GlassMaterialStrength {
         if let tintColor,
            let sourceAlpha = tintColor.usingColorSpace(.deviceRGB)?.alphaComponent,
            let tintLayer = GlassMaterialAccess.tintMatrixLayer(under: glass) {
-            // The captured cell matrix carries the Main-context hue, and only
-            // serves while it matches the current tint color. Without a
+            // The resolved cell matrix carries the requested-context hue, and
+            // only serves while it matches the current Tint color. Without a
             // match, the live matrix serves with our alpha — hue-suppressed
             // as the window's real participation resolves it — until the new
             // color's matrix is captured and the atlas refrozen.

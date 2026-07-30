@@ -1003,6 +1003,7 @@ extension GlassLabView {
                     .disabled(
                         isCapturingTintParameterization
                             || isCapturingTintStudy
+                            || isCapturingTintRenderedAB
                             || isCapturingAtlas
                             || isRunningAtlasReadback
                     )
@@ -1014,6 +1015,7 @@ extension GlassLabView {
                     .disabled(
                         isCapturingTintParameterization
                             || isCapturingTintStudy
+                            || isCapturingTintRenderedAB
                             || isCapturingAtlas
                             || isRunningAtlasReadback
                     )
@@ -1027,6 +1029,7 @@ extension GlassLabView {
                     .disabled(
                         isCapturingTintParameterization
                             || isCapturingTintStudy
+                            || isCapturingTintRenderedAB
                             || isCapturingAtlas
                             || isRunningAtlasReadback
                     )
@@ -1071,6 +1074,7 @@ extension GlassLabView {
     func startTintParameterizationSweep(plan: GlassLabTintSweepPlan) {
         guard !isCapturingTintParameterization,
               !isCapturingTintStudy,
+              !isCapturingTintRenderedAB,
               !isCapturingAtlas,
               !isRunningAtlasReadback else {
             return

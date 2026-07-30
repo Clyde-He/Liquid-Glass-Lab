@@ -74,7 +74,9 @@ extension GlassLabView {
                 captureFullTintStudy()
             }
             .disabled(
-                isCapturingTintStudy || isCapturingTintParameterization
+                isCapturingTintStudy
+                    || isCapturingTintParameterization
+                    || isCapturingTintRenderedAB
             )
 
             if isCapturingTintStudy {
@@ -88,6 +90,7 @@ extension GlassLabView {
         }
 
         tintParameterizationSweepSection()
+        tintRenderedABSection()
 
         if let tintStudyDocument {
             Section("Latest Study") {
@@ -140,11 +143,15 @@ extension GlassLabView {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .disabled(isCapturingTintParameterization)
+        .disabled(
+            isCapturingTintParameterization || isCapturingTintRenderedAB
+        )
     }
 
     func captureFullTintStudy() {
-        guard !isCapturingTintStudy, !isCapturingTintParameterization else {
+        guard !isCapturingTintStudy,
+              !isCapturingTintParameterization,
+              !isCapturingTintRenderedAB else {
             return
         }
         guard !state.hasActiveOverrides else {

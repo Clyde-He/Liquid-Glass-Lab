@@ -344,11 +344,25 @@ complete, hard-gate-passing export into the matching `Golden/macOS-<major>/`
 directory; the raw dataset is evidence for formula fitting, not a runtime
 catalog.
 
-The macOS 27 archive also carries the accepted 131-color focused Phase 2b
-fixture. Phase 2c adds the missing within-sector hue fractions before the
-existing nine fit-independent RGB anchors make the terminal synthesis
-decision at `2e-4` maximum matrix-coefficient error. A failure keeps runtime
-Tint locking; it does not authorize another progressively denser sweep.
+The macOS 27 archive also carries the accepted 131-color focused Phase 2b and
+136-color Phase 2c fixtures. Together with the Full Grid, they provide 437
+colors and 3,496 context rows. The closed-form synthesizer passes the `2e-4`
+complete-matrix gate across all of them, including the nine fit-independent
+RGB anchors; its worst Golden residual is `1.963824e-4`.
+
+The Bench `Tint Study` page also owns the independent rendered-output gate:
+
+```sh
+LiquidGlassLab.app/Contents/MacOS/LiquidGlassLab \
+  --verify-tint-rendered-ab /path/to/tint-rendered-ab.json
+```
+
+It uses eight risk colors × eight contexts, an unchanged A/A screenshot
+control, synthesized-matrix readback, and ScreenCaptureKit pixel comparison.
+The accepted macOS 27 run passed 64/64 rows with zero failures, maximum live
+matrix residual `1.963973e-4`, and maximum RGB code delta 3 for both A/A and
+A/B. This report is session/display evidence rather than an OS Golden fixture;
+the registered matrix captures remain the reproducible synthesis archive.
 
 ## Core Recipe exporter
 

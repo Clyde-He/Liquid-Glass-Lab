@@ -4,7 +4,8 @@
 //
 //  Product-facing ownership for a configurable HUD material. Products choose
 //  semantics; the controller owns atlas loading/calibration, verified
-//  participation, tint locking, retries, and fail-closed fallback.
+//  participation, parameterized Tint, legacy locking, retries, and fail-closed
+//  fallback.
 //
 
 #if os(macOS)
@@ -12,8 +13,9 @@ import AppKit
 
 @MainActor
 public final class GlassHUDMaterialController {
-    /// Provenance of the verified base material. A color-specific tint overlay
-    /// may additionally come from the app-scoped runtime cache.
+    /// Provenance of the verified base material. On a supported system,
+    /// color-specific Tint matrices are synthesized synchronously and are not
+    /// persisted; older fallback paths may still use the app-scoped cache.
     public enum Source: String, Equatable, Sendable {
         case certifiedCatalog
         case runtimeCache
@@ -280,14 +282,19 @@ public final class GlassHUDMaterialController {
             : .regular
         glassView.materialVisibility = configuration.visibility
 
-        let tintIsReady = tintCoverageIsComplete(
+        let resolvedTintAtlas = resolvedTintAtlas(
             for: configuration.tint,
             emphasis: configuration.emphasis
         )
-        // Fail closed for tint too. A non-main target resolves a hue-suppressed
-        // matrix; showing that as the requested tint would falsely report a
-        // fully configured material. The tint appears only after its exact RGB
-        // has a verified matrix for the selected participation.
+        let tintIsReady = configuration.tint == nil
+            || (
+                atlasProvider.isPairedCoverageComplete
+                    && resolvedTintAtlas != nil
+            )
+        // Fail closed for Tint too. On macOS 27 the requested RGB is resolved
+        // synchronously into a short-lived in-memory Atlas overlay. On an
+        // unsupported system, the color remains withheld until the legacy
+        // capture path has verified all selected-participation matrices.
         glassView.materialTint = tintIsReady ? configuration.tint : nil
 
         guard atlasProvider.isPairedCoverageComplete else {
@@ -298,7 +305,7 @@ public final class GlassHUDMaterialController {
 
         let hasMainParticipation = configuration.emphasis == .normal
         let installed = glassView.materialStrength.freeze(
-            atlas: atlasProvider.atlas,
+            atlas: resolvedTintAtlas ?? atlasProvider.atlas,
             mainParticipation: hasMainParticipation
         )
         if installed,
@@ -363,26 +370,93 @@ public final class GlassHUDMaterialController {
 
     // MARK: - Tint
 
-    private func tintCoverageIsComplete(
+    /// Returns the provider Atlas plus the matrices required by the requested
+    /// Tint, without mutating or persisting the provider's reusable base.
+    ///
+    /// macOS 27 always prefers the accepted closed form, even if a legacy
+    /// runtime cache happens to contain the same RGB. Unsupported colors or OS
+    /// majors fall back to a complete captured overlay; partial coverage stays
+    /// nil and therefore fail-closed.
+    private func resolvedTintAtlas(
         for color: NSColor?,
         emphasis: Emphasis
-    ) -> Bool {
-        guard let color else { return true }
+    ) -> GlassMaterialStyleAtlas? {
+        Self.resolvedTintAtlas(
+            atlasProvider.atlas,
+            color: color,
+            emphasis: emphasis,
+            osMajorVersion: ProcessInfo.processInfo
+                .operatingSystemVersion.majorVersion
+        )
+    }
+
+    static func resolvedTintAtlas(
+        _ atlas: GlassMaterialStyleAtlas,
+        color: NSColor?,
+        emphasis: Emphasis,
+        osMajorVersion: Int
+    ) -> GlassMaterialStyleAtlas? {
+        guard let color else { return atlas }
         let hasMainParticipation = emphasis == .normal
-        for isLight in [true, false] {
-            for isClear in [false, true] {
-                let cell = GlassMaterialStyleAtlas.Cell(
+        let cells = [true, false].flatMap { isLight in
+            [false, true].map { isClear in
+                GlassMaterialStyleAtlas.Cell(
                     isLightAppearance: isLight,
                     isClear: isClear,
                     hasMainParticipation: hasMainParticipation
                 )
-                guard atlasProvider.atlas.tintMatrix(
-                    for: cell,
-                    matching: color
-                ) != nil else { return false }
             }
         }
-        return true
+
+        if osMajorVersion
+            == GlassMaterialTintMatrixSynthesizer.supportedOSMajorVersion,
+           let sourceColor = GlassMaterialColorValue(color) {
+            var parameterized = atlas
+            // Do not let an older persisted overlay win over the accepted
+            // closed form on the supported major. This copy is never written
+            // back to the provider or its cache.
+            parameterized.removeAllTintMatrices()
+            var matrices: [
+                GlassMaterialStyleAtlas.Cell: [Float]
+            ] = [:]
+            for cell in cells {
+                guard let matrix =
+                    GlassMaterialTintMatrixSynthesizer.matrix(
+                        for: sourceColor,
+                        cell: cell,
+                        osMajorVersion: osMajorVersion
+                    )
+                else {
+                    matrices = [:]
+                    break
+                }
+                matrices[cell] = matrix
+            }
+            if matrices.count == cells.count {
+                for cell in cells {
+                    guard let matrix = matrices[cell] else { return nil }
+                    parameterized.addTintMatrix(
+                        .init(sourceColor: sourceColor, matrix: matrix),
+                        for: cell
+                    )
+                }
+                return parameterized
+            }
+        }
+
+        guard cells.allSatisfy({
+            atlas.tintMatrix(for: $0, matching: color) != nil
+        }) else {
+            return nil
+        }
+        return atlas
+    }
+
+    private func tintCoverageIsComplete(
+        for color: NSColor?,
+        emphasis: Emphasis
+    ) -> Bool {
+        resolvedTintAtlas(for: color, emphasis: emphasis) != nil
     }
 
     private func scheduleTintLock() {
@@ -496,9 +570,6 @@ public final class GlassHUDMaterialController {
     private func recoveryOpportunityArrived() {
         resetTintRetryBudget()
         atlasProvider.ensureCaptured()
-        if configuration.tint != nil {
-            scheduleTintLock()
-        }
         applyConfiguration()
     }
 

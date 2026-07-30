@@ -5,7 +5,7 @@
 This document hands the macOS 27 Tint-parameterization investigation to a new
 expert without requiring the preceding conversation. It records what the
 captures actually prove, corrects an earlier overbroad conclusion, and defines
-the remaining research boundary.
+the remaining product-acceptance boundary.
 
 The product goal is to render a HUD with the certified Main-On glass
 appearance even while its product window is not focused. The product must
@@ -190,6 +190,153 @@ absolute chroma 0.0004 -> chromatic
 The result is identical at brightness 0.5 and 1.0, suggesting an
 absolute-chroma threshold rather than an HSV-saturation threshold.
 
+## Resolved macOS 27 Closed Form
+
+The three chromatic endpoint functions are now parameterized. This is a
+piecewise HSL-lightness transform in extended sRGB, not a generic fitted LUT.
+
+For source component `x`, define:
+
+```text
+m = min(r, g, b)
+M = max(r, g, b)
+C = M - m
+L = (M + m) / 2
+t(x) = (x - m) / C
+```
+
+### Standard dark endpoint
+
+```text
+f_std(L) =
+    57/85                                           L <= 1/2
+    ((87/5)L - 3) / (17(1 - L))                    1/2 < L <= 5/6
+    (21/17 - (57/85)L) / (1 - L)                   L > 5/6
+
+provisional(x) = (9/17)L + f_std(L)(x - L)
+lower(x) = -3x/17
+upper(x) = (20 - 3x)/17
+
+d_std(x) = min(max(provisional(x), lower(x)), upper(x))
+```
+
+The last line is not a conventional `[0, 1]` clamp. Its component-dependent
+bounds preserve the captured negative and above-one extended-sRGB values.
+
+### Pastel bright endpoint
+
+```text
+L_bright(L) =
+    (137/120)L                                      L <= 10/11
+    17/12 - (5/12)L                                L > 10/11
+
+f_bright(L) =
+    851/800                                         L <= 5/11
+    -4553/2400 + (323/240)/L                       5/11 < L <= 1/2
+    (223/240 - (851/800)L) / (1 - L)               1/2 < L <= 10/11
+    -5/12                                           L > 10/11
+
+p_bright(x) = L_bright(L) + C f_bright(L)(t(x) - 1/2)
+```
+
+### Pastel dark endpoint
+
+```text
+L_dark(L) =
+    (39/40)L                                        L <= 10/11
+    (5/4)L - 1/4                                   L > 10/11
+
+f_dark(L) =
+    791/800                                         L <= 5/11
+    1209/800 - (19/80)/L                           5/11 < L <= 1/2
+    (81/80 - (791/800)L) / (1 - L)                 1/2 < L <= 10/11
+    5/4                                             L > 10/11
+
+p_dark(x) = L_dark(L) + C f_dark(L)(t(x) - 1/2)
+```
+
+### Matrix reconstruction
+
+For each RGB output row:
+
+```text
+scale = brightEndpoint - darkEndpoint
+RGB coefficients = scale × [0.2126, 0.7152, 0.0722]
+bias = darkEndpoint
+```
+
+Coefficient 18 is source alpha. Context family selection is semantic:
+
+- Dark Regular Main-On uses pastel;
+- the other five chromatic luma-endpoint cells use standard;
+- Regular Main-Off uses neutral suppression;
+- absolute chroma at or below the measured boundary uses the achromatic
+  formula.
+
+Do not infer the family from `bright ≈ source`; near-white pastel rows converge
+inside that heuristic tolerance and are otherwise misclassified.
+
+### Validation
+
+`GlassMaterialTintMatrixSynthesizer` and the Golden analyzer independently
+rebuild the complete matrix. Across 437 colors and all 3,496 context rows:
+
+```text
+all rows above the supported achromatic boundary: pass 2e-4
+worst complete-matrix residual: 1.963824e-4
+worst row: boundary-c0600-v1000 · Light · Regular · Main-On
+pastel-bright endpoint maximum: approximately 5.2e-7
+pastel-dark endpoint maximum: approximately 1.6e-7
+fit-independent RGB holdout maximum: below 5e-7 on luma-endpoint rows
+```
+
+The worst row is the intentionally adversarial chroma-`0.0006` boundary
+sample. The 99th percentile complete-matrix residual is approximately
+`2.1e-6`. No per-color matrix cache is required by this macOS 27 model.
+
+### Rendered acceptance
+
+The coefficient gate is now backed by a controlled rendered A/B test through
+the actual AppKit glass renderer. The test covers eight risk colors across all
+eight Light/Dark × Regular/Clear × Main-On/Main-Off contexts, for 64 rows:
+
+- exact black and mid gray;
+- the independent Salmon and Teal holdouts;
+- a gamut-edge red;
+- absolute-chroma boundary probes at `0.0003`, `0.0004`, and `0.0006`.
+
+For every row the harness records the system-resolved matrix, captures an A/A
+pair without changing the matrix, writes the synthesized matrix onto the same
+live Tint layer, verifies the matrix readback, and captures A/B. It uses
+`ScreenCaptureKit` with `SCShareableContent.currentProcess`, so it exercises
+WindowServer output without requiring screen-recording permission.
+
+The final macOS 27 run passed all 64 rows:
+
+```text
+rows: 64/64
+maximum live matrix residual: 1.963973e-4
+maximum A/A RGB code delta: 3
+maximum synthesized A/B RGB code delta: 3
+failures: 0
+```
+
+The matrix gate remains `2e-4`, and synthesized-matrix readback must remain
+within `1e-6`. The pixel gate is calibrated against the per-row A/A control:
+
+```text
+A/A: max <= 4, p99 <= 1, RMS <= 0.5 RGB code values
+A/B: max <= max(4, A/A max + 1)
+     p99 <= max(1, A/A p99 + 1)
+     RMS <= max(0.25, A/A RMS + 0.15)
+```
+
+Up to three pixel attempts may reject transient WindowServer noise; the
+matrix gate is never retried away. A stricter `max <= 2` pixel gate was shown
+invalid because a bit-identical captured/captured Main-Off control produced a
+maximum delta of 3. The retained p99 and RMS limits prevent isolated
+compositor noise from becoming a broad visual-tolerance exemption.
+
 ## Parameterization Attempts and Results
 
 The high-brightness combined grid supplies:
@@ -259,10 +406,13 @@ The unsuccessful models assumed:
   visual-equivalence question.
 
 The captures contradict the first three assumptions near gamut/headroom
-boundaries. The fourth assumption has not yet been validated: `2e-4` is an
-engineering candidate threshold, not a measured perceptual limit.
+boundaries. The fourth assumption is now answered independently rather than
+assumed: the 64-row rendered A/B passed with the candidate matrices, while
+the A/A control established the screenshot noise floor. The `2e-4`
+coefficient gate is therefore retained as a structural gate, not treated as a
+standalone perceptual metric.
 
-## Piecewise-Branch Hypothesis
+## Why Generic Interpolation Failed
 
 Several endpoint surfaces change direction as source colors approach full
 brightness or as an output channel approaches 0, 1, or extended-sRGB
@@ -270,18 +420,10 @@ headroom. Some endpoints become negative or exceed 1. Linear interpolation
 crosses the branch; high-order interpolation overshoots it because neither
 method knows the branch predicate.
 
-The unresolved hypothesis is that Apple first selects a region using a
-gamut/headroom or perceptual-color constraint and then applies a simpler
-formula inside that region.
-
-Potential branch variables include:
-
-- minimum, middle, and maximum source channel;
-- absolute chroma and luma;
-- a predicted endpoint channel crossing 0 or 1;
-- extended-sRGB headroom;
-- HSL/HSV lightness or value;
-- a linear-RGB, Lab, or Oklab gamut boundary.
+The branch variables are now established: HSL lightness at `5/11`, `1/2`,
+`5/6`, and `10/11`, plus the component-dependent standard bounds above.
+Generic interpolation crossed these exact predicates and averaged different
+formula regions.
 
 Do not assume that a near-neutral Dark Regular Main-On row labelled
 `standard` proves a context-family change. The pastel bright endpoint may
@@ -306,30 +448,22 @@ simply converge close enough to the source to cross the analyzer's
 - Product distribution is direct, not Mac App Store, but that does not relax
   fail-closed validation.
 
-## Recommended Next Investigation
+## Product Integration Status
 
-1. Write a reproducible analysis tool that loads all three fixtures, verifies
-   their environment and repeat anchors, and extracts the three endpoint
-   functions.
-2. Analyze `d_std`, `p_bright`, and `p_dark` independently. Start with
-   `d_std`, which dominates current holdout failures.
-3. Plot each ordered output channel over `(S, V, hueFraction)` and locate
-   derivative discontinuities rather than fitting one global surface.
-4. For every discontinuity, test candidate predicates based on source channel
-   extrema, luma/chroma, predicted output bounds, and perceptual-color gamut
-   limits.
-5. Fit the simplest formula separately inside each detected region.
-6. Use the exact cross-session anchors to establish the numerical noise floor.
-7. Lock the complete piecewise model before evaluating the nine reserved
-   colors again.
-8. Report per-function endpoint error, maximum matrix-coefficient error, and
-   rendered pixel/perceptual error. Do not rely on coefficient error alone.
-9. Only after this evaluation choose between:
-   - direct parameter synthesis with a small certification anchor check; or
-   - real-time preview followed by commit-time runtime Tint locking and bounded
-     persistence.
+Both matrix-space and rendered-output acceptance pass on macOS 27, and
+`GlassHUDMaterialController` now uses the result:
 
-No additional capture should be the default next step.
+1. On macOS 27, each configuration update synthesizes the four matrices needed
+   by the selected Normal/Muted participation into an in-memory Atlas copy.
+   The Provider Atlas is not mutated or persisted, and legacy cached matrices
+   cannot override the closed form.
+2. `lockingTint` remains only as a fail-closed fallback for unsupported system
+   majors or colors outside the certified synthesis input domain.
+3. Keep synthesis major-scoped. macOS 26 still needs a reduced certification
+   grid before it can reuse these endpoint formulas with its different context
+   selection table.
+
+No additional macOS 27 color grid is required by the current evidence.
 
 ## Git and Worktree State
 
@@ -342,14 +476,15 @@ agent/tint-parameterization-study
 Recent commits:
 
 ```text
+8cce87f docs: publish tint parameterization research handoff
 d062b81 feat: add terminal tint hue sweep
 66b39ed feat: classify achromatic tint matrices
 b416481 fix: retain unclassified tint matrices
 da43524 feat: add tint parameterization sweep
 ```
 
-The publication commit contains only the handoff, the verified Phase 2c
-fixture, and its manifest registration. The earlier research commits contain
+The publication commit `8cce87f` contains only the handoff, the verified Phase
+2c fixture, and its manifest registration. The earlier research commits contain
 the capture/analyzer implementation and the registered Full Grid and Phase 2b
 fixtures.
 
@@ -359,5 +494,30 @@ Golden/macOS-27/manifest.json
 Golden/macOS-27/tint-parameterization-hue-phase-2c.json
 ```
 
-No unrelated worktree changes belong in the publication commit. The dedicated
-branch is pushed independently; `main` must not be updated by this workflow.
+The closed-form and rendered-acceptance work after `8cce87f` consists of:
+
+```text
+Documentation/GlassLabPlayground.md
+Documentation/TintParameterizationHandoff.md
+Documentation/TintParameterizationStudy.md
+Golden/README.md
+Golden/tools/analyze-tint-parameterization.mjs
+Golden/tools/analyze-tint-parameterization.test.mjs
+LiquidGlassLab/GlassLab/GlassLabBenchHeadless.swift
+LiquidGlassLab/GlassLab/GlassLabBenchTintStudy.swift
+LiquidGlassLab/GlassLab/GlassLabTintParameterizationSweep.swift
+LiquidGlassLab/GlassLab/GlassLabTintRenderedAB.swift
+LiquidGlassLab/GlassLab/GlassLabView.swift
+LiquidGlassLab/GlassMaterial/GlassHUDMaterialController.swift
+LiquidGlassLab/GlassMaterial/GlassMaterialAtlas.swift
+LiquidGlassLab/GlassMaterial/GlassMaterialStrength.swift
+LiquidGlassLab/GlassMaterial/GlassMaterialTintMatrixSynthesizer.swift
+LiquidGlassLab/GlassMaterial/README.md
+Tests/GlassHUDMaterialTests/TintMatrixSynthesizerTests.swift
+```
+
+At the time of this handoff update, these files are intentionally uncommitted.
+`LiquidGlassLab.xcodeproj/project.pbxproj` also has an unrelated Xcode
+formatting-only worktree diff and must not be included with the research.
+The dedicated branch is pushed independently; `main` must not be updated by
+this workflow.

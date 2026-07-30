@@ -142,15 +142,22 @@ extension GlassLabView {
         let tintParameterizationHueFlag = arguments.firstIndex(
             of: "--capture-tint-parameterization-phase-2c"
         )
-        guard let flagIndex = sizeFlag
-                ?? resizeFlag
-                ?? removalWarmupFlag
-                ?? goldenFlag
-                ?? atlasFlag
-                ?? tintParameterizationHueFlag
-                ?? tintParameterizationFocusedFlag
-                ?? tintParameterizationFlag
-                ?? planFlag else {
+        let tintRenderedABFlag = arguments.firstIndex(
+            of: "--verify-tint-rendered-ab"
+        )
+        let captureFlagIndices = [
+            sizeFlag,
+            resizeFlag,
+            removalWarmupFlag,
+            goldenFlag,
+            atlasFlag,
+            tintRenderedABFlag,
+            tintParameterizationHueFlag,
+            tintParameterizationFocusedFlag,
+            tintParameterizationFlag,
+            planFlag,
+        ].compactMap { $0 }
+        guard let flagIndex = captureFlagIndices.first else {
             return
         }
         // A capture flag without its output path must fail loudly: silently
@@ -183,6 +190,30 @@ extension GlassLabView {
 
         var exitCode: Int32 = 0
         do {
+            if tintRenderedABFlag != nil {
+                let document = try await performTintRenderedABAcceptance()
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let payload = try encoder.encode(document)
+                var written = destination
+                do {
+                    try payload.write(to: destination, options: .atomic)
+                } catch {
+                    written = URL(fileURLWithPath: NSTemporaryDirectory())
+                        .appendingPathComponent(destination.lastPathComponent)
+                    try payload.write(to: written, options: .atomic)
+                }
+                FileHandle.standardError.write(Data(
+                    (
+                        document.report
+                            + "\n"
+                            + document.failureReport
+                            + "\nWrote \(written.path)\n"
+                    ).utf8
+                ))
+                state.testWindow.tearDown()
+                exit(document.passed ? 0 : 2)
+            }
             if tintParameterizationFlag != nil
                 || tintParameterizationFocusedFlag != nil
                 || tintParameterizationHueFlag != nil {
@@ -198,13 +229,15 @@ extension GlassLabView {
                     into: destination,
                     plan: plan
                 )
-                let report = "== Tint Parameterization Sweep ==\n"
-                    + "Plan: \(document.plan.id)\n"
-                    + "Colors: \(document.completedColorCount)/"
-                    + "\(document.plan.colors.count)\n"
-                    + "Rows: \(document.rows.count)\n"
-                    + "Unclassified: \(document.unclassifiedRowCount)\n"
-                    + "Complete: \(document.complete ? "yes" : "no")"
+                let report = [
+                    "== Tint Parameterization Sweep ==",
+                    "Plan: \(document.plan.id)",
+                    "Colors: \(document.completedColorCount)/"
+                        + "\(document.plan.colors.count)",
+                    "Rows: \(document.rows.count)",
+                    "Unclassified: \(document.unclassifiedRowCount)",
+                    "Complete: \(document.complete ? "yes" : "no")",
+                ].joined(separator: "\n")
                 FileHandle.standardError.write(Data(
                     (report + "\nWrote \(destination.path)\n").utf8
                 ))

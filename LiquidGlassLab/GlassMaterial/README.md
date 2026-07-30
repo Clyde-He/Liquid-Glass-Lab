@@ -16,8 +16,8 @@ The product-facing surface is deliberately small:
 - `GlassHUDMaterialController`
 
 The product owns semantic choices; the controller owns packaged-catalog
-loading, app-scoped runtime caching, calibration, retries, tint locking, and
-fail-closed fallback:
+loading, app-scoped base calibration, synchronous macOS 27 Tint synthesis,
+legacy locking, retries, and fail-closed fallback:
 
 ```swift
 import AppKit
@@ -46,15 +46,18 @@ material.configuration.variant = .regular
 
 Keep the controller alive for as long as the HUD is alive. The packaged
 `glass-macos-<major>.json` is discovered from the Swift Package resource bundle
-automatically. Runtime calibration and tint matrices are cached under the
-consumer app's Caches directory; the product does not supply or coordinate JSON
-files.
+automatically. On macOS 27, arbitrary in-gamut Tint colors are synthesized
+synchronously into an in-memory overlay: changing a color neither captures nor
+writes a per-color matrix cache. Runtime base calibration and unsupported-major
+Tint fallback data may still be cached under the consumer app's Caches
+directory; the product does not supply or coordinate JSON files.
 
 `normal` and `muted` are product semantics, not trusted labels in a JSON file.
-Both are installed from the same paired atlas transaction. A requested tint is
-withheld until its exact RGB has verified matrices for the selected
-participation; the product never presents a hue-suppressed live fallback as a
-successfully configured tint.
+Both are installed from the same paired atlas transaction. On macOS 27 a
+requested Tint is available in the same synchronous configuration update. On
+other system majors it is withheld until its exact RGB has verified matrices
+for the selected participation; the product never presents a hue-suppressed
+live fallback as a successfully configured Tint.
 
 Run the independent `GlassHUDConsumerDemo` app scheme from Xcode. To compile it
 from the command line:

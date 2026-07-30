@@ -3,10 +3,10 @@
 Goal (follow-up declared in PR #3): determine whether the live Tint matrix can
 be synthesized directly from a requested RGBA, eliminating per-color capture
 and persistence so continuous color-picker interaction needs no
-`lockingTint` phase. This brief records what has already been established
-from existing data, what has been ruled out, and the concrete study that
-remains. Read it fully before touching capture code — several hypotheses
-were already tested and several dead ends are documented.
+`lockingTint` phase. This brief records what was established, what was ruled
+out, the now-resolved macOS 27 model, and the remaining product-acceptance
+boundary. Read it fully before touching capture code — several hypotheses were
+already tested and several dead ends are documented.
 
 ## Established structure (verified at two hues, two macOS majors)
 
@@ -37,9 +37,9 @@ The first full-grid checkpoint on macOS 27 extended this result to all 144
 nonzero chromatic grid colors across all eight cells. It also found the first
 counterexample to treating the structure as universal: exact black
 `gray-000`, Light Regular Main-On resolved a different structure
-(`rank-1 residual 0.309601`). Exact black is therefore an explicit unknown
-family or zero-color special case until its raw matrix and neighboring gray
-samples are analyzed.
+(`rank-1 residual 0.309601`). Later gray probes established that this is the
+achromatic channel-affine family, not corrupt capture data or an unknown
+zero-color special case.
 
 ### 2. The standard transform: bright endpoint = the source color, exactly
 
@@ -51,8 +51,9 @@ requested tint RGB to capture precision, at both measured hues:
 | salmon (1.000, 0.450, 0.350) | (1.000, 0.450, 0.350) | (0.872, 0.001, −0.062) |
 | coral (0.920, 0.180, 0.380) | (0.920, 0.180, 0.380) | (0.609, −0.027, 0.145) |
 
-Only the **dark endpoint function `d_std(src)`** is unknown — 3 numbers per
-color. Note the extended-sRGB negative components: fitting must not clamp.
+At this stage only the **dark endpoint function `d_std(src)`** remained
+unknown — 3 numbers per color. Phase 2c later resolved it in closed form.
+Note the extended-sRGB negative components: synthesis must not clamp.
 
 ### 3. The pastel transform (dark-appearance treatment)
 
@@ -64,7 +65,8 @@ the source:
 | salmon (1.000, 0.450, 0.350) | (0.982, 0.624, 0.559) | (1.003, 0.419, 0.313) |
 | coral (0.920, 0.180, 0.380) | (0.911, 0.345, 0.498) | (0.922, 0.151, 0.359) |
 
-Here **both** endpoint functions `p_bright(src)`, `p_dark(src)` are unknown.
+At this stage **both** endpoint functions `p_bright(src)`, `p_dark(src)`
+remained unknown. Phase 2c later resolved both in closed form.
 
 ### 4. The neutral suppression matrix contains no hue information
 
@@ -194,9 +196,9 @@ diagonal = 0.3125 / D
 bias = (1.1875 × x - 0.25) / D
 ```
 
-The maximum residual across the 36 gray rows is `6.2e-8`. This is a model
-candidate, not yet a product gate: all six original gray anchors participated
-in deriving it.
+The maximum residual across the 36 gray rows is `6.2e-8`. Five unseen Phase 2b
+gray values later held to `1.34e-7`, and the formula is now part of the
+complete macOS 27 numeric gate.
 
 ### Focused Phase 2b result
 
@@ -217,7 +219,7 @@ Consequently they prove channel symmetry but do not constrain arbitrary hue
 fraction. Simple interpolation still misses the independent RGB holdouts by as
 much as `8.1e-2`, so Phase 2b does not certify product synthesis.
 
-### Hue-fraction Phase 2c plan
+### Hue-fraction Phase 2c result
 
 `tint-parameterization-hue-fraction-phase-2c` adds 136 colors. Its main 128
 samples cover H0/H30/H45/H60 × four saturations × the same eight dense
@@ -239,40 +241,44 @@ excluded from fitting. Synthesis proceeds only if all nine stay within
 otherwise the parameterized path is rejected and the product retains runtime
 Tint locking.
 
-1. **Grid sweep.** Reuse the paired-witness capture machinery
-   (`GlassMaterialAtlasProvider.captureTintMatrices` and the Bench tint
-   auto-lock in `GlassLabBenchAtlas.swift`) to sweep a color grid per cell:
-   ≥ 12 hues × 4 saturations × 3 brightnesses, plus achromatic colors, very
-   dark colors, gamut-edge colors (component 0 and 1), and an alpha sweep at
-   fixed RGB to confirm alpha touches only coefficient 18. Export
-   `(sourceColor → 8 cells × matrix)` as a Golden fixture
-   (`Golden/macOS-27/tint-parameterization-sweep.json` + manifest entry).
-2. **Structure classification.** For every captured matrix, require the alpha
-   row and complete finite payload, then measure the rank-1 luma and neutral
-   residuals. A structural violation invalidates the current candidate model
-   for that row and must be retained and reported as `unclassified`, not
-   smoothed over or used to abort the remaining evidence capture.
-3. **Fit the three endpoint functions** (`d_std`, `p_bright`, `p_dark`).
-   Try, in order: linear map in linear-RGB; affine map in linear-RGB;
-   hue-preserving HSB scalar model; Oklab/Lab affine. Report residuals in
-   both matrix-coefficient space and rendered-color space; residuals must be
-   below capture noise (compare against repeat-capture variance, cf.
-   `recursive-pass-audit-stability-repeat.json` methodology).
-4. **Cross-version check.** Re-run a reduced grid on macOS 26 to confirm
-   hypothesis (6): same transforms, different selection table. If false, the
-   model becomes per-major and the certification gate below carries more
-   weight.
-5. **Certification gate (keep the fail-closed philosophy).** Synthesis is
-   never trusted blind. Per macOS major, at first use, capture a small
-   anchor set (3–5 colors) through the existing paired pipeline and compare
-   synthesized vs resolved matrices; only on agreement does the controller
-   enable the synthesis path, otherwise it falls back to today's per-color
-   capture. Capture machinery is demoted to certification, not deleted.
-6. **Product integration.** On success: `GlassHUDMaterialController` drops
-   `lockingTint` for the synthesized path (status collapses to
-   ready-with-tint immediately), the runtime tint cache and
-   `mergeTintMatrices` shrink to anchor storage, and the color picker
-   becomes fully continuous.
+That gate now passes. The resolved model uses source extended-sRGB HSL
+lightness and exact piecewise predicates at `5/11`, `1/2`, `5/6`, and `10/11`.
+Pastel bright and dark are hue-preserving lightness/chroma transforms.
+Standard dark uses its own lightness/chroma transform followed by
+component-dependent extended-range bounds `-3x/17...(20 - 3x)/17`.
+`Documentation/TintParameterizationHandoff.md` records the complete formulas.
+
+`GlassMaterialTintMatrixSynthesizer` rebuilds all standard, pastel,
+neutral-suppression, and achromatic context rows. The Swift regression reads
+all three fixtures directly: 437 colors and 3,496 rows pass the `2e-4`
+complete-matrix gate. The maximum is `1.963824e-4` on the intentionally
+adversarial chroma-`.0006` boundary row; the 99th percentile is approximately
+`2.1e-6`.
+
+Rendered A/B acceptance now also passes. The controlled test applies eight
+risk colors to all eight Light/Dark × Regular/Clear × Main-On/Main-Off cells,
+captures an unchanged A/A control, writes the synthesized matrix to the same
+live Tint layer, verifies its readback, and captures the A/B output through
+`ScreenCaptureKit`. The final macOS 27 run completed 64/64 rows with zero
+failures, maximum live matrix residual `1.963973e-4`, maximum A/A RGB code
+delta 3, and maximum synthesized A/B RGB code delta 3. The per-row p99/RMS
+checks stayed within the calibrated compositor-noise envelope.
+
+Product runtime behavior is now switched on macOS 27.
+`GlassHUDMaterialController` synthesizes the selected Normal/Muted context
+matrices synchronously into an in-memory Atlas copy. It does not mutate the
+Provider Atlas or persist a color-bound cache, and a legacy cached matrix
+cannot override the closed form.
+
+The original grid capture, structure classification, and endpoint fitting
+steps are complete. Remaining work is:
+
+1. **Cross-version check.** Run a reduced macOS 26 certification grid to test
+   whether it shares the endpoint formulas with a different context-selection
+   table. Keep the synthesizer major-scoped until that passes.
+2. **Fallback retention.** Keep runtime Tint capture for unsupported majors or
+   colors outside the certified synthesis input domain, not for normal macOS
+   27 color-picker changes.
 
 ## Constraints and gotchas
 
