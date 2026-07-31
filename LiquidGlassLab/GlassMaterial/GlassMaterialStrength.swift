@@ -9,6 +9,7 @@
 
 #if os(macOS)
 import AppKit
+import OSLog
 
 /// Continuously dials an `NSGlassEffectView` between its system-resolved
 /// material at `1` and a fully dematerialized surface at `0`, coordinating
@@ -393,14 +394,26 @@ final class GlassMaterialStrength {
         }
         guard let glass,
               let sourceAlpha = tintColor
-                .usingColorSpace(.deviceRGB)?.alphaComponent,
-              let tintLayer = GlassMaterialAccess.tintMatrixLayer(under: glass),
-              var matrix = atlas.tintMatrix(
-                for: currentCell(for: glass),
-                matching: tintColor
-              ),
-              matrix.count == 20
+                .usingColorSpace(.deviceRGB)?.alphaComponent
         else { return false }
+        guard let tintLayer = GlassMaterialAccess.tintMatrixLayer(under: glass)
+        else {
+            // Normal exactly once per Tint session: the branch does not exist
+            // until AppKit inserts it, and the full install path answers that.
+            GlassMaterialTintLog.signposts.notice(
+                "restamp refused: tint layer not materialized"
+            )
+            return false
+        }
+        guard var matrix = atlas.tintMatrix(
+            for: currentCell(for: glass),
+            matching: tintColor
+        ), matrix.count == 20 else {
+            GlassMaterialTintLog.signposts.notice(
+                "restamp refused: no atlas matrix for the current cell"
+            )
+            return false
+        }
         matrix[18] = Float(GlassMaterialCurve.tintMatrixAlpha(
             at: value,
             sourceAlpha: Double(sourceAlpha)
@@ -409,7 +422,12 @@ final class GlassMaterialStrength {
         guard let written = GlassMaterialAccess.colorMatrix(on: tintLayer),
               written.count == matrix.count,
               zip(written, matrix).allSatisfy({ abs($0 - $1) < 1e-5 })
-        else { return false }
+        else {
+            GlassMaterialTintLog.signposts.notice(
+                "restamp refused: readback does not match the write"
+            )
+            return false
+        }
         lastFrozenTintMatrix = matrix
         return true
     }
@@ -790,50 +808,122 @@ final class GlassMaterialStrength {
     /// shader inputs. The written numeric vector is the authoritative check
     /// — the system cannot reproduce it at any `value` on a flat window —
     /// with margin and rim kept as cheaper leading checks.
+    /// Every leg of `frozenStateHolds` used to fail silently, so a transient
+    /// `frozenInstallFailed` on an untested OS major named nothing. Name the
+    /// broken invariant instead; the healthy path still logs zero lines.
+    private func frozenStateBroke(_ reason: String) -> Bool {
+        GlassMaterialTintLog.signposts.notice(
+            "frozen state broke: \(reason, privacy: .public)"
+        )
+        return false
+    }
+
+    private static func worstCoefficient(
+        _ current: [Float],
+        _ written: [Float]
+    ) -> (index: Int, current: Float, written: Float) {
+        var worst = (index: 0, current: current[0], written: written[0])
+        for (index, pair) in zip(current, written).enumerated()
+        where abs(pair.0 - pair.1) > abs(worst.current - worst.written) {
+            worst = (index, pair.0, pair.1)
+        }
+        return worst
+    }
+
     private func frozenStateHolds(
         _ sample: GlassMaterialStyleSample,
         on glass: NSGlassEffectView
     ) -> Bool {
-        guard let margin = GlassMaterialAccess.marginWidth(under: glass),
-              abs(margin - sample.marginWidth) < 0.25 else { return false }
+        guard let margin = GlassMaterialAccess.marginWidth(under: glass) else {
+            return frozenStateBroke("margin unreadable")
+        }
+        guard abs(margin - sample.marginWidth) < 0.25 else {
+            return frozenStateBroke(
+                "margin drifted: \(margin) vs \(sample.marginWidth)"
+            )
+        }
         guard let target = GlassMaterialAccess.glassBackgroundTarget(
             under: glass
-        ) else { return false }
+        ) else {
+            return frozenStateBroke("no glassBackground target")
+        }
         let currentInputs = GlassMaterialAccess.readTypedInputs(from: target)
         for (key, written) in lastFrozenNumbers {
-            guard let current = currentInputs.numeric[key],
-                  abs(current - written) < 1e-3 else { return false }
+            let current = currentInputs.numeric[key]
+            guard let current, abs(current - written) < 1e-3 else {
+                let read = current.map { "\($0)" } ?? "nil"
+                return frozenStateBroke(
+                    "shader numeric \(key): \(read) vs \(written)"
+                )
+            }
         }
         for (key, written) in lastFrozenColors {
             guard let current = currentInputs.colors[key],
                   GlassMaterialAccess.colorsMatch(current, written)
-            else { return false }
+            else {
+                return frozenStateBroke("shader color \(key) drifted")
+            }
         }
         let matrixLayersNow = GlassMaterialAccess.untintedMatrixLayers(
             under: glass
         )
         guard matrixLayersNow.count == sample.matrices.count else {
-            return false
+            return frozenStateBroke(
+                "untinted matrix layers: \(matrixLayersNow.count)"
+                    + " vs \(sample.matrices.count)"
+            )
         }
-        for (layer, slot) in zip(matrixLayersNow, sample.matrices) {
+        for (slotIndex, (layer, slot)) in zip(
+            matrixLayersNow,
+            sample.matrices
+        ).enumerated() {
             guard let current = GlassMaterialAccess.colorMatrix(on: layer),
-                  current.count == slot.matrix.count,
-                  zip(current, slot.matrix).allSatisfy({
-                      abs($0 - $1) < 1e-3
-                  })
-            else { return false }
+                  current.count == slot.matrix.count
+            else {
+                return frozenStateBroke(
+                    "grade matrix \(slotIndex) unreadable"
+                )
+            }
+            guard zip(current, slot.matrix).allSatisfy({
+                abs($0 - $1) < 1e-3
+            }) else {
+                let worst = Self.worstCoefficient(current, slot.matrix)
+                return frozenStateBroke(
+                    "grade matrix \(slotIndex) coefficient \(worst.index):"
+                        + " \(worst.current) vs \(worst.written)"
+                )
+            }
         }
         if tintColor != nil, let written = lastFrozenTintMatrix {
             guard let tintLayer = GlassMaterialAccess.tintMatrixLayer(
                 under: glass
-            ), let current = GlassMaterialAccess.colorMatrix(on: tintLayer),
-                current.count == written.count,
-                zip(current, written).allSatisfy({ abs($0 - $1) < 1e-3 })
-            else { return false }
+            ) else {
+                return frozenStateBroke("tint layer missing")
+            }
+            guard let current = GlassMaterialAccess.colorMatrix(on: tintLayer),
+                  current.count == written.count
+            else {
+                return frozenStateBroke("tint matrix unreadable")
+            }
+            guard zip(current, written).allSatisfy({ abs($0 - $1) < 1e-3 })
+            else {
+                let worst = Self.worstCoefficient(current, written)
+                return frozenStateBroke(
+                    "tint matrix coefficient \(worst.index):"
+                        + " \(worst.current) on layer vs \(worst.written) written"
+                )
+            }
         }
         let rimLayers = GlassMaterialAccess.rimLayers(under: glass)
-        guard rimLayers.count == sample.rims.count else { return false }
-        for (layer, rim) in zip(rimLayers, sample.rims) {
+        guard rimLayers.count == sample.rims.count else {
+            return frozenStateBroke(
+                "rim layers: \(rimLayers.count) vs \(sample.rims.count)"
+            )
+        }
+        for (rimIndex, (layer, rim)) in zip(
+            rimLayers,
+            sample.rims
+        ).enumerated() {
             var rimColors: [String: NSColor] = [:]
             for (key, color) in rim.colors { rimColors[key] = color.nsColor }
             if !GlassMaterialAccess.rimPayloadMatches(
@@ -841,7 +931,7 @@ final class GlassMaterialStrength {
                 colors: rimColors,
                 on: layer
             ) {
-                return false
+                return frozenStateBroke("rim payload \(rimIndex) drifted")
             }
         }
         return true
@@ -958,12 +1048,38 @@ public final class GlassMaterialEffectView: NSGlassEffectView {
     /// Separates Tint-branch materialization from the frozen writer's
     /// controlled color. This avoids the public setter's complete style apply
     /// when the product controller is about to write only the Tint matrix.
+    ///
+    /// The native color is pinned by RGB: assigning `tintColor` makes the
+    /// system re-resolve the Tint pass and rewrite its matrix at commit, so
+    /// an opacity drag — which streams colors differing only in alpha — was
+    /// feeding the system's own tint writer a reason to race the frozen
+    /// restamp on every tick. The native color's only jobs are materializing
+    /// the branch and being the fallback visual; the displayed alpha lives in
+    /// coefficient 18 of the frozen writer's matrix, so alpha-only changes
+    /// carry no information the native assignment needs to deliver.
     func stageMaterialTint(
         nativeColor: NSColor?,
         controlledColor: NSColor?
     ) {
-        tintColor = nativeColor
+        if !Self.sameTintRGB(tintColor, nativeColor) {
+            tintColor = nativeColor
+        }
         materialStrength.stageTintColor(controlledColor)
+    }
+
+    private static func sameTintRGB(_ a: NSColor?, _ b: NSColor?) -> Bool {
+        switch (a, b) {
+        case (nil, nil):
+            return true
+        case let (a?, b?):
+            guard let aValue = GlassMaterialColorValue(a),
+                  let bValue = GlassMaterialColorValue(b) else { return false }
+            return abs(aValue.red - bValue.red) <= 0.0005
+                && abs(aValue.green - bValue.green) <= 0.0005
+                && abs(aValue.blue - bValue.blue) <= 0.0005
+        default:
+            return false
+        }
     }
 
     /// Installs a verified atlas for the HUD's only supported frozen
