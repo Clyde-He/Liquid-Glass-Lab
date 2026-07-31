@@ -1180,11 +1180,22 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         configurationUpdateDepth += 1
         updates()
         configurationUpdateDepth -= 1
-        guard configurationUpdateDepth == 0,
-              hasDeferredConfigurationUpdate
-        else { return }
+        guard configurationUpdateDepth == 0 else { return }
+        let needsConfigurationUpdate = hasDeferredConfigurationUpdate
+        let needsStrengthRefresh = hasDeferredStrengthRefresh
+        let needsSystemRestampRefresh = hasDeferredSystemRestampRefresh
         hasDeferredConfigurationUpdate = false
-        synchronizeRequestedConfiguration()
+        hasDeferredStrengthRefresh = false
+        hasDeferredSystemRestampRefresh = false
+
+        let controllerApplied = needsConfigurationUpdate
+            && synchronizeRequestedConfiguration()
+        if needsStrengthRefresh, !controllerApplied {
+            refreshMaterialStrength()
+        }
+        if needsSystemRestampRefresh {
+            scheduleMaterialStrengthRefresh()
+        }
     }
 
     private(set) lazy var materialStrength = GlassMaterialStrength(glass: self)
@@ -1196,7 +1207,12 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     private var effectController: GlassEffectController?
     private var configurationUpdateDepth = 0
     private var hasDeferredConfigurationUpdate = false
+    private var hasDeferredStrengthRefresh = false
+    private var hasDeferredSystemRestampRefresh = false
     private var referenceWindowCloseObserver: NSObjectProtocol?
+
+    /// Internal performance diagnostic used by batching regression tests.
+    private(set) var materialRefreshGeneration = 0
 
     /// Internal product-controller hook. `NSView` has no did-move-to-window
     /// notification a separate owner can reliably observe.
@@ -1205,7 +1221,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     override public var style: NSGlassEffectView.Style {
         didSet {
             guard style != oldValue else { return }
-            materialStrength.refresh()
+            requestMaterialStrengthRefresh()
             guard !isApplyingControlledConfiguration else { return }
             requestedConfigurationDidChange()
         }
@@ -1214,7 +1230,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     override public var appearance: NSAppearance? {
         didSet {
             guard appearance !== oldValue else { return }
-            refreshNowAndAfterSystemRestamp()
+            requestMaterialStrengthRefresh(afterSystemRestamp: true)
             guard !isApplyingControlledConfiguration else { return }
             requestedConfigurationDidChange()
         }
@@ -1248,7 +1264,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     override public var cornerRadius: CGFloat {
         didSet {
             guard cornerRadius != oldValue else { return }
-            refreshNowAndAfterSystemRestamp()
+            requestMaterialStrengthRefresh(afterSystemRestamp: true)
             updateRequiredWindowInset()
         }
     }
@@ -1321,19 +1337,23 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
             hasDeferredConfigurationUpdate = true
             return
         }
-        synchronizeRequestedConfiguration()
+        _ = synchronizeRequestedConfiguration()
     }
 
-    private func synchronizeRequestedConfiguration() {
-        guard let controller = effectController else { return }
-        controller.configuration = .init(
+    @discardableResult
+    private func synchronizeRequestedConfiguration() -> Bool {
+        guard let controller = effectController else { return false }
+        let requested = GlassEffectController.Configuration(
             variant: style == .clear ? .clear : .regular,
             visibility: Double(requestedEffectAmount),
             appearance: Self.controlledAppearance(for: appearance),
             tint: requestedTintColor,
             emphasis: effectState == .active ? .normal : .muted
         )
+        let changed = controller.configuration != requested
+        controller.configuration = requested
         updateRequiredWindowInset()
+        return changed
     }
 
     func updateRequiredWindowInset() {
@@ -1429,7 +1449,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
-        materialStrength.refresh()
+        refreshMaterialStrength()
         updateRequiredWindowInset()
     }
 
@@ -1504,9 +1524,34 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     /// lands in the same turn as the notification; anything later is caught
     /// by the layout hook and the next context notification.
     private func refreshNowAndAfterSystemRestamp() {
+        refreshMaterialStrength()
+        scheduleMaterialStrengthRefresh()
+    }
+
+    private func requestMaterialStrengthRefresh(
+        afterSystemRestamp: Bool = false
+    ) {
+        guard configurationUpdateDepth == 0 else {
+            hasDeferredStrengthRefresh = true
+            hasDeferredSystemRestampRefresh =
+                hasDeferredSystemRestampRefresh || afterSystemRestamp
+            return
+        }
+        if afterSystemRestamp {
+            refreshNowAndAfterSystemRestamp()
+        } else {
+            refreshMaterialStrength()
+        }
+    }
+
+    private func refreshMaterialStrength() {
+        materialRefreshGeneration += 1
         materialStrength.refresh()
+    }
+
+    private func scheduleMaterialStrengthRefresh() {
         Task { @MainActor [weak self] in
-            self?.materialStrength.refresh()
+            self?.refreshMaterialStrength()
         }
     }
 }

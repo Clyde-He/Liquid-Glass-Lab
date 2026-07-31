@@ -234,8 +234,11 @@ edge-to-edge will still clip the Main-On outer passes no matter what this
 module writes. Size the panel to its visual content plus
 `requiredWindowInset` on every side and respond to
 `onRequiredWindowInsetChange` when size, style, participation, or calibration
-changes. Window dragging, snapping, and hit testing should continue to use the
-visual glass frame rather than the larger transparent panel frame.
+changes. Keep the visual content size fixed and grow the panel outward by the
+reported inset; deriving the glass bounds back from the expanded panel can
+create a size/inset feedback loop. Window dragging, snapping, and hit testing
+should continue to use the visual glass frame rather than the larger transparent
+panel frame.
 
 A frozen style needs an active defense rather than a single write. AppKit
 restamps parts of the tree for the window's *real* participation one cycle

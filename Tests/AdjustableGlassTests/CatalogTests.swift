@@ -47,6 +47,39 @@ final class CatalogTests: XCTestCase {
     }
 
     @MainActor
+    func testPreAtlasEnvelopeUsesWorstBundledMainOnMargin() {
+        let provider = GlassMaterialAtlasProvider(
+            hostWindow: nil,
+            certifiedAtlasURLs: GlassMaterialAtlasCatalog.bundledAtlasURLs()
+        )
+
+        XCTAssertEqual(
+            provider.conservativeMainOnMargin(for: 96),
+            68,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            provider.conservativeMainOnMargin(for: 128),
+            83,
+            accuracy: 0.001
+        )
+    }
+
+    @MainActor
+    func testPreAtlasEnvelopeFallsBackToWorstMeasuredRatio() {
+        let provider = GlassMaterialAtlasProvider(
+            hostWindow: nil,
+            certifiedAtlasURLs: []
+        )
+
+        XCTAssertEqual(
+            provider.conservativeMainOnMargin(for: 120),
+            85.2,
+            accuracy: 0.001
+        )
+    }
+
+    @MainActor
     func testCertifiedCatalogKeepsCompatibleCachedTintOverlay() throws {
         let catalogURL = try XCTUnwrap(
             GlassMaterialAtlasCatalog.bundledAtlasURL(forMacOSMajor: 27)
