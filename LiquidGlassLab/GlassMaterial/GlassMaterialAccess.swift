@@ -14,6 +14,7 @@
 #if os(macOS)
 import AppKit
 
+@available(macOS 26.0, *)
 enum GlassMaterialAccess {
     struct GlassBackgroundTarget {
         let layer: CALayer

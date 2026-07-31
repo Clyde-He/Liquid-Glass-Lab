@@ -3,6 +3,7 @@ import Foundation
 import XCTest
 @testable import AdjustableGlass
 
+@available(macOS 26.0, *)
 final class TintMatrixSynthesizerTests: XCTestCase {
     private struct SweepDocument: Decodable {
         var rows: [SweepRow]

@@ -143,7 +143,11 @@ private final class ConsumerDemoAppDelegate:
         glassView.onStatusChange = { [weak self] status in
             self?.render(status: status)
         }
+        glassView.onRequiredWindowInsetChange = { [weak self] _ in
+            self?.layoutHUDPanel()
+        }
 
+        layoutHUDPanel()
         hudPanel.orderFront(nil)
         if let hudContent = hudPanel.contentView {
             frameMonitor.start(on: hudContent)
@@ -270,7 +274,7 @@ private final class ConsumerDemoAppDelegate:
         relativeTo controlWindow: NSWindow
     ) -> (ConsumerHUDPanel, AdjustableGlassEffectView) {
         let contentSize = CGSize(width: 320, height: 120)
-        let padding: CGFloat = 64
+        let padding: CGFloat = 1
         let panelSize = CGSize(
             width: contentSize.width + padding * 2,
             height: contentSize.height + padding * 2
@@ -303,12 +307,15 @@ private final class ConsumerDemoAppDelegate:
         )
         glass.cornerRadius = 24
 
+        let hudContent = NSView(
+            frame: NSRect(origin: .zero, size: contentSize)
+        )
         let title = NSTextField(labelWithString: "Product HUD")
         title.font = .systemFont(ofSize: 16, weight: .semibold)
         title.alignment = .center
         title.frame = NSRect(
-            x: padding,
-            y: padding + 64,
+            x: 0,
+            y: 64,
             width: contentSize.width,
             height: 22
         )
@@ -319,15 +326,16 @@ private final class ConsumerDemoAppDelegate:
         hudDetailLabel.textColor = .secondaryLabelColor
         hudDetailLabel.alignment = .center
         hudDetailLabel.frame = NSRect(
-            x: padding,
-            y: padding + 36,
+            x: 0,
+            y: 36,
             width: contentSize.width,
             height: 18
         )
 
+        hudContent.addSubview(title)
+        hudContent.addSubview(hudDetailLabel)
+        glass.contentView = hudContent
         container.addSubview(glass)
-        container.addSubview(title)
-        container.addSubview(hudDetailLabel)
         panel.contentView = container
 
         let origin = NSPoint(
@@ -336,6 +344,25 @@ private final class ConsumerDemoAppDelegate:
         )
         panel.setFrameOrigin(origin)
         return (panel, glass)
+    }
+
+    private func layoutHUDPanel() {
+        guard let panel = hudPanel, let glass = glassView else { return }
+        let contentSize = CGSize(width: 320, height: 120)
+        let inset = glass.requiredWindowInset
+        let total = CGSize(
+            width: contentSize.width + inset * 2,
+            height: contentSize.height + inset * 2
+        )
+        let topLeft = NSPoint(x: panel.frame.minX, y: panel.frame.maxY)
+        panel.setContentSize(total)
+        panel.setFrameTopLeftPoint(topLeft)
+        glass.frame = NSRect(
+            x: inset,
+            y: inset,
+            width: contentSize.width,
+            height: contentSize.height
+        )
     }
 
     private func labeledRow(_ title: String, _ control: NSView) -> NSView {
@@ -382,24 +409,28 @@ private final class ConsumerDemoAppDelegate:
         let visibility = visibilitySlider.doubleValue
         visibilityValue.stringValue = String(format: "%.2f", visibility)
 
-        glassView.style = variantControl.selectedSegment == 1
-            ? .clear
-            : .regular
-        glassView.effectState = emphasisControl.selectedSegment == 1
-            ? .inactive
-            : .active
-        glassView.appearance = {
-            switch appearanceControl.selectedSegment {
-            case 1:
-                NSAppearance(named: .aqua)
-            case 2:
-                NSAppearance(named: .darkAqua)
-            default:
-                nil
-            }
-        }()
-        glassView.effectAmount = CGFloat(visibility)
-        glassView.tintColor = tintToggle.state == .on ? tintWell.color : nil
+        glassView.performConfigurationUpdates {
+            glassView.style = variantControl.selectedSegment == 1
+                ? .clear
+                : .regular
+            glassView.effectState = emphasisControl.selectedSegment == 1
+                ? .inactive
+                : .active
+            glassView.appearance = {
+                switch appearanceControl.selectedSegment {
+                case 1:
+                    NSAppearance(named: .aqua)
+                case 2:
+                    NSAppearance(named: .darkAqua)
+                default:
+                    nil
+                }
+            }()
+            glassView.effectAmount = CGFloat(visibility)
+            glassView.tintColor = tintToggle.state == .on
+                ? tintWell.color
+                : nil
+        }
 
         let tint = tintToggle.state == .on ? "Tint" : "No Tint"
         hudDetailLabel.stringValue = [

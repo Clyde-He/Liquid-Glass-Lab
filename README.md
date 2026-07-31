@@ -30,9 +30,11 @@ Start with:
 
 ## Build
 
-The current target is macOS 26.0+. Accepted per-OS captures currently include
-the macOS 26.6 and macOS 27 beta Recipe/Recursive baselines, plus the macOS 27
-SwiftUI Semantic Usage fixture.
+The Glass runtime is available on macOS 26.0+. The Swift Package itself can be
+linked by applications that retain an older deployment target; consumers gate
+`AdjustableGlassEffectView` at runtime and keep their pre-macOS-26 fallback.
+Accepted per-OS captures currently include the macOS 26.6 and macOS 27 beta
+Recipe/Recursive baselines, plus the macOS 27 SwiftUI Semantic Usage fixture.
 
 ```sh
 xcodebuild \
