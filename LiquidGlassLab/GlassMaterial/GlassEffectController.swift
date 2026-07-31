@@ -303,6 +303,7 @@ final class GlassEffectController {
     }
 
     func invalidate() {
+        atlasProvider.invalidate()
         installRetryTask?.cancel()
         installRetryTask = nil
         calibrationRetryTask?.cancel()
@@ -367,7 +368,7 @@ final class GlassEffectController {
             return ceil(max(0, sample.marginWidth)) + 1
         }
         guard configuration.emphasis == .normal else { return 1 }
-        return ceil(max(16, 0.35 * shortSide)) + 1
+        return ceil(atlasProvider.conservativeMainOnMargin(for: shortSide)) + 1
     }
 
     func recalibrate() {

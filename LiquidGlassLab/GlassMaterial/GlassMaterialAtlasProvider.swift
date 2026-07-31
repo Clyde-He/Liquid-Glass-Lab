@@ -108,16 +108,19 @@ final class GlassMaterialAtlasProvider {
     private let shortSides: [Double]
     private let storageURL: URL?
     private let certifiedAtlasURLs: [URL]
+    private let certifiedFallbackAtlases: [GlassMaterialStyleAtlas]
     private let probeWidth: Double
     private var mainProbeContainer: NSView?
     private var witnessWindow: GlassMaterialCalibrationWindow?
     private var witnessProbeContainer: NSView?
     private var captureTask: Task<Void, Never>?
+    private var captureGeneration = 0
     private var tintCaptureTask: Task<Void, Never>?
     private var tintCaptureGeneration = 0
     private var observers: [NSObjectProtocol] = []
     private var didLoadCandidates = false
     private var pendingRecalibration = false
+    private var isInvalidated = false
 
     /// Host flags are a scheduling precondition, never proof of the captured
     /// material. Payload proof comes from paired On/Off samples.
@@ -153,6 +156,9 @@ final class GlassMaterialAtlasProvider {
         self.shortSides = shortSides.sorted()
         self.storageURL = storageURL
         self.certifiedAtlasURLs = certifiedAtlasURLs
+        self.certifiedFallbackAtlases = certifiedAtlasURLs.compactMap {
+            Self.loadCertifiedFallbackAtlas(from: $0)
+        }
         self.probeWidth = max(480, (shortSides.max() ?? 320) * 1.5)
         self.atlas = GlassMaterialStyleAtlas()
     }
@@ -166,6 +172,7 @@ final class GlassMaterialAtlasProvider {
     /// Loads a certified atlas or verified runtime cache, otherwise calibrates
     /// at the next stable main/key opportunity. Idempotent.
     public func ensureCaptured() {
+        guard !isInvalidated else { return }
         observeHostWindow()
         if isMainOnCoverageComplete {
             state = .ready
@@ -186,7 +193,9 @@ final class GlassMaterialAtlasProvider {
     /// transactional calibration. The old disk cache remains untouched until
     /// the replacement has fully verified and can atomically overwrite it.
     public func recalibrate() {
+        guard !isInvalidated else { return }
         pendingRecalibration = captureTask != nil
+        captureGeneration += 1
         captureTask?.cancel()
         tintCaptureGeneration += 1
         tintCaptureTask?.cancel()
@@ -216,6 +225,44 @@ final class GlassMaterialAtlasProvider {
         tearDownWitnessWindow()
     }
 
+    /// Stops every provider-owned transaction and releases its AppKit probes.
+    /// A controller replacement must not let the old provider finish against a
+    /// stale reference window or race the replacement's cache write.
+    public func invalidate() {
+        guard !isInvalidated else { return }
+        isInvalidated = true
+        captureGeneration += 1
+        captureTask?.cancel()
+        captureTask = nil
+        pendingRecalibration = false
+        tintCaptureGeneration += 1
+        tintCaptureTask?.cancel()
+        tintCaptureTask = nil
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        observers = []
+        mainProbeContainer?.removeFromSuperview()
+        mainProbeContainer = nil
+        tearDownWitnessWindow()
+        onAtlasUpdated = nil
+        onStateChanged = nil
+    }
+
+    /// Conservative window room while the selected runtime atlas is not ready.
+    /// Use the largest interpolated Main-On margin across every bundled,
+    /// structurally verified catalog. If none decode, retain the worst measured
+    /// ratio from the shipped evidence rather than guessing from one OS major.
+    func conservativeMainOnMargin(for shortSide: Double) -> Double {
+        let side = max(0, shortSide)
+        if let measured = certifiedFallbackAtlases.compactMap({
+            $0.maximumMainOnMargin(at: side)
+        }).max() {
+            return measured
+        }
+        return max(16, 0.71 * side)
+    }
+
     /// Captures the paired Main-On and Main-Off tint matrices for one chosen
     /// RGB in all four appearance × variant contexts. The base atlas must
     /// already be verified. Each pair is admitted only while its base styles
@@ -225,6 +272,10 @@ final class GlassMaterialAtlasProvider {
         for color: NSColor,
         completion: @escaping @MainActor (Bool) -> Void
     ) {
+        guard !isInvalidated else {
+            completion(false)
+            return
+        }
         guard isMainOnCoverageComplete else {
             ensureCaptured()
             completion(false)
@@ -440,6 +491,21 @@ final class GlassMaterialAtlasProvider {
         return candidate
     }
 
+    private static func loadCertifiedFallbackAtlas(
+        from url: URL
+    ) -> GlassMaterialStyleAtlas? {
+        guard let data = try? Data(contentsOf: url),
+              let candidate = try? JSONDecoder().decode(
+                GlassMaterialStyleAtlas.self,
+                from: data
+              ),
+              candidate.environment?.schemaVersion
+                == GlassMaterialStyleAtlas.currentSchemaVersion,
+              candidate.hasVerifiedMainOnPayload()
+        else { return nil }
+        return candidate
+    }
+
     // MARK: - Capture scheduling
 
     private func observeHostWindow() {
@@ -464,14 +530,20 @@ final class GlassMaterialAtlasProvider {
     }
 
     private func captureWhenPossible() {
-        guard captureTask == nil, !isMainOnCoverageComplete else { return }
+        guard !isInvalidated,
+              captureTask == nil,
+              !isMainOnCoverageComplete
+        else { return }
         guard hostParticipates else {
             state = .waitingForMainWindow
             return
         }
+        captureGeneration += 1
+        let generation = captureGeneration
         captureTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.runCalibration()
+            await self.runCalibration(generation: generation)
+            guard !self.isInvalidated else { return }
             self.captureTask = nil
             if self.pendingRecalibration {
                 self.pendingRecalibration = false
@@ -486,7 +558,8 @@ final class GlassMaterialAtlasProvider {
     /// Captures all four cells as one transaction. Progress is observable, but
     /// neither `atlas` nor the disk cache changes until every On/Off pair has
     /// passed payload validation.
-    private func runCalibration() async {
+    private func runCalibration(generation: Int) async {
+        guard captureIsCurrent(generation) else { return }
         guard prepareWitnessWindow() else {
             state = .failed("Could not create the Main-Off witness window.")
             return
@@ -494,6 +567,7 @@ final class GlassMaterialAtlasProvider {
         defer { tearDownWitnessWindow() }
 
         try? await Task.sleep(for: .milliseconds(500))
+        guard captureIsCurrent(generation) else { return }
         guard hostParticipates else {
             state = .waitingForMainWindow
             return
@@ -537,6 +611,8 @@ final class GlassMaterialAtlasProvider {
             return
         }
 
+        guard captureIsCurrent(generation) else { return }
+
         atlas = candidate
         atlasSource = .runtimeCalibration
         do {
@@ -551,6 +627,12 @@ final class GlassMaterialAtlasProvider {
         }
         state = .ready
         onAtlasUpdated?(atlas)
+    }
+
+    private func captureIsCurrent(_ generation: Int) -> Bool {
+        !isInvalidated
+            && !Task.isCancelled
+            && generation == captureGeneration
     }
 
     private func captureVerifiedBatch(

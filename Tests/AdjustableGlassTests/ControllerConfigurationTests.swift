@@ -158,6 +158,23 @@ final class ControllerConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testConfigurationBatchCoalescesMaterialRefreshes() async {
+        let view = AdjustableGlassEffectView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 120)
+        )
+        let initialGeneration = view.materialRefreshGeneration
+
+        view.performConfigurationUpdates {
+            view.style = .clear
+            view.appearance = NSAppearance(named: .darkAqua)
+        }
+
+        XCTAssertEqual(view.materialRefreshGeneration, initialGeneration)
+        await Task.yield()
+        XCTAssertEqual(view.materialRefreshGeneration, initialGeneration + 1)
+    }
+
+    @MainActor
     func testLayoutInsetTracksSelectedParticipation() {
         let view = AdjustableGlassEffectView(
             frame: NSRect(x: 0, y: 0, width: 320, height: 120)
@@ -173,5 +190,23 @@ final class ControllerConfigurationTests: XCTestCase {
 
         XCTAssertGreaterThan(activeInset, inactiveInset)
         XCTAssertGreaterThanOrEqual(inactiveInset, 1)
+    }
+
+    @MainActor
+    func testPreAtlasInsetCoversTheMacOS26Envelope() {
+        let controller = GlassEffectController(
+            hostWindow: nil,
+            configuration: nil,
+            storageURL: nil,
+            certifiedAtlasURLs: GlassMaterialAtlasCatalog.bundledAtlasURLs()
+        )
+        defer { controller.invalidate() }
+
+        XCTAssertEqual(
+            controller.requiredWindowInset(
+                for: CGSize(width: 320, height: 120)
+            ),
+            81
+        )
     }
 }

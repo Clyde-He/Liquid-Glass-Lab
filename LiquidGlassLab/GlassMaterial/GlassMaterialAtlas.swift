@@ -397,6 +397,28 @@ struct GlassMaterialStyleAtlas: Codable, Sendable {
         (cells[cell] ?? []).map(\.shortSide)
     }
 
+    /// The largest verified Main-On render margin at one requested geometry.
+    /// Used only for the transient pre-atlas window envelope, where oversizing
+    /// is safer than clipping and appearance/variant are not yet trustworthy.
+    public func maximumMainOnMargin(at shortSide: Double) -> Double? {
+        guard hasVerifiedMainOnPayload() else { return nil }
+        var margins: [Double] = []
+        for isLight in [true, false] {
+            for isClear in [false, true] {
+                let cell = Cell(
+                    isLightAppearance: isLight,
+                    isClear: isClear,
+                    hasMainParticipation: true
+                )
+                guard let sample = sample(for: cell, at: shortSide) else {
+                    return nil
+                }
+                margins.append(sample.marginWidth)
+            }
+        }
+        return margins.max()
+    }
+
     /// True when every sample of the cell carries the structural invariants
     /// `capture` guarantees: two untinted grade slots with well-formed 4×5
     /// matrices, and one key-fill rim with a nonempty value payload and both
