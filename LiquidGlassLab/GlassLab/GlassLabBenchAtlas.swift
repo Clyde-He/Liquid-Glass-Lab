@@ -716,8 +716,15 @@ extension GlassLabView {
                 providerStatus = "No control window available."
                 return
             }
+            guard let probeHost = state.testWindow.liveControlProbeHost,
+                  probeHost.window === window else {
+                providerStatus =
+                    "No supported control-window probe host available."
+                return
+            }
             provider = GlassMaterialAtlasProvider(
                 hostWindow: window,
+                probeHostView: probeHost,
                 shortSides: Self.atlasProbeShortSides,
                 storageURL: try? Self.providerAtlasStorageURL(),
                 certifiedAtlasURLs:
@@ -1847,7 +1854,9 @@ extension GlassLabView {
         state.isTestWindowMain = false
         state.testWindow.sync(with: state)
         try await Task.sleep(for: .milliseconds(600))
-        if let controlWindow = state.testWindow.liveControlWindow {
+        if let controlWindow = state.testWindow.liveControlWindow,
+           let probeHost = state.testWindow.liveControlProbeHost,
+           probeHost.window === controlWindow {
             // Simulate the user working in the window: the provider's whole
             // premise is capturing at real main/active moments.
             NSApplication.shared.activate(ignoringOtherApps: true)
@@ -1856,6 +1865,7 @@ extension GlassLabView {
             let providerSides: [Double] = [64, 96, 160]
             let provider = GlassMaterialAtlasProvider(
                 hostWindow: controlWindow,
+                probeHostView: probeHost,
                 shortSides: providerSides,
                 storageURL: nil
             )

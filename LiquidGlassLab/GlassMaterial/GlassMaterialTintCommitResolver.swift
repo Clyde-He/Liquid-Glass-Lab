@@ -52,6 +52,7 @@ final class GlassMaterialTintCommitResolver {
     }
 
     private weak var hostWindow: NSWindow?
+    private weak var mainProbeHost: NSView?
     private var mainContainer: NSView?
     private var witnessWindow: GlassMaterialTintWitnessWindow?
     private var witnessContainer: NSView?
@@ -81,8 +82,9 @@ final class GlassMaterialTintCommitResolver {
 
     private(set) var refusals = RefusalCounts()
 
-    init(hostWindow: NSWindow) {
+    init(hostWindow: NSWindow, mainProbeHost: NSView) {
         self.hostWindow = hostWindow
+        self.mainProbeHost = mainProbeHost
     }
 
     deinit {
@@ -111,13 +113,14 @@ final class GlassMaterialTintCommitResolver {
 
     private func performWarmUp() async -> Bool {
         guard let hostWindow,
-              let hostContent = hostWindow.contentView,
+              let mainProbeHost,
+              mainProbeHost.window === hostWindow,
               hostParticipates
         else { return false }
 
         tearDownProbes()
         let container = makeClippedContainer()
-        hostContent.addSubview(container)
+        mainProbeHost.addSubview(container)
         mainContainer = container
         guard prepareWitnessWindow(), let witnessContainer else {
             tearDown()
@@ -136,7 +139,7 @@ final class GlassMaterialTintCommitResolver {
         // first commit and a coarse poll charges a visible wait for work that
         // is already done.
         for attempt in 0..<64 {
-            hostContent.layoutSubtreeIfNeeded()
+            mainProbeHost.layoutSubtreeIfNeeded()
             witnessWindow?.contentView?.layoutSubtreeIfNeeded()
             CATransaction.flush()
             refusals.warmUpPolls += 1
@@ -187,7 +190,7 @@ final class GlassMaterialTintCommitResolver {
             GlassMaterialTintLog.signposts.notice("resolve refused: witness participating")
             return nil
         }
-        guard let hostContent = hostWindow?.contentView else { return nil }
+        guard let hostContent = validMainProbeHost else { return nil }
 
         // Set and commit. Clearing to nil first would be the simple way to be
         // sure a stale matrix is not read back, but setting `tintColor` from nil
@@ -287,7 +290,7 @@ final class GlassMaterialTintCommitResolver {
     func prewarmTintBranch(for color: NSColor) {
         GlassMaterialTintLog.signposts.notice("prewarm tint branch")
         guard isWarm, !pairs.isEmpty,
-              let hostContent = hostWindow?.contentView
+              let hostContent = validMainProbeHost
         else { return }
         commitTint(color, in: hostContent)
         lastResolvedMatrices = [:]
@@ -327,6 +330,13 @@ final class GlassMaterialTintCommitResolver {
         guard let hostWindow else { return false }
         return (hostWindow.isMainWindow || hostWindow.isKeyWindow)
             && NSApp.isActive
+    }
+
+    private var validMainProbeHost: NSView? {
+        guard let hostWindow, let mainProbeHost,
+              mainProbeHost.window === hostWindow
+        else { return nil }
+        return mainProbeHost
     }
 
     private var witnessIsMainOff: Bool {

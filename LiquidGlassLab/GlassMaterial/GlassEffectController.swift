@@ -196,6 +196,7 @@ final class GlassEffectController {
     private let atlasProvider: GlassMaterialAtlasProvider
 
     private weak var hostWindow: NSWindow?
+    private weak var probeHostView: NSView?
     private var observers: [NSObjectProtocol] = []
     private var installRetryTask: Task<Void, Never>?
     private var calibrationRetryTask: Task<Void, Never>?
@@ -246,10 +247,12 @@ final class GlassEffectController {
 
     convenience init(
         hostWindow: NSWindow?,
+        probeHostView: NSView? = nil,
         configuration: Configuration? = nil
     ) {
         self.init(
             hostWindow: hostWindow,
+            probeHostView: probeHostView,
             configuration: configuration,
             shortSides: [48, 64, 96, 128, 160, 200, 320],
             storageURL: nil,
@@ -259,15 +262,18 @@ final class GlassEffectController {
 
     init(
         hostWindow: NSWindow?,
+        probeHostView: NSView? = nil,
         configuration: Configuration?,
         shortSides: [Double] = [48, 64, 96, 128, 160, 200, 320],
         storageURL: URL? = nil,
         certifiedAtlasURLs: [URL]? = nil
     ) {
         self.hostWindow = hostWindow
+        self.probeHostView = probeHostView
         self.configuration = configuration ?? Configuration()
         self.atlasProvider = GlassMaterialAtlasProvider(
             hostWindow: hostWindow,
+            probeHostView: probeHostView,
             shortSides: shortSides,
             storageURL: storageURL ?? Self.defaultStorageURL(),
             certifiedAtlasURLs: certifiedAtlasURLs
@@ -721,9 +727,12 @@ final class GlassEffectController {
             return
         }
         let resolver = tintCommitResolver ?? {
-            guard let hostWindow else { return nil }
+            guard let hostWindow, let probeHostView,
+                  probeHostView.window === hostWindow
+            else { return nil }
             let created = GlassMaterialTintCommitResolver(
-                hostWindow: hostWindow
+                hostWindow: hostWindow,
+                mainProbeHost: probeHostView
             )
             tintCommitResolver = created
             return created
@@ -808,9 +817,13 @@ final class GlassEffectController {
         pendingTintCommitRequest = (color, sourceColor)
         pendingTintCommitRequestedAt = DispatchTime.now().uptimeNanoseconds
         guard hostParticipates else { return }
-        if tintCommitResolver == nil, let hostWindow {
+        if tintCommitResolver == nil,
+           let hostWindow,
+           let probeHostView,
+           probeHostView.window === hostWindow {
             tintCommitResolver = GlassMaterialTintCommitResolver(
-                hostWindow: hostWindow
+                hostWindow: hostWindow,
+                mainProbeHost: probeHostView
             )
         }
         guard let resolver = tintCommitResolver else { return }

@@ -1193,6 +1193,20 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         }
     }
 
+    /// A consumer-owned AppKit view inside `referenceWindow` where invisible
+    /// verification probes may be attached.
+    ///
+    /// SwiftUI consumers should supply a view installed through
+    /// `NSViewRepresentable`; adding subviews directly to an
+    /// `NSHostingController` root is unsupported. Plain AppKit windows whose
+    /// content is not owned by a view controller may omit this property.
+    @objc public weak var referenceView: NSView? {
+        didSet {
+            guard referenceView !== oldValue else { return }
+            rebuildEffectController()
+        }
+    }
+
     /// Whether the system's bounds-extending glass shadow is retained.
     ///
     /// Disabling it suppresses the bounds-extending Shadow/SDR Shadow family
@@ -1293,9 +1307,11 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     /// its verified material context.
     public init(
         referenceWindow: NSWindow? = nil,
+        referenceView: NSView? = nil,
         frame frameRect: NSRect = .zero
     ) {
         self.referenceWindow = referenceWindow
+        self.referenceView = referenceView
         super.init(frame: frameRect)
         observeReferenceWindowClose()
         rebuildEffectController()
@@ -1473,6 +1489,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
 
         let controller = GlassEffectController(
             hostWindow: referenceWindow,
+            probeHostView: resolvedReferenceView,
             configuration: .init(
                 variant: style == .clear ? .clear : .regular,
                 visibility: Double(requestedEffectAmount),
@@ -1490,6 +1507,27 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         controller.attach(to: self)
         status = Self.publicStatus(for: controller.status)
         updateRequiredWindowInset()
+    }
+
+    private var resolvedReferenceView: NSView? {
+        Self.resolveReferenceView(
+            referenceWindow: referenceWindow,
+            referenceView: referenceView
+        )
+    }
+
+    static func resolveReferenceView(
+        referenceWindow: NSWindow?,
+        referenceView: NSView?
+    ) -> NSView? {
+        guard let referenceWindow else { return nil }
+        if let referenceView {
+            return referenceView.window === referenceWindow
+                ? referenceView
+                : nil
+        }
+        guard referenceWindow.contentViewController == nil else { return nil }
+        return referenceWindow.contentView
     }
 
     private func requestedConfigurationDidChange() {

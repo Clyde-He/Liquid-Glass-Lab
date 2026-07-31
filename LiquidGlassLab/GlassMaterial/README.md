@@ -19,7 +19,8 @@ import AppKit
 import AdjustableGlass
 
 let glassView = AdjustableGlassEffectView(
-    referenceWindow: settingsWindow
+    referenceWindow: settingsWindow,
+    referenceView: appKitReferenceView
 )
 glassView.contentView = hudContentView
 glassView.cornerRadius = 24
@@ -48,6 +49,7 @@ right vocabulary:
 | `effectState` | Added deterministic `.active` / `.inactive` material |
 | `hasOuterShadow` | Retains the bounds-extending shadow; when `false`, the safety inset is 0pt on macOS 26 and 1pt on macOS 27 |
 | `referenceWindow` | Optional, replaceable ordinary app window used for verification |
+| `referenceView` | Optional consumer-owned AppKit insertion point for invisible verification probes |
 | `requiredWindowInset`, `onRequiredWindowInsetChange` | Transparent room required around the visual glass bounds |
 | `status`, `onStatusChange`, `prepareIfNeeded()` | Readiness and retry surface |
 | `performConfigurationUpdates(_:)` | Applies several property changes as one material transaction |
@@ -65,6 +67,13 @@ The reference may be nil at launch and replaced later without recreating the
 glass or its `contentView`. A certified base atlas and supported in-gamut Tint
 can become ready without it; runtime calibration and system-resolved
 wider-gamut Tint wait until a reference window is available and participating.
+
+When `referenceWindow` is managed by SwiftUI, provide `referenceView` from an
+`NSViewRepresentable` installed in that window's content. AppKit does not
+support adding subviews directly to `NSHostingController.view`; the package
+therefore never uses a view-controller-owned content root as an implicit probe
+host. A plain AppKit window with no `contentViewController` may omit
+`referenceView` and uses its `contentView` as the insertion point.
 
 The packaged
 `glass-macos-<major>.json` is discovered from the Swift Package resource bundle
@@ -145,6 +154,7 @@ consumers must pass frozen readback before anything is published or persisted.
 ```swift
 let provider = GlassMaterialAtlasProvider(
     hostWindow: settingsWindow,
+    probeHostView: appKitReferenceView,
     shortSides: [48, 64, 96, 128, 160, 200, 320],
     storageURL: runtimeAtlasFileURL,
     certifiedAtlasURLs:

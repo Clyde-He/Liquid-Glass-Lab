@@ -105,6 +105,9 @@ final class GlassMaterialAtlasProvider {
     }
 
     private weak var hostWindow: NSWindow?
+    /// Consumer-owned insertion point for invisible calibration probes.
+    /// SwiftUI hosting-controller roots are not safe to mutate directly.
+    private weak var probeHostView: NSView?
     private let shortSides: [Double]
     private let storageURL: URL?
     private let certifiedAtlasURLs: [URL]
@@ -148,11 +151,13 @@ final class GlassMaterialAtlasProvider {
     ///     proof is accepted; display and minor/beta build are diagnostic only.
     public init(
         hostWindow: NSWindow?,
+        probeHostView: NSView? = nil,
         shortSides: [Double] = [48, 64, 96, 128, 160, 200, 320],
         storageURL: URL? = nil,
         certifiedAtlasURLs: [URL] = []
     ) {
         self.hostWindow = hostWindow
+        self.probeHostView = probeHostView
         self.shortSides = shortSides.sorted()
         self.storageURL = storageURL
         self.certifiedAtlasURLs = certifiedAtlasURLs
@@ -669,7 +674,7 @@ final class GlassMaterialAtlasProvider {
             }
         }
 
-        hostWindow?.contentView?.layoutSubtreeIfNeeded()
+        resolvedProbeHostView?.layoutSubtreeIfNeeded()
         witnessWindow?.contentView?.layoutSubtreeIfNeeded()
         try? await Task.sleep(for: .milliseconds(600))
 
@@ -904,11 +909,23 @@ final class GlassMaterialAtlasProvider {
            mainProbeContainer.superview != nil {
             return mainProbeContainer
         }
-        guard let contentView = hostWindow?.contentView else { return nil }
+        guard let contentView = resolvedProbeHostView else { return nil }
         let container = makeClippedContainer()
         contentView.addSubview(container)
         mainProbeContainer = container
         return container
+    }
+
+    /// An explicit AppKit island is required when a view controller owns the
+    /// window content. Plain AppKit windows without a content-view controller
+    /// retain the source-compatible content-view fallback.
+    private var resolvedProbeHostView: NSView? {
+        guard let hostWindow else { return nil }
+        if let probeHostView {
+            return probeHostView.window === hostWindow ? probeHostView : nil
+        }
+        guard hostWindow.contentViewController == nil else { return nil }
+        return hostWindow.contentView
     }
 
     private func prepareWitnessWindow() -> Bool {
