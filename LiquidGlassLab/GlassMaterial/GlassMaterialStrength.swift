@@ -811,11 +811,36 @@ final class GlassMaterialStrength {
     /// Every leg of `frozenStateHolds` used to fail silently, so a transient
     /// `frozenInstallFailed` on an untested OS major named nothing. Name the
     /// broken invariant instead; the healthy path still logs zero lines.
+    ///
+    /// A persistent break is re-checked by the pre-commit observer and the
+    /// 16 ms reassert cadence, so an identical reason is logged once and then
+    /// counted; recovery logs the count. A flicker therefore reads as
+    /// break/recovered pairs at its visible cadence, and a wedged state as
+    /// one line — not a flooded log on the exact main-thread path being
+    /// diagnosed.
+    private var lastFrozenBreakReason: String?
+    private var suppressedFrozenBreakCount = 0
+
     private func frozenStateBroke(_ reason: String) -> Bool {
+        guard reason != lastFrozenBreakReason else {
+            suppressedFrozenBreakCount += 1
+            return false
+        }
+        lastFrozenBreakReason = reason
+        suppressedFrozenBreakCount = 0
         GlassMaterialTintLog.signposts.notice(
             "frozen state broke: \(reason, privacy: .public)"
         )
         return false
+    }
+
+    private func noteFrozenStateHolds() {
+        guard let reason = lastFrozenBreakReason else { return }
+        GlassMaterialTintLog.signposts.notice(
+            "frozen state recovered from: \(reason, privacy: .public) (\(self.suppressedFrozenBreakCount, privacy: .public) repeats suppressed)"
+        )
+        lastFrozenBreakReason = nil
+        suppressedFrozenBreakCount = 0
     }
 
     private static func worstCoefficient(
@@ -934,6 +959,7 @@ final class GlassMaterialStrength {
                 return frozenStateBroke("rim payload \(rimIndex) drifted")
             }
         }
+        noteFrozenStateHolds()
         return true
     }
 
@@ -1061,22 +1087,35 @@ public final class GlassMaterialEffectView: NSGlassEffectView {
         nativeColor: NSColor?,
         controlledColor: NSColor?
     ) {
-        if !Self.sameTintRGB(tintColor, nativeColor) {
+        if !Self.nativeTintAssignmentIsChurn(from: tintColor, to: nativeColor) {
             tintColor = nativeColor
         }
         materialStrength.stageTintColor(controlledColor)
     }
 
-    private static func sameTintRGB(_ a: NSColor?, _ b: NSColor?) -> Bool {
-        switch (a, b) {
+    /// True only for the assignments the pin exists to absorb: an opacity drag
+    /// streaming the same RGB between *nonzero* alphas. Alpha `0` is not part
+    /// of that stream — it is the placeholder that materializes the branch
+    /// before a color is verified — so transitions into or out of it must
+    /// reach the setter, or the placeholder would pin the native fallback
+    /// transparent for as long as the RGB survives.
+    private static func nativeTintAssignmentIsChurn(
+        from current: NSColor?,
+        to requested: NSColor?
+    ) -> Bool {
+        switch (current, requested) {
         case (nil, nil):
             return true
-        case let (a?, b?):
-            guard let aValue = GlassMaterialColorValue(a),
-                  let bValue = GlassMaterialColorValue(b) else { return false }
-            return abs(aValue.red - bValue.red) <= 0.0005
-                && abs(aValue.green - bValue.green) <= 0.0005
-                && abs(aValue.blue - bValue.blue) <= 0.0005
+        case let (current?, requested?):
+            guard let a = GlassMaterialColorValue(current),
+                  let b = GlassMaterialColorValue(requested)
+            else { return false }
+            guard abs(a.red - b.red) <= 0.0005,
+                  abs(a.green - b.green) <= 0.0005,
+                  abs(a.blue - b.blue) <= 0.0005
+            else { return false }
+            if abs(a.alpha - b.alpha) <= 0.0005 { return true }
+            return a.alpha > 0.0005 && b.alpha > 0.0005
         default:
             return false
         }
