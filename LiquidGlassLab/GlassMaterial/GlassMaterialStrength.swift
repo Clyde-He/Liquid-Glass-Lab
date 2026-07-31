@@ -11,6 +11,106 @@
 import AppKit
 import OSLog
 
+/// Temporary product experiment for identifying which outer passes actually
+/// require the native render margin. Kept behind SPI until the visual study
+/// establishes a stable contained-rendering contract.
+@_spi(Experimental)
+public struct AdjustableGlassOuterPasses: OptionSet, Equatable, Sendable {
+    public let rawValue: UInt8
+
+    public init(rawValue: UInt8) {
+        self.rawValue = rawValue
+    }
+
+    public static let shadow = Self(rawValue: 1 << 0)
+    public static let ringShadow = Self(rawValue: 1 << 1)
+    public static let bleed = Self(rawValue: 1 << 2)
+    public static let outerRefraction = Self(rawValue: 1 << 3)
+    public static let all: Self = [
+        .shadow,
+        .ringShadow,
+        .bleed,
+        .outerRefraction,
+    ]
+}
+
+/// Value-semantic transform applied after selecting and interpolating a
+/// certified atlas sample. Opacity/amount gates are preferred over rewriting
+/// the pass geometry so each experiment removes the narrowest possible visual
+/// contribution. Margin remains independently controllable: disabling a pass
+/// and shrinking its backing room are intentionally separate observations.
+struct GlassMaterialRenderExperiment: Equatable {
+    var outerPasses: AdjustableGlassOuterPasses = .all
+    var marginWidthOverride: Double?
+
+    static var currentProductDefault: Self {
+        productDefault(
+            osMajorVersion: ProcessInfo.processInfo
+                .operatingSystemVersion.majorVersion
+        )
+    }
+
+    static func productDefault(osMajorVersion: Int) -> Self {
+        outerShadowPolicy(
+            hasOuterShadow: false,
+            osMajorVersion: osMajorVersion
+        )
+    }
+
+    static func outerShadowPolicy(
+        hasOuterShadow: Bool,
+        osMajorVersion: Int
+    ) -> Self {
+        guard !hasOuterShadow else { return Self() }
+        let disabledPasses: AdjustableGlassOuterPasses
+        switch osMajorVersion {
+        case 26:
+            disabledPasses = .shadow
+        case 27:
+            disabledPasses = .ringShadow
+        default:
+            disabledPasses = [.shadow, .ringShadow]
+        }
+        return Self(
+            outerPasses: .all.subtracting(disabledPasses),
+            marginWidthOverride: 0
+        )
+    }
+
+    func applying(
+        to source: GlassMaterialStyleSample
+    ) -> GlassMaterialStyleSample {
+        var sample = source
+        if !outerPasses.contains(.shadow) {
+            sample.setExistingNumericValue(0, for: "inputShadowOpacity")
+            sample.setExistingNumericValue(0, for: "inputSDRShadowOpacity")
+        }
+        if !outerPasses.contains(.ringShadow) {
+            sample.setExistingNumericValue(0, for: "inputRingShadowOpacity")
+        }
+        if !outerPasses.contains(.bleed) {
+            sample.setExistingNumericValue(0, for: "inputBleedOpacity")
+        }
+        if !outerPasses.contains(.outerRefraction) {
+            sample.setExistingNumericValue(
+                0,
+                for: "inputOuterRefractionAmount"
+            )
+        }
+        if let marginWidthOverride {
+            sample.marginWidth = max(0, marginWidthOverride)
+        }
+        return sample
+    }
+}
+
+private extension GlassMaterialStyleSample {
+    mutating func setExistingNumericValue(_ value: Double, for key: String) {
+        guard numeric[key] != nil else { return }
+        numeric[key] = value
+    }
+}
+
 /// Continuously dials an `NSGlassEffectView` between its system-resolved
 /// material at `1` and a fully dematerialized surface at `0`, coordinating
 /// every contributing pass rather than fading the composited result.
@@ -126,6 +226,8 @@ final class GlassMaterialStrength {
     private var lastFrozenNumbers: [String: Double] = [:]
     private var lastFrozenColors: [String: NSColor] = [:]
     private var lastFrozenTintMatrix: [Float]?
+    private(set) var renderExperiment =
+        GlassMaterialRenderExperiment.currentProductDefault
 
     /// The installed style atlas, if any. See `freeze(atlas:)`.
     public private(set) var frozenAtlas: GlassMaterialStyleAtlas?
@@ -180,10 +282,11 @@ final class GlassMaterialStrength {
               )
         else { return false }
         if let frozenAtlas {
-            guard let sample = frozenAtlas.sample(
+            guard let capturedSample = frozenAtlas.sample(
                 for: currentCell(for: glass),
                 at: min(glass.bounds.width, glass.bounds.height)
             ) else { return false }
+            let sample = renderExperiment.applying(to: capturedSample)
             return frozenDestination(
                 for: sample,
                 target: target,
@@ -199,11 +302,12 @@ final class GlassMaterialStrength {
     /// destination tree now. It does not trigger a write.
     public var frozenStyleIsCurrentlyApplied: Bool {
         guard let frozenAtlas, let glass,
-              let sample = frozenAtlas.sample(
-                for: currentCell(for: glass),
-                at: min(glass.bounds.width, glass.bounds.height)
+              let capturedSample = frozenAtlas.sample(
+                  for: currentCell(for: glass),
+                  at: min(glass.bounds.width, glass.bounds.height)
               )
         else { return false }
+        let sample = renderExperiment.applying(to: capturedSample)
         return frozenStateHolds(sample, on: glass)
     }
 
@@ -492,10 +596,11 @@ final class GlassMaterialStrength {
 
     private func preCommitReassertIfNeeded() {
         guard let frozenAtlas, let glass else { return }
-        guard let sample = frozenAtlas.sample(
+        guard let capturedSample = frozenAtlas.sample(
             for: currentCell(for: glass),
             at: min(glass.bounds.width, glass.bounds.height)
         ) else { return }
+        let sample = renderExperiment.applying(to: capturedSample)
         if frozenStateHolds(sample, on: glass) { return }
         apply()
     }
@@ -532,6 +637,19 @@ final class GlassMaterialStrength {
         frozenAtlas = nil
         frozenAppearanceSelection = .system
         lastWrittenFilterIdentity = nil
+    }
+
+    func setRenderExperiment(
+        outerPasses: AdjustableGlassOuterPasses,
+        marginWidthOverride: Double?
+    ) {
+        let next = GlassMaterialRenderExperiment(
+            outerPasses: outerPasses,
+            marginWidthOverride: marginWidthOverride.map { max(0, $0) }
+        )
+        guard next != renderExperiment else { return }
+        renderExperiment = next
+        apply()
     }
 
     deinit {
@@ -645,7 +763,10 @@ final class GlassMaterialStrength {
         let shortSide = min(glass.bounds.width, glass.bounds.height)
         // Defensive only: freeze(atlas:) rejects an atlas that could miss a
         // cell, so in the supported domain this lookup always succeeds.
-        guard let sample = atlas.sample(for: cell, at: shortSide) else { return }
+        guard let capturedSample = atlas.sample(for: cell, at: shortSide) else {
+            return
+        }
+        let sample = renderExperiment.applying(to: capturedSample)
 
         // Validate the complete destination topology before the first write;
         // an incomplete tree receives nothing at all. See
@@ -816,11 +937,16 @@ final class GlassMaterialStrength {
                 try? await Task.sleep(for: .milliseconds(delay))
                 guard !Task.isCancelled, let self, self.frozenAtlas != nil,
                       let glass = self.glass else { return }
-                if let sample = self.frozenAtlas?.sample(
+                if let capturedSample = self.frozenAtlas?.sample(
                     for: self.currentCell(for: glass),
                     at: min(glass.bounds.width, glass.bounds.height)
-                ), self.frozenStateHolds(sample, on: glass) {
-                    continue
+                ) {
+                    let sample = self.renderExperiment.applying(
+                        to: capturedSample
+                    )
+                    if self.frozenStateHolds(sample, on: glass) {
+                        continue
+                    }
                 }
                 self.apply()
                 beat = 0
@@ -1089,6 +1215,28 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         }
     }
 
+    /// Whether the system's bounds-extending glass shadow is retained.
+    ///
+    /// The backing pass is OS-specific: macOS 26 uses the legacy Shadow/SDR
+    /// Shadow family, while macOS 27 uses Ring Shadow. Disabling it guarantees
+    /// `requiredWindowInset == 0`; enabling it restores the native pass and its
+    /// atlas-derived window inset.
+    public var hasOuterShadow = false {
+        didSet {
+            guard hasOuterShadow != oldValue else { return }
+            let policy = GlassMaterialRenderExperiment.outerShadowPolicy(
+                hasOuterShadow: hasOuterShadow,
+                osMajorVersion: ProcessInfo.processInfo
+                    .operatingSystemVersion.majorVersion
+            )
+            requestedExperimentalOuterPasses = policy.outerPasses
+            requestedExperimentalMarginWidth = policy.marginWidthOverride.map {
+                CGFloat($0)
+            }
+            applyRenderExperiment()
+        }
+    }
+
     /// Symmetric transparent room the owning window must provide outside this
     /// view's bounds so the selected material's outer passes can render.
     public private(set) var requiredWindowInset: CGFloat = 0 {
@@ -1099,6 +1247,37 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     }
 
     public var onRequiredWindowInsetChange: ((CGFloat) -> Void)?
+
+    /// Temporary controls used by the ConsumerDemo pass/margin study. They
+    /// override the stable `hasOuterShadow` policy and remain deliberately SPI.
+    @_spi(Experimental)
+    public var experimentalOuterPasses: AdjustableGlassOuterPasses {
+        get { requestedExperimentalOuterPasses }
+        set {
+            guard newValue != requestedExperimentalOuterPasses else { return }
+            requestedExperimentalOuterPasses = newValue
+            applyRenderExperiment()
+        }
+    }
+
+    @_spi(Experimental)
+    public var experimentalMarginWidth: CGFloat? {
+        get { requestedExperimentalMarginWidth }
+        set {
+            let normalized = newValue.map { max(0, $0) }
+            guard normalized != requestedExperimentalMarginWidth else { return }
+            requestedExperimentalMarginWidth = normalized
+            applyRenderExperiment()
+        }
+    }
+
+    @_spi(Experimental)
+    public var experimentalNativeRequiredWindowInset: CGFloat {
+        effectController?.requiredWindowInset(
+            for: bounds.size,
+            respectsRenderExperiment: false
+        ) ?? 0
+    }
 
     /// Product-facing strength in the closed range `0...1`.
     public var effectAmount: CGFloat {
@@ -1204,6 +1383,11 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     private var isApplyingControlledConfiguration = false
     private var requestedEffectAmount: CGFloat = 1
     private var requestedTintColor: NSColor?
+    private var requestedExperimentalOuterPasses: AdjustableGlassOuterPasses =
+        GlassMaterialRenderExperiment.currentProductDefault.outerPasses
+    private var requestedExperimentalMarginWidth: CGFloat? =
+        GlassMaterialRenderExperiment.currentProductDefault
+            .marginWidthOverride.map { CGFloat($0) }
     private var effectController: GlassEffectController?
     private var configurationUpdateDepth = 0
     private var hasDeferredConfigurationUpdate = false
@@ -1547,6 +1731,14 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     private func refreshMaterialStrength() {
         materialRefreshGeneration += 1
         materialStrength.refresh()
+    }
+
+    private func applyRenderExperiment() {
+        materialStrength.setRenderExperiment(
+            outerPasses: requestedExperimentalOuterPasses,
+            marginWidthOverride: requestedExperimentalMarginWidth.map(Double.init)
+        )
+        updateRequiredWindowInset()
     }
 
     private func scheduleMaterialStrengthRefresh() {

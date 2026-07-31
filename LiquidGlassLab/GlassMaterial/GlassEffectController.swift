@@ -344,7 +344,15 @@ final class GlassEffectController {
     /// `AdjustableGlassEffectView.requiredWindowInset` forwards this value to
     /// the consumer. Before a verified atlas is available, return the measured
     /// conservative Main-On envelope.
-    func requiredWindowInset(for size: CGSize) -> CGFloat {
+    func requiredWindowInset(
+        for size: CGSize,
+        respectsRenderExperiment: Bool = true
+    ) -> CGFloat {
+        if respectsRenderExperiment,
+           let margin = glassView?.materialStrength.renderExperiment
+            .marginWidthOverride {
+            return windowInset(for: margin)
+        }
         let shortSide = max(0, min(size.width, size.height))
         let isLight: Bool
         switch configuration.appearance {
@@ -365,10 +373,17 @@ final class GlassEffectController {
             for: cell,
             at: Double(shortSide)
         ) {
-            return ceil(max(0, sample.marginWidth)) + 1
+            return windowInset(for: sample.marginWidth)
         }
-        guard configuration.emphasis == .normal else { return 1 }
-        return ceil(atlasProvider.conservativeMainOnMargin(for: shortSide)) + 1
+        guard configuration.emphasis == .normal else { return 0 }
+        return windowInset(
+            for: atlasProvider.conservativeMainOnMargin(for: shortSide)
+        )
+    }
+
+    private func windowInset(for marginWidth: Double) -> CGFloat {
+        let margin = max(0, marginWidth)
+        return margin == 0 ? 0 : ceil(margin) + 1
     }
 
     func recalibrate() {

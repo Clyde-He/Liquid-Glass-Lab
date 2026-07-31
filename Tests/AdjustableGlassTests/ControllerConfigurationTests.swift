@@ -1,5 +1,5 @@
 import XCTest
-@testable import AdjustableGlass
+@_spi(Experimental) @testable import AdjustableGlass
 
 @available(macOS 26.0, *)
 final class ControllerConfigurationTests: XCTestCase {
@@ -175,10 +175,11 @@ final class ControllerConfigurationTests: XCTestCase {
     }
 
     @MainActor
-    func testLayoutInsetTracksSelectedParticipation() {
+    func testNativeLayoutInsetTracksSelectedParticipation() {
         let view = AdjustableGlassEffectView(
             frame: NSRect(x: 0, y: 0, width: 320, height: 120)
         )
+        view.experimentalMarginWidth = nil
         view.style = .regular
         view.effectState = .active
         view.layoutSubtreeIfNeeded()
@@ -189,7 +190,7 @@ final class ControllerConfigurationTests: XCTestCase {
         let inactiveInset = view.requiredWindowInset
 
         XCTAssertGreaterThan(activeInset, inactiveInset)
-        XCTAssertGreaterThanOrEqual(inactiveInset, 1)
+        XCTAssertEqual(inactiveInset, 0)
     }
 
     @MainActor
@@ -208,5 +209,133 @@ final class ControllerConfigurationTests: XCTestCase {
             ),
             81
         )
+    }
+
+    @MainActor
+    func testRenderExperimentDisablesOnlySelectedPassGates() {
+        let source = GlassMaterialStyleSample(
+            shortSide: 120,
+            numeric: [
+                "inputFaceOpacity": 1,
+                "inputShadowOpacity": 0.4,
+                "inputSDRShadowOpacity": 0.2,
+                "inputRingShadowOpacity": 0.06,
+                "inputBleedOpacity": 0.53,
+                "inputOuterRefractionAmount": 24,
+            ],
+            colors: [:],
+            points: [:],
+            nilKeys: [],
+            marginWidth: 83,
+            outputMinimum: -10_000,
+            outputMaximum: 1,
+            matrices: [],
+            rims: []
+        )
+
+        let shadowless = GlassMaterialRenderExperiment(
+            outerPasses: .all.subtracting(.shadow)
+        ).applying(to: source)
+        XCTAssertEqual(shadowless.numeric["inputShadowOpacity"], 0)
+        XCTAssertEqual(shadowless.numeric["inputSDRShadowOpacity"], 0)
+        XCTAssertEqual(shadowless.numeric["inputRingShadowOpacity"], 0.06)
+        XCTAssertEqual(shadowless.numeric["inputBleedOpacity"], 0.53)
+        XCTAssertEqual(
+            shadowless.numeric["inputOuterRefractionAmount"],
+            24
+        )
+
+        let ringless = GlassMaterialRenderExperiment(
+            outerPasses: .all.subtracting(.ringShadow)
+        ).applying(to: source)
+        XCTAssertEqual(ringless.numeric["inputRingShadowOpacity"], 0)
+        XCTAssertEqual(ringless.numeric["inputShadowOpacity"], 0.4)
+
+        let bleedless = GlassMaterialRenderExperiment(
+            outerPasses: .all.subtracting(.bleed)
+        ).applying(to: source)
+        XCTAssertEqual(bleedless.numeric["inputBleedOpacity"], 0)
+        XCTAssertEqual(bleedless.numeric["inputShadowOpacity"], 0.4)
+
+        let noOuterRefraction = GlassMaterialRenderExperiment(
+            outerPasses: .all.subtracting(.outerRefraction)
+        ).applying(to: source)
+        XCTAssertEqual(
+            noOuterRefraction.numeric["inputOuterRefractionAmount"],
+            0
+        )
+        XCTAssertEqual(noOuterRefraction.numeric["inputBleedOpacity"], 0.53)
+    }
+
+    @MainActor
+    func testExperimentalMarginOverridesOnlyTheEffectiveWindowInset() {
+        let view = AdjustableGlassEffectView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 120)
+        )
+        let nativeInset = view.experimentalNativeRequiredWindowInset
+
+        view.experimentalMarginWidth = 12
+
+        XCTAssertEqual(view.requiredWindowInset, 13)
+        XCTAssertEqual(view.experimentalNativeRequiredWindowInset, nativeInset)
+        XCTAssertGreaterThan(nativeInset, view.requiredWindowInset)
+
+        view.experimentalMarginWidth = nil
+        XCTAssertEqual(view.requiredWindowInset, nativeInset)
+    }
+
+    @MainActor
+    func testZeroExperimentalMarginRequiresNoWindowInset() {
+        let view = AdjustableGlassEffectView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 120)
+        )
+
+        view.experimentalMarginWidth = 0
+
+        XCTAssertEqual(view.requiredWindowInset, 0)
+    }
+
+    func testMacOS26ProductPolicyContainsTheGlass() {
+        let macOS26 = GlassMaterialRenderExperiment.productDefault(
+            osMajorVersion: 26
+        )
+
+        XCTAssertFalse(macOS26.outerPasses.contains(.shadow))
+        XCTAssertTrue(macOS26.outerPasses.contains(.bleed))
+        XCTAssertTrue(macOS26.outerPasses.contains(.outerRefraction))
+        XCTAssertEqual(macOS26.marginWidthOverride, 0)
+
+        let macOS27 = GlassMaterialRenderExperiment.productDefault(
+            osMajorVersion: 27
+        )
+        XCTAssertTrue(macOS27.outerPasses.contains(.shadow))
+        XCTAssertFalse(macOS27.outerPasses.contains(.ringShadow))
+        XCTAssertEqual(macOS27.marginWidthOverride, 0)
+
+        let native = GlassMaterialRenderExperiment.outerShadowPolicy(
+            hasOuterShadow: true,
+            osMajorVersion: 26
+        )
+        XCTAssertEqual(native.outerPasses, .all)
+        XCTAssertNil(native.marginWidthOverride)
+    }
+
+    @MainActor
+    func testHasOuterShadowControlsTheDerivedWindowInset() {
+        let view = AdjustableGlassEffectView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 120)
+        )
+
+        XCTAssertFalse(view.hasOuterShadow)
+        XCTAssertEqual(view.requiredWindowInset, 0)
+
+        view.hasOuterShadow = true
+        XCTAssertEqual(
+            view.requiredWindowInset,
+            view.experimentalNativeRequiredWindowInset
+        )
+
+        view.hasOuterShadow = false
+        XCTAssertEqual(view.requiredWindowInset, 0)
     }
 }

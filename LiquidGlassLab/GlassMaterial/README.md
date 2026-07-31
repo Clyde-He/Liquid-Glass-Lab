@@ -46,6 +46,7 @@ right vocabulary:
 | `appearance` | `nil` follows the system; an override pins Light or Dark |
 | `effectAmount` | Added continuous glass amount in `0...1` |
 | `effectState` | Added deterministic `.active` / `.inactive` material |
+| `hasOuterShadow` | Retains the OS-specific outer shadow; when `false`, the required window inset is zero |
 | `referenceWindow` | Optional, replaceable ordinary app window used for verification |
 | `requiredWindowInset`, `onRequiredWindowInsetChange` | Transparent room required around the visual glass bounds |
 | `status`, `onStatusChange`, `prepareIfNeeded()` | Readiness and retry surface |
