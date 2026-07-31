@@ -389,8 +389,7 @@ final class GlassEffectController {
 
         glassView.applyControlledConfiguration(
             style: configuration.variant == .clear ? .clear : .regular,
-            amount: configuration.visibility,
-            appearance: nsAppearance(for: configuration.appearance)
+            amount: configuration.visibility
         )
 
         // Fail closed for Tint: an unverified or hue-suppressed matrix is never
@@ -503,17 +502,6 @@ final class GlassEffectController {
             if installRetryTask == nil {
                 scheduleInstallRetry()
             }
-        }
-    }
-
-    private func nsAppearance(for appearance: Appearance) -> NSAppearance? {
-        switch appearance {
-        case .system:
-            nil
-        case .light:
-            NSAppearance(named: .aqua)
-        case .dark:
-            NSAppearance(named: .darkAqua)
         }
     }
 

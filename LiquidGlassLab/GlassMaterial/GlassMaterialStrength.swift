@@ -1069,6 +1069,9 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         case waitingForReferenceWindow
         case preparing
         case ready
+        /// The material is currently unavailable, but this is not necessarily
+        /// terminal. Readiness retries and reference-window recovery can move
+        /// the view back to `preparing` or `ready` without product intervention.
         case unavailable(UnavailabilityReason)
     }
 
@@ -1200,15 +1203,15 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         }
     }
 
-    /// Applies native properties and continuous strength without feeding the
-    /// resulting writes back into the owning controller.
+    /// Applies the controlled style and continuous strength without feeding
+    /// the resulting writes back into the owning controller. Appearance stays
+    /// owned by the native view so semantic variants such as Vibrant are not
+    /// replaced by a plain Light/Dark reconstruction.
     func applyControlledConfiguration(
         style: NSGlassEffectView.Style,
-        amount: Double,
-        appearance: NSAppearance?
+        amount: Double
     ) {
         isApplyingControlledConfiguration = true
-        self.appearance = appearance
         self.style = style
         materialStrength.value = amount
         isApplyingControlledConfiguration = false
@@ -1326,16 +1329,6 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         default:
             return false
         }
-    }
-
-    /// Installs a verified atlas for the HUD's only supported frozen
-    /// participation. Returns false without changing the current freeze when
-    /// the candidate is stale, incomplete, or lacks paired Main-On proof.
-    @discardableResult
-    func installFrozenMainOnAtlas(
-        _ atlas: GlassMaterialStyleAtlas
-    ) -> Bool {
-        materialStrength.freeze(atlas: atlas, mainParticipation: true)
     }
 
     override public func layout() {

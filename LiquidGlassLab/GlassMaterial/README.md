@@ -48,6 +48,12 @@ right vocabulary:
 | `referenceWindow` | Read-only ordinary app window used for verification |
 | `status`, `onStatusChange`, `prepareIfNeeded()` | Readiness and retry surface |
 
+`status` describes current readiness, not a terminal lifecycle. An
+`.unavailable` view can recover automatically after a material-install retry,
+Tint resolution, reference-window activation, or runtime recalibration; keep
+observing `onStatusChange` rather than treating the first unavailable value as
+a permanent fallback decision.
+
 The `referenceWindow` must be an ordinary window that can genuinely become main
 or key, such as Settings or the app's primary window. The rendered glass can
 live in a nonactivating HUD panel and never become main or key itself.

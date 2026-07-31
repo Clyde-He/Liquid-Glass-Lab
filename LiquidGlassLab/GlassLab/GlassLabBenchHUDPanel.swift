@@ -28,6 +28,14 @@ final class GlassLabHUDPanelController {
             case .auto: nil
             }
         }
+
+        var frozenSelection: GlassMaterialStrength.FrozenAppearanceSelection {
+            switch self {
+            case .light: .light
+            case .dark: .dark
+            case .auto: .system
+            }
+        }
     }
 
     private var panel: NSPanel?
@@ -99,8 +107,11 @@ final class GlassLabHUDPanelController {
     }
 
     func setAppearance(_ appearance: Appearance) {
+        guard self.appearance != appearance else { return }
         self.appearance = appearance
         panel?.appearance = appearance.nsAppearance
+        refreeze()
+        scheduleFreezeRetryIfNeeded()
         updateLabels()
     }
 
@@ -209,7 +220,8 @@ final class GlassLabHUDPanelController {
         if let atlas {
             let installed = glassView.materialStrength.freeze(
                 atlas: atlas,
-                mainParticipation: !isMuted
+                mainParticipation: !isMuted,
+                appearanceSelection: appearance.frozenSelection
             )
             lastFreezeSucceeded = installed
                 && glassView.materialStrength.frozenStyleIsCurrentlyApplied
