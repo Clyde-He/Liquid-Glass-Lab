@@ -396,6 +396,7 @@ private final class ConsumerDemoAppDelegate:
         container.cornerRadius = hudCornerRadius
         let glass = AdjustableGlassEffectView(
             referenceWindow: controlWindow,
+            referenceView: controlWindow.contentView,
             frame: NSRect(
                 x: padding,
                 y: padding,

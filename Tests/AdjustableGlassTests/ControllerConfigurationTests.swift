@@ -119,15 +119,75 @@ final class ControllerConfigurationTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        let referenceView = NSView(
+            frame: referenceWindow.contentView?.bounds ?? .zero
+        )
+        referenceWindow.contentView?.addSubview(referenceView)
 
         XCTAssertNil(view.referenceWindow)
         view.referenceWindow = referenceWindow
+        view.referenceView = referenceView
         XCTAssertTrue(view.referenceWindow === referenceWindow)
+        XCTAssertTrue(view.referenceView === referenceView)
         XCTAssertTrue(view.contentView === content)
 
+        view.referenceView = nil
         view.referenceWindow = nil
+        XCTAssertNil(view.referenceView)
         XCTAssertNil(view.referenceWindow)
         XCTAssertTrue(view.contentView === content)
+    }
+
+    @MainActor
+    func testViewControllerOwnedWindowAcceptsReferenceViewBeforeAttachment() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let controller = NSViewController()
+        controller.view = NSView(frame: window.contentView?.bounds ?? .zero)
+        window.contentViewController = controller
+
+        XCTAssertNil(AdjustableGlassEffectView.resolveReferenceView(
+            referenceWindow: window,
+            referenceView: nil
+        ))
+
+        let anchor = NSView(frame: .zero)
+        let glass = AdjustableGlassEffectView(referenceWindow: window)
+        XCTAssertTrue(glass.responds(
+            to: NSSelectorFromString("setReferenceView:")
+        ))
+        glass.setValue(anchor, forKey: "referenceView")
+        XCTAssertTrue(glass.referenceView === anchor)
+        XCTAssertTrue(AdjustableGlassEffectView.resolveReferenceView(
+            referenceWindow: window,
+            referenceView: glass.referenceView
+        ) === anchor)
+
+        controller.view.addSubview(anchor)
+        XCTAssertTrue(anchor.window === window)
+        XCTAssertTrue(AdjustableGlassEffectView.resolveReferenceView(
+            referenceWindow: window,
+            referenceView: glass.referenceView
+        ) === anchor)
+    }
+
+    @MainActor
+    func testPlainAppKitWindowUsesItsContentViewAsReferenceView() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+
+        XCTAssertTrue(AdjustableGlassEffectView.resolveReferenceView(
+            referenceWindow: window,
+            referenceView: nil
+        ) === window.contentView)
     }
 
     @MainActor
