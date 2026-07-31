@@ -1,5 +1,5 @@
 import AppKit
-@_spi(Experimental) import AdjustableGlass
+import AdjustableGlass
 import OSLog
 
 /// Measures what the logs so far could not: whether frames actually reach the
@@ -123,39 +123,11 @@ private final class ConsumerDemoAppDelegate:
         action: nil
     )
     private let tintWell = NSColorWell()
-    private let shadowPassToggle = NSButton(
-        checkboxWithTitle: "Shadow",
+    private let outerShadowToggle = NSButton(
+        checkboxWithTitle: "Outer Shadow",
         target: nil,
         action: nil
     )
-    private let ringShadowPassToggle = NSButton(
-        checkboxWithTitle: "Ring Shadow",
-        target: nil,
-        action: nil
-    )
-    private let bleedPassToggle = NSButton(
-        checkboxWithTitle: "Bleed",
-        target: nil,
-        action: nil
-    )
-    private let outerRefractionPassToggle = NSButton(
-        checkboxWithTitle: "Outer Refraction",
-        target: nil,
-        action: nil
-    )
-    private let nativeMarginToggle = NSButton(
-        checkboxWithTitle: "Native",
-        target: nil,
-        action: nil
-    )
-    private let marginSlider = NSSlider(
-        value: 0,
-        minValue: 0,
-        maxValue: 120,
-        target: nil,
-        action: nil
-    )
-    private let marginValue = NSTextField(labelWithString: "0pt")
     private let panelLevelControl = NSSegmentedControl(
         labels: ["Normal", "Floating"],
         trackingMode: .selectOne,
@@ -216,7 +188,7 @@ private final class ConsumerDemoAppDelegate:
 
     private func buildControlWindow() -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 660),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 600),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -227,8 +199,7 @@ private final class ConsumerDemoAppDelegate:
 
         let title = NSTextField(
             wrappingLabelWithString:
-                "This target imports only AdjustableGlass. "
-                + "It has no Capture or Atlas controls."
+                "This target exercises only AdjustableGlass's supported API."
         )
         title.font = .systemFont(ofSize: 15, weight: .semibold)
 
@@ -236,20 +207,7 @@ private final class ConsumerDemoAppDelegate:
         emphasisControl.selectedSegment = 0
         appearanceControl.selectedSegment = 0
         visibilitySlider.isContinuous = true
-        marginSlider.isContinuous = true
-        marginValue.alignment = .right
-        marginValue.widthAnchor.constraint(equalToConstant: 48).isActive = true
-        for toggle in [
-            ringShadowPassToggle,
-            bleedPassToggle,
-            outerRefractionPassToggle,
-        ] {
-            toggle.state = .on
-        }
-        shadowPassToggle.state = .off
-        ringShadowPassToggle.state = .on
-        nativeMarginToggle.state = .off
-        marginSlider.isEnabled = true
+        outerShadowToggle.state = .off
         panelLevelControl.selectedSegment = 1
         placementControl.selectedSegment = 0
         tintWell.color = NSColor(
@@ -272,12 +230,7 @@ private final class ConsumerDemoAppDelegate:
             visibilitySlider,
             tintToggle,
             tintWell,
-            shadowPassToggle,
-            ringShadowPassToggle,
-            bleedPassToggle,
-            outerRefractionPassToggle,
-            nativeMarginToggle,
-            marginSlider,
+            outerShadowToggle,
             panelLevelControl,
             placementControl,
             panelShadowToggle,
@@ -298,23 +251,6 @@ private final class ConsumerDemoAppDelegate:
         let tintRow = NSStackView(views: [tintToggle, tintWell])
         tintRow.orientation = .horizontal
         tintRow.spacing = 12
-
-        let passRow = NSStackView(views: [
-            shadowPassToggle,
-            ringShadowPassToggle,
-            bleedPassToggle,
-            outerRefractionPassToggle,
-        ])
-        passRow.orientation = .horizontal
-        passRow.spacing = 12
-
-        let marginRow = NSStackView(views: [
-            nativeMarginToggle,
-            marginSlider,
-            marginValue,
-        ])
-        marginRow.orientation = .horizontal
-        marginRow.spacing = 10
 
         let windowRow = NSStackView(views: [
             panelLevelControl,
@@ -345,9 +281,7 @@ private final class ConsumerDemoAppDelegate:
             labeledRow("Visibility", visibilityRow),
             labeledRow("Tint", tintRow),
             separator(),
-            NSTextField(labelWithString: "Outer Pass Experiment (SPI)"),
-            labeledRow("Passes", passRow),
-            labeledRow("Margin", marginRow),
+            labeledRow("Glass", outerShadowToggle),
             labeledRow("Window", windowRow),
             labeledRow("Panel", panelShadowToggle),
             actions,
@@ -371,8 +305,6 @@ private final class ConsumerDemoAppDelegate:
             emphasisControl.widthAnchor.constraint(equalToConstant: 430),
             appearanceControl.widthAnchor.constraint(equalToConstant: 430),
             visibilityRow.widthAnchor.constraint(equalToConstant: 430),
-            passRow.widthAnchor.constraint(equalToConstant: 430),
-            marginRow.widthAnchor.constraint(equalToConstant: 430),
             windowRow.widthAnchor.constraint(equalToConstant: 430),
         ])
         return window
@@ -539,15 +471,6 @@ private final class ConsumerDemoAppDelegate:
     }
 
     @objc private func controlChanged(_ sender: Any?) {
-        if let button = sender as? NSButton,
-           button === nativeMarginToggle,
-           button.state == .off,
-           let glassView {
-            marginSlider.doubleValue = max(
-                0,
-                Double(glassView.experimentalNativeRequiredWindowInset - 1)
-            )
-        }
         tintWell.isEnabled = tintToggle.state == .on
         applyConfiguration()
         if let control = sender as? NSSegmentedControl,
@@ -602,55 +525,18 @@ private final class ConsumerDemoAppDelegate:
             glassView.tintColor = tintToggle.state == .on
                 ? tintWell.color
                 : nil
+            glassView.hasOuterShadow = outerShadowToggle.state == .on
         }
-
-        var outerPasses: AdjustableGlassOuterPasses = []
-        if shadowPassToggle.state == .on { outerPasses.insert(.shadow) }
-        if ringShadowPassToggle.state == .on {
-            outerPasses.insert(.ringShadow)
-        }
-        if bleedPassToggle.state == .on { outerPasses.insert(.bleed) }
-        if outerRefractionPassToggle.state == .on {
-            outerPasses.insert(.outerRefraction)
-        }
-        glassView.experimentalOuterPasses = outerPasses
-
-        let usesNativeMargin = nativeMarginToggle.state == .on
-        marginSlider.isEnabled = !usesNativeMargin
-        if usesNativeMargin {
-            glassView.experimentalMarginWidth = nil
-            let nativeMargin = max(
-                0,
-                Double(glassView.experimentalNativeRequiredWindowInset - 1)
-            )
-            marginSlider.maxValue = max(120, nativeMargin)
-            marginSlider.doubleValue = nativeMargin
-        } else {
-            glassView.experimentalMarginWidth = CGFloat(
-                marginSlider.doubleValue
-            )
-        }
-        marginValue.stringValue = String(
-            format: "%.0fpt",
-            marginSlider.doubleValue
-        )
-
-        let disabledPasses: [String] = [
-            shadowPassToggle.state == .off ? "Shadow" : nil,
-            ringShadowPassToggle.state == .off ? "Ring" : nil,
-            bleedPassToggle.state == .off ? "Bleed" : nil,
-            outerRefractionPassToggle.state == .off ? "Outer" : nil,
-        ].compactMap { $0 }
-        let passSummary = disabledPasses.isEmpty
-            ? "All Passes"
-            : "−" + disabledPasses.joined(separator: ",")
 
         let tint = tintToggle.state == .on ? "Tint" : "No Tint"
+        let shadow = outerShadowToggle.state == .on
+            ? "Outer Shadow"
+            : "No Outer Shadow"
         hudDetailLabel.stringValue = [
             variantControl.selectedSegment == 1 ? "Clear" : "Regular",
             emphasisControl.selectedSegment == 1 ? "Muted" : "Normal",
             tint,
-            passSummary,
+            shadow,
             String(format: "Inset %.0f", glassView.requiredWindowInset),
             String(format: "G %.2f", visibility),
         ].joined(separator: " · ")
@@ -663,11 +549,7 @@ private final class ConsumerDemoAppDelegate:
             $0.isMainWindow || $0.isKeyWindow ? "yes" : "no"
         } ?? "not attached"
         let insetState = glassView.map {
-            String(
-                format: "Inset %.0fpt · Native %.0fpt",
-                $0.requiredWindowInset,
-                $0.experimentalNativeRequiredWindowInset
-            )
+            String(format: "Inset %.0fpt", $0.requiredWindowInset)
         } ?? "Inset unavailable"
         let prefix = "HUD main/key: \(hudState) · \(insetState) · "
         switch status {

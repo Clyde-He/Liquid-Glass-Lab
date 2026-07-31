@@ -1224,7 +1224,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
 
     public var onRequiredWindowInsetChange: ((CGFloat) -> Void)?
 
-    /// Temporary controls used by the ConsumerDemo pass/margin study. They
+    /// Temporary controls used by the Lab's frozen-HUD pass/margin study. They
     /// override the stable `hasOuterShadow` policy and remain deliberately SPI.
     @_spi(Experimental)
     public var experimentalOuterPasses: AdjustableGlassOuterPasses {
