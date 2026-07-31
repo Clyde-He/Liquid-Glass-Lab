@@ -246,10 +246,8 @@ private final class ConsumerDemoAppDelegate:
         ] {
             toggle.state = .on
         }
-        let osMajorVersion = ProcessInfo.processInfo
-            .operatingSystemVersion.majorVersion
-        shadowPassToggle.state = osMajorVersion == 26 ? .off : .on
-        ringShadowPassToggle.state = osMajorVersion == 27 ? .off : .on
+        shadowPassToggle.state = .off
+        ringShadowPassToggle.state = .on
         nativeMarginToggle.state = .off
         marginSlider.isEnabled = true
         panelLevelControl.selectedSegment = 1
