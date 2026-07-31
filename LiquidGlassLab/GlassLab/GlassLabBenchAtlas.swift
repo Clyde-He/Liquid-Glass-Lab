@@ -355,7 +355,7 @@ extension GlassLabView {
                 ))
                 controller.setRenderExperiment(
                     outerPasses: hudExperimentalOuterPasses,
-                    marginWidth: hudExperimentalMarginWidth.map(CGFloat.init)
+                    marginWidth: hudExperimentalMarginWidth.map { CGFloat($0) }
                 )
                 controller.show()
             } else {
@@ -475,7 +475,7 @@ extension GlassLabView {
     private func pushHUDRenderExperiment() {
         hudPanelController?.setRenderExperiment(
             outerPasses: hudExperimentalOuterPasses,
-            marginWidth: hudExperimentalMarginWidth.map(CGFloat.init)
+            marginWidth: hudExperimentalMarginWidth.map { CGFloat($0) }
         )
     }
 
