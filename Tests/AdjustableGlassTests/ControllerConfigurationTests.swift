@@ -46,6 +46,29 @@ final class ControllerConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testViewPreservesVibrantAppearanceOverride() throws {
+        let referenceWindow = NSWindow(
+            contentRect: .zero,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let view = AdjustableGlassEffectView(
+            referenceWindow: referenceWindow
+        )
+        let requested = try XCTUnwrap(
+            NSAppearance(named: .vibrantDark)
+        )
+
+        view.appearance = requested
+
+        XCTAssertEqual(
+            view.appearance?.name,
+            NSAppearance.Name.vibrantDark
+        )
+    }
+
+    @MainActor
     func testVariantAndEmphasisChangesRequireFullMaterialInstall() {
         let baseline = GlassEffectController.Configuration()
         var clear = baseline
