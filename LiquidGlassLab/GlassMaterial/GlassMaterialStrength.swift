@@ -44,35 +44,13 @@ struct GlassMaterialRenderExperiment: Equatable {
     var marginWidthOverride: Double?
 
     static var currentProductDefault: Self {
-        productDefault(
-            osMajorVersion: ProcessInfo.processInfo
-                .operatingSystemVersion.majorVersion
-        )
+        outerShadowPolicy(hasOuterShadow: false)
     }
 
-    static func productDefault(osMajorVersion: Int) -> Self {
-        outerShadowPolicy(
-            hasOuterShadow: false,
-            osMajorVersion: osMajorVersion
-        )
-    }
-
-    static func outerShadowPolicy(
-        hasOuterShadow: Bool,
-        osMajorVersion: Int
-    ) -> Self {
+    static func outerShadowPolicy(hasOuterShadow: Bool) -> Self {
         guard !hasOuterShadow else { return Self() }
-        let disabledPasses: AdjustableGlassOuterPasses
-        switch osMajorVersion {
-        case 26:
-            disabledPasses = .shadow
-        case 27:
-            disabledPasses = .ringShadow
-        default:
-            disabledPasses = [.shadow, .ringShadow]
-        }
         return Self(
-            outerPasses: .all.subtracting(disabledPasses),
+            outerPasses: .all.subtracting(.shadow),
             marginWidthOverride: 0
         )
     }
@@ -1217,17 +1195,15 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
 
     /// Whether the system's bounds-extending glass shadow is retained.
     ///
-    /// The backing pass is OS-specific: macOS 26 uses the legacy Shadow/SDR
-    /// Shadow family, while macOS 27 uses Ring Shadow. Disabling it guarantees
-    /// `requiredWindowInset == 0`; enabling it restores the native pass and its
-    /// atlas-derived window inset.
+    /// Disabling it suppresses the bounds-extending Shadow/SDR Shadow family
+    /// while retaining the inner Ring Shadow. The resulting safety inset is 0
+    /// on macOS 26 and 1pt on macOS 27. Enabling it restores the native shadow
+    /// and its atlas-derived window inset.
     public var hasOuterShadow = false {
         didSet {
             guard hasOuterShadow != oldValue else { return }
             let policy = GlassMaterialRenderExperiment.outerShadowPolicy(
-                hasOuterShadow: hasOuterShadow,
-                osMajorVersion: ProcessInfo.processInfo
-                    .operatingSystemVersion.majorVersion
+                hasOuterShadow: hasOuterShadow
             )
             requestedExperimentalOuterPasses = policy.outerPasses
             requestedExperimentalMarginWidth = policy.marginWidthOverride.map {

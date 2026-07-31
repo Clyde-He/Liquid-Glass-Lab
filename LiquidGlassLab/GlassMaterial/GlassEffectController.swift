@@ -375,15 +375,31 @@ final class GlassEffectController {
         ) {
             return windowInset(for: sample.marginWidth)
         }
-        guard configuration.emphasis == .normal else { return 0 }
+        guard configuration.emphasis == .normal else {
+            return windowInset(for: 0)
+        }
         return windowInset(
             for: atlasProvider.conservativeMainOnMargin(for: shortSide)
         )
     }
 
     private func windowInset(for marginWidth: Double) -> CGFloat {
+        Self.windowInset(
+            for: marginWidth,
+            osMajorVersion: ProcessInfo.processInfo
+                .operatingSystemVersion.majorVersion
+        )
+    }
+
+    static func windowInset(
+        for marginWidth: Double,
+        osMajorVersion: Int
+    ) -> CGFloat {
         let margin = max(0, marginWidth)
-        return margin == 0 ? 0 : ceil(margin) + 1
+        if margin == 0 {
+            return osMajorVersion >= 27 ? 1 : 0
+        }
+        return ceil(margin) + 1
     }
 
     func recalibrate() {
