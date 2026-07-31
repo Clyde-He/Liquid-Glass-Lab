@@ -55,9 +55,12 @@ xcodebuild \
   build
 ```
 
-`GlassHUDConsumerDemo` imports only the public `GlassHUDMaterial` product. The
+`GlassHUDConsumerDemo` imports only the public `AdjustableGlass` product. The
 macOS-major Catalog is carried by the package resource bundle; consuming apps
-do not run the Lab's Capture workflow.
+do not run the Lab's Capture workflow. Its frame-cadence logger is disabled by
+default so an idle demo represents product energy use; set the scheme
+environment variable `ADJUSTABLE_GLASS_FRAME_MONITOR=1` only while profiling Tint
+drag presentation.
 
 ## Private API warning
 

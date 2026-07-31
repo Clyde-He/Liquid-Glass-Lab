@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		000000000000000000000220 /* GlassHUDMaterial in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000000000320 /* GlassHUDMaterial */; };
+		000000000000000000000220 /* AdjustableGlass in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000000000320 /* AdjustableGlass */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,7 +37,7 @@
 		000000000000000131000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
-				000000000000000000000220 /* GlassHUDMaterial in Frameworks */,
+				000000000000000000000220 /* AdjustableGlass in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -97,7 +97,7 @@
 			);
 			name = GlassHUDConsumerDemo;
 			packageProductDependencies = (
-				000000000000000000000320 /* GlassHUDMaterial */,
+				000000000000000000000320 /* AdjustableGlass */,
 			);
 			productName = GlassHUDConsumerDemo;
 			productReference = 000000000000000000000121 /* GlassHUDConsumerDemo.app */;
@@ -448,10 +448,10 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		000000000000000000000320 /* GlassHUDMaterial */ = {
+		000000000000000000000320 /* AdjustableGlass */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 000000000000000000000300 /* XCLocalSwiftPackageReference "." */;
-			productName = GlassHUDMaterial;
+			productName = AdjustableGlass;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

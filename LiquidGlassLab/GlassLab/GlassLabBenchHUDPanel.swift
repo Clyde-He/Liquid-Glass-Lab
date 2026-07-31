@@ -3,7 +3,7 @@
 //  LiquidGlassLab
 //
 //  Bench: the frozen-baseline acceptance vehicle — a real non-activating HUD
-//  panel that is never key or main, rendering a GlassMaterialEffectView
+//  panel that is never key or main, rendering an AdjustableGlassEffectView
 //  frozen from a captured style atlas. This is the product contract under
 //  test: Light/Dark/Auto, Regular/Clear, Normal/Muted participation, Glass
 //  Visibility, Tint, and content-driven size with no recapture.
@@ -31,7 +31,7 @@ final class GlassLabHUDPanelController {
     }
 
     private var panel: NSPanel?
-    private(set) var glassView: GlassMaterialEffectView?
+    private(set) var glassView: AdjustableGlassEffectView?
     private var titleLabel: NSTextField?
     private var detailLabel: NSTextField?
 
@@ -108,7 +108,7 @@ final class GlassLabHUDPanelController {
         guard self.isClear != isClear else { return }
         self.isClear = isClear
         if let glassView {
-            glassView.materialStyle = isClear ? .clear : .regular
+            glassView.style = isClear ? .clear : .regular
         }
         updateLabels()
     }
@@ -124,13 +124,13 @@ final class GlassLabHUDPanelController {
 
     func setStrength(_ value: Double) {
         strengthValue = value
-        glassView?.materialVisibility = value
+        glassView?.effectAmount = CGFloat(value)
         updateLabels()
     }
 
     func setTint(_ color: NSColor?) {
         tintColor = color
-        glassView?.materialTint = color
+        glassView?.tintColor = color
     }
 
     func setContentSize(_ size: CGSize) {
@@ -163,7 +163,7 @@ final class GlassLabHUDPanelController {
         container.wantsLayer = true
         panel.contentView = container
 
-        let glassView = GlassMaterialEffectView()
+        let glassView = AdjustableGlassEffectView()
         glassView.cornerRadius = 24
         container.addSubview(glassView)
 
@@ -196,10 +196,10 @@ final class GlassLabHUDPanelController {
     private func applyEverything() {
         guard let panel, let glassView else { return }
         panel.appearance = appearance.nsAppearance
-        glassView.materialStyle = isClear ? .clear : .regular
-        glassView.materialTint = tintColor
+        glassView.style = isClear ? .clear : .regular
+        glassView.tintColor = tintColor
         refreeze()
-        glassView.materialVisibility = strengthValue
+        glassView.effectAmount = CGFloat(strengthValue)
         layoutPanel()
         updateLabels()
     }

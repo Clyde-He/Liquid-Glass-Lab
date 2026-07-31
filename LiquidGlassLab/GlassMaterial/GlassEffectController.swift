@@ -1,5 +1,5 @@
 //
-//  GlassHUDMaterialController.swift
+//  GlassEffectController.swift
 //  LiquidGlassLab
 //
 //  Product-facing ownership for a configurable HUD material. Products choose
@@ -13,22 +13,22 @@ import AppKit
 import OSLog
 
 @MainActor
-public final class GlassHUDMaterialController {
+final class GlassEffectController {
     /// Provenance of the verified base material. On a supported system,
     /// color-specific Tint matrices are synthesized synchronously and are not
     /// persisted; older fallback paths may still use the app-scoped cache.
-    public enum Source: String, Equatable, Sendable {
+    enum Source: String, Equatable, Sendable {
         case certifiedCatalog
         case runtimeCache
         case runtimeCalibration
     }
 
-    public enum Variant: Equatable, Sendable {
+    enum Variant: Equatable, Sendable {
         case regular
         case clear
     }
 
-    public enum Appearance: Equatable, Sendable {
+    enum Appearance: Equatable, Sendable {
         case system
         case light
         case dark
@@ -36,21 +36,21 @@ public final class GlassHUDMaterialController {
 
     /// Product semantics, deliberately hiding the implementation's window
     /// participation vocabulary.
-    public enum Emphasis: Equatable, Sendable {
+    enum Emphasis: Equatable, Sendable {
         /// Holds the verified Main-On material even on a never-main HUD.
         case normal
         /// Holds the paired, verified Main-Off material regardless of focus.
         case muted
     }
 
-    public struct Configuration: Equatable {
-        public var variant: Variant
-        public var visibility: Double
-        public var appearance: Appearance
-        public var tint: NSColor?
-        public var emphasis: Emphasis
+    struct Configuration: Equatable {
+        var variant: Variant
+        var visibility: Double
+        var appearance: Appearance
+        var tint: NSColor?
+        var emphasis: Emphasis
 
-        public init(
+        init(
             variant: Variant = .regular,
             visibility: Double = 1,
             appearance: Appearance = .system,
@@ -64,7 +64,7 @@ public final class GlassHUDMaterialController {
             self.emphasis = emphasis
         }
 
-        public static func == (
+        static func == (
             lhs: Configuration,
             rhs: Configuration
         ) -> Bool {
@@ -87,7 +87,7 @@ public final class GlassHUDMaterialController {
         }
     }
 
-    public enum FallbackReason: Equatable {
+    enum FallbackReason: Equatable {
         case calibrationFailed(String)
         case frozenInstallFailed
         case tintNotYetVerified
@@ -96,31 +96,31 @@ public final class GlassHUDMaterialController {
     /// Live cost of the commit-resolution path, so a perceived delay can be
     /// attributed instead of guessed. Resolution itself measures ~7 ms on the
     /// certification host; anything larger here is orchestration.
-    public struct TintDiagnostics: Equatable, Sendable {
+    struct TintDiagnostics: Equatable, Sendable {
         /// Request-to-displayed latency for the most recent resolved color.
-        public var lastLatencyMilliseconds: Double?
+        var lastLatencyMilliseconds: Double?
         /// Cost of the resolving commit alone.
-        public var lastResolveMilliseconds: Double?
+        var lastResolveMilliseconds: Double?
         /// One-time probe materialization.
-        public var warmUpMilliseconds: Double?
+        var warmUpMilliseconds: Double?
         /// Commit attempts the most recent color needed.
-        public var attemptsForLastColor: Int = 0
+        var attemptsForLastColor: Int = 0
         /// Colors resolved through the system this session.
-        public var resolvedColorCount: Int = 0
+        var resolvedColorCount: Int = 0
         /// Requests coalesced away because a newer pick arrived first.
-        public var supersededRequestCount: Int = 0
+        var supersededRequestCount: Int = 0
         /// Times the full style transaction ran (base validation + whole-style
         /// write + readback). Should be rare: base changes only.
-        public var fullFreezeCount: Int = 0
+        var fullFreezeCount: Int = 0
         /// Times only the 20 Tint coefficients were restamped.
-        public var tintRestampCount: Int = 0
+        var tintRestampCount: Int = 0
         /// Cost of the most recent install, whichever path it took.
-        public var lastInstallMilliseconds: Double?
+        var lastInstallMilliseconds: Double?
     }
 
-    public private(set) var tintDiagnostics = TintDiagnostics()
+    private(set) var tintDiagnostics = TintDiagnostics()
 
-    public enum Status: Equatable {
+    enum Status: Equatable {
         case idle
         case waitingForMainWindow
         case calibrating(completed: Int, total: Int)
@@ -131,13 +131,18 @@ public final class GlassHUDMaterialController {
         case fallback(FallbackReason)
     }
 
-    public var configuration: Configuration {
+    var configuration: Configuration {
         didSet {
             configuration.visibility = min(
                 max(configuration.visibility, 0),
                 1
             )
             guard configuration != oldValue else { return }
+            let requiresFullMaterialInstall =
+                Self.requiresFullMaterialInstall(
+                    from: oldValue,
+                    to: configuration
+                )
             if !Self.colorsMatch(configuration.tint, oldValue.tint) {
                 tintConfigurationDidChange(
                     from: oldValue.tint,
@@ -162,20 +167,31 @@ public final class GlassHUDMaterialController {
             if configuration.tint != nil, oldValue.tint == nil {
                 prepareTintCommitResolver()
             }
-            applyConfiguration()
+            applyConfiguration(
+                allowsTintRestamp: !requiresFullMaterialInstall
+            )
         }
     }
 
-    public private(set) var status: Status = .idle {
+    static func requiresFullMaterialInstall(
+        from oldConfiguration: Configuration,
+        to newConfiguration: Configuration
+    ) -> Bool {
+        oldConfiguration.variant != newConfiguration.variant
+            || oldConfiguration.appearance != newConfiguration.appearance
+            || oldConfiguration.emphasis != newConfiguration.emphasis
+    }
+
+    private(set) var status: Status = .idle {
         didSet {
             guard status != oldValue else { return }
             onStatusChanged?(status)
         }
     }
 
-    public var onStatusChanged: ((Status) -> Void)?
+    var onStatusChanged: ((Status) -> Void)?
 
-    public private(set) weak var glassView: GlassMaterialEffectView?
+    private(set) weak var glassView: AdjustableGlassEffectView?
     private let atlasProvider: GlassMaterialAtlasProvider
 
     private weak var hostWindow: NSWindow?
@@ -227,7 +243,7 @@ public final class GlassHUDMaterialController {
     private static let tintRetryMilliseconds = [450, 1_000, 2_000, 5_000]
     private static let tintCommitFailureLimit = 3
 
-    public convenience init(
+    convenience init(
         hostWindow: NSWindow,
         configuration: Configuration? = nil
     ) {
@@ -266,13 +282,9 @@ public final class GlassHUDMaterialController {
         }
     }
 
-    /// Attaches product configuration to one material view. Calibration is
-    /// lazy but automatic; until verified data is ready the view remains
-    /// native and `status` exposes why. Replacing an attached view is accepted
-    /// only after the old view has left its window, because AppKit offers no
-    /// in-place way to restore a privately authored material tree.
+    /// Attaches product configuration to the owning material view.
     @discardableResult
-    public func attach(to glassView: GlassMaterialEffectView) -> Bool {
+    func attach(to glassView: AdjustableGlassEffectView) -> Bool {
         if self.glassView !== glassView {
             guard self.glassView?.window == nil else { return false }
             self.glassView?.materialWindowDidChange = nil
@@ -289,13 +301,7 @@ public final class GlassHUDMaterialController {
         return true
     }
 
-    /// Stops controlling the attached view after it has been removed from its
-    /// window. Returns false and keeps control while the view is still on
-    /// screen; silently abandoning a frozen view would leave authored private
-    /// material values visible with no controller maintaining them.
-    @discardableResult
-    public func detach() -> Bool {
-        guard glassView?.window == nil else { return false }
+    func invalidate() {
         installRetryTask?.cancel()
         installRetryTask = nil
         calibrationRetryTask?.cancel()
@@ -322,10 +328,9 @@ public final class GlassHUDMaterialController {
         glassView?.materialStrength.invalidate()
         glassView = nil
         refreshStatus()
-        return true
     }
 
-    public func ensureReady() {
+    func ensureReady() {
         atlasProvider.ensureCaptured()
         applyConfiguration()
     }
@@ -374,17 +379,19 @@ public final class GlassHUDMaterialController {
     // applications collapsed to roughly one per second and the color visibly
     // dropped out. Configuration is therefore applied synchronously, and the
     // per-application cost is kept small instead.
-    private func applyConfiguration() {
+    private func applyConfiguration(
+        allowsTintRestamp: Bool = false
+    ) {
         guard let glassView else {
             refreshStatus()
             return
         }
 
-        glassView.appearance = nsAppearance(for: configuration.appearance)
-        glassView.materialStyle = configuration.variant == .clear
-            ? .clear
-            : .regular
-        glassView.materialVisibility = configuration.visibility
+        glassView.applyControlledConfiguration(
+            style: configuration.variant == .clear ? .clear : .regular,
+            amount: configuration.visibility,
+            appearance: nsAppearance(for: configuration.appearance)
+        )
 
         // Fail closed for Tint: an unverified or hue-suppressed matrix is never
         // presented as the requested color. In-gamut colors resolve from the
@@ -442,11 +449,14 @@ public final class GlassHUDMaterialController {
         }
 
         let hasMainParticipation = configuration.emphasis == .normal
-        // A color change only differs in 20 tint coefficients. Restamping just
-        // that branch skips revalidating and rewriting the whole style, which
-        // is what let a streaming color picker saturate the main thread.
+        // When the discrete base axes are unchanged, continuous amount updates
+        // are already applied by the strength writer and a color change differs
+        // only in 20 Tint coefficients. Restamping that branch preserves the
+        // streaming color-picker performance. Appearance, variant, and
+        // participation changes never enter this path.
         let installStart = DispatchTime.now().uptimeNanoseconds
-        if glassView.materialStrength.restampTintOverlay(
+        if allowsTintRestamp,
+           glassView.materialStrength.restampTintOverlay(
             installableAtlas ?? atlasProvider.atlas,
             baseGeneration: baseAtlasGeneration,
             mainParticipation: hasMainParticipation,
@@ -471,7 +481,10 @@ public final class GlassHUDMaterialController {
         let installed = glassView.materialStrength.freeze(
             atlas: installableAtlas ?? atlasProvider.atlas,
             mainParticipation: hasMainParticipation,
-            baseGeneration: baseAtlasGeneration
+            baseGeneration: baseAtlasGeneration,
+            appearanceSelection: Self.frozenAppearanceSelection(
+                for: configuration.appearance
+            )
         )
         let freezeMs = Self.milliseconds(since: installStart)
         tintDiagnostics.lastInstallMilliseconds = freezeMs
@@ -501,6 +514,19 @@ public final class GlassHUDMaterialController {
             NSAppearance(named: .aqua)
         case .dark:
             NSAppearance(named: .darkAqua)
+        }
+    }
+
+    static func frozenAppearanceSelection(
+        for appearance: Appearance
+    ) -> GlassMaterialStrength.FrozenAppearanceSelection {
+        switch appearance {
+        case .system:
+            .system
+        case .light:
+            .light
+        case .dark:
+            .dark
         }
     }
 
@@ -670,7 +696,7 @@ public final class GlassHUDMaterialController {
             } else if self.hostParticipates {
                 self.fallBackFromTintCommitResolution()
             }
-            self.applyConfiguration()
+            self.applyConfiguration(allowsTintRestamp: true)
         }
     }
 
@@ -777,7 +803,7 @@ public final class GlassHUDMaterialController {
                 "commit resolution failed \(self.tintCommitFailureCount, privacy: .public) times; using legacy capture"
             )
             fallBackFromTintCommitResolution()
-            applyConfiguration()
+            applyConfiguration(allowsTintRestamp: true)
             return
         }
         tintDiagnostics.lastResolveMilliseconds = Self.milliseconds(since: start)
@@ -799,7 +825,7 @@ public final class GlassHUDMaterialController {
            Self.rgbKey(for: newest.sourceColor) == key {
             pendingTintCommitRequest = nil
         }
-        applyConfiguration()
+        applyConfiguration(allowsTintRestamp: true)
     }
 
     /// Hands Tint to the bounded legacy path and disables this resolver
@@ -1011,13 +1037,13 @@ public final class GlassHUDMaterialController {
                         requestedColor
                       )
                 else {
-                    self.applyConfiguration()
+                    self.applyConfiguration(allowsTintRestamp: true)
                     return
                 }
                 if success {
                     self.tintRetryIndex = 0
                 }
-                self.applyConfiguration()
+                self.applyConfiguration(allowsTintRestamp: true)
             }
         }
     }
@@ -1178,7 +1204,7 @@ public final class GlassHUDMaterialController {
         return cacheRoot
             .appendingPathComponent(appScope, isDirectory: true)
             .appendingPathComponent(
-                "GlassHUDMaterial",
+                "AdjustableGlass",
                 isDirectory: true
             )
             .appendingPathComponent(

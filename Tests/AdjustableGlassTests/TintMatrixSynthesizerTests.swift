@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 import XCTest
-@testable import GlassHUDMaterial
+@testable import AdjustableGlass
 
 final class TintMatrixSynthesizerTests: XCTestCase {
     private struct SweepDocument: Decodable {
@@ -358,11 +358,11 @@ final class TintMatrixSynthesizerTests: XCTestCase {
         }
 
         for emphasis in [
-            GlassHUDMaterialController.Emphasis.normal,
+            GlassEffectController.Emphasis.normal,
             .muted,
         ] {
             let resolved = try XCTUnwrap(
-                GlassHUDMaterialController.resolvedTintAtlas(
+                GlassEffectController.resolvedTintAtlas(
                     atlas,
                     color: color,
                     emphasis: emphasis,
@@ -473,7 +473,7 @@ final class TintMatrixSynthesizerTests: XCTestCase {
             )
         }
         XCTAssertNil(
-            GlassHUDMaterialController.resolvedTintAtlas(
+            GlassEffectController.resolvedTintAtlas(
                 atlas,
                 color: color,
                 emphasis: .normal,
@@ -489,7 +489,7 @@ final class TintMatrixSynthesizerTests: XCTestCase {
             for: try XCTUnwrap(requiredCells.last)
         )
         let resolved = try XCTUnwrap(
-            GlassHUDMaterialController.resolvedTintAtlas(
+            GlassEffectController.resolvedTintAtlas(
                 atlas,
                 color: color,
                 emphasis: .normal,

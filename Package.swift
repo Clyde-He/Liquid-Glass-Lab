@@ -3,19 +3,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "GlassHUDMaterial",
+    name: "AdjustableGlass",
     platforms: [
         .macOS(.v26),
     ],
     products: [
         .library(
-            name: "GlassHUDMaterial",
-            targets: ["GlassHUDMaterial"]
+            name: "AdjustableGlass",
+            targets: ["AdjustableGlass"]
         ),
     ],
     targets: [
         .target(
-            name: "GlassHUDMaterial",
+            name: "AdjustableGlass",
             path: "LiquidGlassLab/GlassMaterial",
             exclude: [
                 "README.md",
@@ -28,9 +28,9 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "GlassHUDMaterialTests",
-            dependencies: ["GlassHUDMaterial"],
-            path: "Tests/GlassHUDMaterialTests",
+            name: "AdjustableGlassTests",
+            dependencies: ["AdjustableGlass"],
+            path: "Tests/AdjustableGlassTests",
             swiftSettings: [
                 .defaultIsolation(MainActor.self),
             ]

@@ -1,6 +1,6 @@
 //
 //  GlassMaterialTintCommitResolver.swift
-//  GlassHUDMaterial
+//  AdjustableGlass
 //
 //  Synchronous Tint resolution for colors the certified closed form does not
 //  cover — anything outside the extended-sRGB unit domain (a Display P3 or

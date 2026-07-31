@@ -124,7 +124,7 @@ extension GlassLabView {
             Toggle(isOn: hudVisibleBinding) {
                 LabRowLabel(
                     "Show HUD Panel",
-                    description: "A borderless non-activating floating panel rendering a GlassMaterialEffectView frozen from the paired atlas. Normal holds verified Main-On; Muted holds verified Main-Off. The panel itself never becomes key or main."
+                    description: "A borderless non-activating floating panel rendering an AdjustableGlassEffectView frozen from the paired atlas. Normal holds verified Main-On; Muted holds verified Main-Off. The panel itself never becomes key or main."
                 )
             }
             .disabled(atlasDocument == nil && !hudPanelVisible)

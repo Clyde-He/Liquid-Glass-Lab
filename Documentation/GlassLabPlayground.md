@@ -23,7 +23,7 @@ For prioritized unknowns and future experiments across both renderers, see
 | [GlassLabTintStudy.swift](../LiquidGlassLab/GlassLab/GlassLabTintStudy.swift) | Deterministic Tint presets plus cross-renderer static and Materialize export models |
 | [GlassLabView.swift](../LiquidGlassLab/GlassLab/GlassLabView.swift) | Section/page controls, the tweaking Inspectors, and refresh scheduling |
 | `GlassLabBench*.swift` | The Bench: capture drivers, probes, studies, exports, and the headless CLI harness, split per area (`Materialize`, `TintStudy`, `Probes`, `Headless`, `Tools`) as `GlassLabView` extensions |
-| [GlassHUDMaterialController.swift](../LiquidGlassLab/GlassMaterial/GlassHUDMaterialController.swift) | Product-facing Regular/Clear, visibility, appearance, tint, and deterministic Normal/Muted ownership |
+| [GlassEffectController.swift](../LiquidGlassLab/GlassMaterial/GlassEffectController.swift) | Internal Regular/Clear, effect amount, appearance, tint, and deterministic active/inactive ownership |
 | [GlassMaterialAtlasCatalog.swift](../LiquidGlassLab/GlassMaterial/GlassMaterialAtlasCatalog.swift) | Discovers one certified JSON snapshot per macOS major; build/display metadata is diagnostic |
 
 ## Two renderer spaces
