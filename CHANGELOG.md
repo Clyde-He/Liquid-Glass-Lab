@@ -8,11 +8,25 @@ those changes will be called out explicitly here.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-31
+
+### Added
+
+- Added `referenceView` as a consumer-owned AppKit insertion point for
+  invisible material probes in view-controller-managed windows.
+
 ### Changed
 
 - Runtime calibration and wider-gamut Tint now require an explicit
   `referenceView` when the reference window has a `contentViewController`;
   controller-owned content roots are no longer used as implicit probe hosts.
+
+### Fixed
+
+- Material probes no longer attach directly to `NSHostingController.view`,
+  avoiding unsupported SwiftUI view-hierarchy mutations and AppKit warnings.
+- A `referenceView` assigned before it joins its reference window remains
+  available for runtime calibration and wider-gamut Tint once attached.
 
 ## [0.1.0] - 2026-07-31
 
@@ -39,5 +53,6 @@ those changes will be called out explicitly here.
 - The implementation relies on private AppKit details and is intended for
   Direct Distribution, not the Mac App Store.
 
-[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.1.0...HEAD
+[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/Clyde-He/Liquid-Glass-Lab/releases/tag/0.1.0
