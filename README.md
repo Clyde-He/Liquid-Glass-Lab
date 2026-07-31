@@ -28,6 +28,42 @@ Start with:
 - [Glass Lab Playground](./Documentation/GlassLabPlayground.md)
 - [Glass Research Roadmap](./Documentation/GlassResearchRoadmap.md)
 
+## AdjustableGlass Swift Package
+
+The repository root publishes the reusable `AdjustableGlass` library. Add the
+package by version and link its product from the consuming target:
+
+```swift
+dependencies: [
+    .package(
+        url: "https://github.com/Clyde-He/Liquid-Glass-Lab.git",
+        from: "0.1.0"
+    ),
+],
+targets: [
+    .target(
+        name: "YourApp",
+        dependencies: [
+            .product(name: "AdjustableGlass", package: "liquid-glass-lab"),
+        ]
+    ),
+]
+```
+
+`AdjustableGlassEffectView` is available on macOS 26 and later. The package can
+still be linked by an app whose deployment target is macOS 15 so the app can
+retain its existing fallback on older systems.
+
+| macOS | Product status |
+|---|---|
+| 26 | Bundled catalog; measured and visually accepted |
+| 27 | Bundled catalog; measured and visually accepted |
+| Other major | Runtime calibration fallback; not release-certified |
+
+See the [product integration guide](./LiquidGlassLab/GlassMaterial/README.md),
+[changelog](./CHANGELOG.md), and [release process](./RELEASING.md) for the
+supported API and compatibility contract.
+
 ## Build
 
 The Glass runtime is available on macOS 26.0+. The Swift Package itself can be
@@ -71,3 +107,8 @@ Core Animation implementation details. Runtime access is capability-checked so
 missing symbols and selectors can fail closed, but recipes, role tags, object
 graphs, and ABI assumptions remain OS-build-specific. The lab is research
 infrastructure, not a promise of App Store-safe or cross-version-stable API.
+
+## License
+
+Liquid Glass Lab and `AdjustableGlass` are available under the
+[MIT License](./LICENSE).

@@ -1,0 +1,37 @@
+# Changelog
+
+All notable changes to `AdjustableGlass` are documented in this file.
+
+The project follows [Semantic Versioning](https://semver.org/). While the
+package remains below `1.0.0`, minor releases may refine the supported API;
+those changes will be called out explicitly here.
+
+## [Unreleased]
+
+## [0.1.0] - 2026-07-31
+
+### Added
+
+- `AdjustableGlassEffectView`, an `NSGlassEffectView` subclass with continuous
+  `effectAmount` and deterministic active/inactive material state.
+- Supported Regular/Clear styles, system or forced appearance, verified Tint,
+  replaceable reference windows, status reporting, and batched configuration.
+- `hasOuterShadow` and size-dependent `requiredWindowInset` integration for
+  transparent nonactivating HUD panels.
+- Bundled, verified macOS 26 and macOS 27 material catalogs with runtime
+  calibration as the fallback for an uncertified macOS major.
+- A standalone Consumer Demo covering the supported product API, geometry,
+  window placement, rounded hit testing, and panel shadow behavior.
+- Package tests covering catalog admission, configuration transactions,
+  platform inset policy, Tint synthesis, and recovery behavior.
+
+### Compatibility
+
+- The package can be linked from a macOS 15 deployment target so consumers can
+  retain an older-system fallback. `AdjustableGlassEffectView` itself is
+  available on macOS 26 and later.
+- The implementation relies on private AppKit details and is intended for
+  Direct Distribution, not the Mac App Store.
+
+[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.1.0...HEAD
+[0.1.0]: https://github.com/Clyde-He/Liquid-Glass-Lab/releases/tag/0.1.0

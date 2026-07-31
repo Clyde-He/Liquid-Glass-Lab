@@ -89,7 +89,8 @@ back in one `CATransaction` commit. The first such color pays a one-time probe
 materialization (`status` reports `preparing`); every later color change costs
 one commit. Extrapolating the closed form past its certified domain would
 render visibly wrong hues, so the domain guard is deliberate, not
-conservative — see `Documentation/TintParameterizationStudy.md`.
+conservative — see the
+[Tint Parameterization Study](../../Documentation/TintParameterizationStudy.md).
 
 Both paths fail closed. The requested color appears only once every cell of
 the selected participation has a verified matrix, proven against the paired
@@ -277,7 +278,7 @@ deterministic final writer until that question is settled by capture.
 ## Take it
 
 Copy this directory. It has no dependency on the rest of Liquid Glass Lab —
-eight Swift files plus any certified JSON catalogs, AppKit only:
+nine Swift files plus any certified JSON catalogs, AppKit only:
 
 | File | Role |
 |---|---|
@@ -346,7 +347,7 @@ Each accepted direct archive contains 104 runs / 936 samples across
 appearance, backdrop, participation, tint, both directions, and `shortSide`
 48/200/400. Fixtures and analysis live in `Golden/macOS-26/unified/`,
 `Golden/macOS-27/unified/`, and the P1.1 section of
-`Documentation/GlassResearchRoadmap.md`.
+[Glass Research Roadmap](../../Documentation/GlassResearchRoadmap.md).
 
 The executable learnings currently pass 33/33 on macOS 26. At the 200pt
 reference size the single-endpoint curve replays the measured continuous
@@ -354,16 +355,15 @@ channels; across 48/200/400 every remaining channel stays inside the documented
 geometry bound. A resize/rebuild test confirms the authored strength survives
 AppKit replacing the whole subtree.
 
+Targeted author visual acceptance of the compact product HUD path is complete
+on both macOS 26 and macOS 27, including size-dependent rendering and the
+platform-specific safety inset with Outer Shadow disabled.
+
 ## What is not
 
-- **macOS 27's compact visual acceptance is pending.** The direct macOS 27
-  archive (`Golden/macOS-27/unified/`) landed: of its 22 new `glassBackground`
-  inputs, 17 animate and are in the table, one is verified static, and the
-  four aberration inputs never resolve in the sampled domain. The numeric side
-  is closed from the same table as macOS 26; the targeted author review of the
-  small-size path has not happened yet.
 - **Private semantic roles and non-panel hosts** were never sampled.
-- **Visual acceptance is the author's, not instrumented**, and only on macOS 26.
+- **Visual acceptance is the author's, not instrumented.** It is a release
+  acceptance step rather than an executable test.
 - **Runtime cost is unmeasured.** Do not drive this from a high-frequency
   update loop without profiling first.
 
