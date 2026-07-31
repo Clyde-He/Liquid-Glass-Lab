@@ -42,6 +42,7 @@ private final class GlassMaterialTintWitnessWindow: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+@available(macOS 26.0, *)
 @MainActor
 final class GlassMaterialTintCommitResolver {
     private struct ProbePair {

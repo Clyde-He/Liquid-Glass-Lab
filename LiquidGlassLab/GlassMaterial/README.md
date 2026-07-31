@@ -21,6 +21,7 @@ import AdjustableGlass
 let glassView = AdjustableGlassEffectView(
     referenceWindow: settingsWindow
 )
+glassView.contentView = hudContentView
 glassView.cornerRadius = 24
 glassView.style = .clear
 glassView.effectAmount = 0.72       // effect strength, not alphaValue
@@ -45,8 +46,10 @@ right vocabulary:
 | `appearance` | `nil` follows the system; an override pins Light or Dark |
 | `effectAmount` | Added continuous glass amount in `0...1` |
 | `effectState` | Added deterministic `.active` / `.inactive` material |
-| `referenceWindow` | Read-only ordinary app window used for verification |
+| `referenceWindow` | Optional, replaceable ordinary app window used for verification |
+| `requiredWindowInset`, `onRequiredWindowInsetChange` | Transparent room required around the visual glass bounds |
 | `status`, `onStatusChange`, `prepareIfNeeded()` | Readiness and retry surface |
+| `performConfigurationUpdates(_:)` | Applies several property changes as one material transaction |
 
 `status` describes current readiness, not a terminal lifecycle. An
 `.unavailable` view can recover automatically after a material-install retry,
@@ -54,9 +57,13 @@ Tint resolution, reference-window activation, or runtime recalibration; keep
 observing `onStatusChange` rather than treating the first unavailable value as
 a permanent fallback decision.
 
-The `referenceWindow` must be an ordinary window that can genuinely become main
-or key, such as Settings or the app's primary window. The rendered glass can
-live in a nonactivating HUD panel and never become main or key itself.
+When supplied, `referenceWindow` must be an ordinary window that can genuinely
+become main or key, such as Settings or the app's primary window. The rendered
+glass can live in a nonactivating HUD panel and never become main or key itself.
+The reference may be nil at launch and replaced later without recreating the
+glass or its `contentView`. A certified base atlas and supported in-gamut Tint
+can become ready without it; runtime calibration and system-resolved
+wider-gamut Tint wait until a reference window is available and participating.
 
 The packaged
 `glass-macos-<major>.json` is discovered from the Swift Package resource bundle
@@ -224,8 +231,11 @@ One transplant group cannot be restamped and falls on the host layout:
 frame, so the glass must sit inset by at least the sample's `marginWidth`
 inside a transparent window — a content-sized HUD whose glass fills its panel
 edge-to-edge will still clip the Main-On outer passes no matter what this
-module writes. Size the panel to content plus `marginWidth` padding;
-`sample(for:at:)` exposes the captured value.
+module writes. Size the panel to its visual content plus
+`requiredWindowInset` on every side and respond to
+`onRequiredWindowInsetChange` when size, style, participation, or calibration
+changes. Window dragging, snapping, and hit testing should continue to use the
+visual glass frame rather than the larger transparent panel frame.
 
 A frozen style needs an active defense rather than a single write. AppKit
 restamps parts of the tree for the window's *real* participation one cycle

@@ -113,6 +113,7 @@ struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
     /// slot fails to read completely — a partial capture must not report
     /// success and then silently skip slots at apply time.
     @MainActor
+    @available(macOS 26.0, *)
     public static func capture(
         from glass: NSGlassEffectView
     ) -> GlassMaterialStyleSample? {
@@ -199,6 +200,8 @@ struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
 /// still accept the complete payload. Runtime calibration remains the fallback
 /// when a future system changes that topology.
 struct GlassMaterialStyleAtlas: Codable, Sendable {
+    private static let requiredRimColorKeys = ["fillColor", "keyColor"]
+
     /// Bump when either the payload shape or the proof required to trust a
     /// captured payload changes. Version 2 requires every Main-On sample to
     /// carry a same-context Main-Off witness; a version-1 cache may contain a
@@ -531,7 +534,7 @@ struct GlassMaterialStyleAtlas: Codable, Sendable {
             && sample.rims.count == 1
             && sample.rims.allSatisfy { rim in
                 !rim.values.isEmpty
-                    && GlassMaterialAccess.rimColorKeys.allSatisfy {
+                    && requiredRimColorKeys.allSatisfy {
                         rim.colors[$0] != nil
                     }
             }
@@ -681,6 +684,7 @@ extension GlassMaterialStyleAtlas {
     /// tint-selection time: the user is choosing the color in an active
     /// window, which is exactly the Main participation the matrix needs.
     @MainActor
+    @available(macOS 26.0, *)
     public static func captureTintMatrix(
         from glass: NSGlassEffectView
     ) -> TintMatrix? {

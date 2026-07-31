@@ -17,6 +17,7 @@ private final class GlassMaterialCalibrationWindow: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+@available(macOS 26.0, *)
 @MainActor
 final class GlassMaterialAtlasProvider {
     /// Where a calibration currently stands, for progress UI.
@@ -143,7 +144,7 @@ final class GlassMaterialAtlasProvider {
     ///     preference order. The first schema + macOS-major match with paired
     ///     proof is accepted; display and minor/beta build are diagnostic only.
     public init(
-        hostWindow: NSWindow,
+        hostWindow: NSWindow?,
         shortSides: [Double] = [48, 64, 96, 128, 160, 200, 320],
         storageURL: URL? = nil,
         certifiedAtlasURLs: [URL] = []

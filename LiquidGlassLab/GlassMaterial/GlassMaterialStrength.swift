@@ -87,6 +87,7 @@ import OSLog
 /// 0.05 mid-transition hump on `inputBlurOpacity1` under Regular, inside the
 /// ordinary bound and deliberately left unmodelled — see
 /// `gated-blur-overshoots-by-its-saturation-deficit`.
+@available(macOS 26.0, *)
 @MainActor
 final class GlassMaterialStrength {
     enum FrozenAppearanceSelection: Equatable, Sendable {
@@ -1051,6 +1052,7 @@ final class GlassMaterialStrength {
 
 /// An `NSGlassEffectView` whose visual effect can be adjusted without exposing
 /// the calibration and frozen-material machinery that maintains it.
+@available(macOS 26.0, *)
 @MainActor
 public final class AdjustableGlassEffectView: NSGlassEffectView {
     public enum EffectState: Equatable, Sendable {
@@ -1079,23 +1081,37 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     ///
     /// A nonactivating HUD cannot become main or key itself, so readiness is
     /// derived from this reference window.
-    public private(set) weak var referenceWindow: NSWindow?
+    public weak var referenceWindow: NSWindow? {
+        didSet {
+            guard referenceWindow !== oldValue else { return }
+            observeReferenceWindowClose()
+            rebuildEffectController()
+        }
+    }
+
+    /// Symmetric transparent room the owning window must provide outside this
+    /// view's bounds so the selected material's outer passes can render.
+    public private(set) var requiredWindowInset: CGFloat = 0 {
+        didSet {
+            guard requiredWindowInset != oldValue else { return }
+            onRequiredWindowInsetChange?(requiredWindowInset)
+        }
+    }
+
+    public var onRequiredWindowInsetChange: ((CGFloat) -> Void)?
 
     /// Product-facing strength in the closed range `0...1`.
     public var effectAmount: CGFloat {
-        get {
-            if let controller = effectController {
-                return CGFloat(controller.configuration.visibility)
-            }
-            return CGFloat(materialStrength.value)
-        }
+        get { requestedEffectAmount }
         set {
             let clamped = min(max(newValue, 0), 1)
-            guard let controller = effectController else {
+            guard clamped != requestedEffectAmount else { return }
+            requestedEffectAmount = clamped
+            guard effectController != nil else {
                 materialStrength.value = Double(clamped)
                 return
             }
-            controller.configuration.visibility = Double(clamped)
+            requestedConfigurationDidChange()
         }
     }
 
@@ -1103,18 +1119,15 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     /// HUD window's own main/key participation.
     public var effectState: EffectState = .active {
         didSet {
-            guard effectState != oldValue,
-                  let controller = effectController
-            else { return }
-            controller.configuration.emphasis = effectState == .active
-                ? .normal
-                : .muted
+            guard effectState != oldValue else { return }
+            requestedConfigurationDidChange()
         }
     }
 
     public private(set) var status: Status = .idle {
         didSet {
             guard status != oldValue else { return }
+            updateRequiredWindowInset()
             onStatusChange?(status)
         }
     }
@@ -1124,16 +1137,18 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     /// Creates an adjustable glass view tied to the app window that provides
     /// its verified material context.
     public init(
-        referenceWindow: NSWindow,
+        referenceWindow: NSWindow? = nil,
         frame frameRect: NSRect = .zero
     ) {
         self.referenceWindow = referenceWindow
         super.init(frame: frameRect)
+        observeReferenceWindowClose()
         rebuildEffectController()
     }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        rebuildEffectController()
     }
 
     @available(*, unavailable, message: "Use init(referenceWindow:frame:)")
@@ -1143,24 +1158,45 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
 
     isolated deinit {
         effectController?.invalidate()
+        if let referenceWindowCloseObserver {
+            NotificationCenter.default.removeObserver(referenceWindowCloseObserver)
+        }
         NotificationCenter.default.removeObserver(self)
     }
 
     /// Rechecks cached or runtime readiness after the reference window or
     /// display environment changes.
     public func prepareIfNeeded() {
-        if effectController == nil, referenceWindow != nil {
+        if effectController == nil {
             rebuildEffectController()
         }
         effectController?.ensureReady()
+    }
+
+    /// Applies several product properties as one controller transaction. The
+    /// native properties still change immediately, while the expensive frozen
+    /// material install is deferred until the outermost update completes.
+    public func performConfigurationUpdates(_ updates: () -> Void) {
+        configurationUpdateDepth += 1
+        updates()
+        configurationUpdateDepth -= 1
+        guard configurationUpdateDepth == 0,
+              hasDeferredConfigurationUpdate
+        else { return }
+        hasDeferredConfigurationUpdate = false
+        synchronizeRequestedConfiguration()
     }
 
     private(set) lazy var materialStrength = GlassMaterialStrength(glass: self)
 
     private var isRefreshing = false
     private var isApplyingControlledConfiguration = false
+    private var requestedEffectAmount: CGFloat = 1
     private var requestedTintColor: NSColor?
     private var effectController: GlassEffectController?
+    private var configurationUpdateDepth = 0
+    private var hasDeferredConfigurationUpdate = false
+    private var referenceWindowCloseObserver: NSObjectProtocol?
 
     /// Internal product-controller hook. `NSView` has no did-move-to-window
     /// notification a separate owner can reliably observe.
@@ -1170,36 +1206,50 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         didSet {
             guard style != oldValue else { return }
             materialStrength.refresh()
-            guard !isApplyingControlledConfiguration,
-                  let controller = effectController
-            else { return }
-            controller.configuration.variant = style == .clear
-                ? .clear
-                : .regular
+            guard !isApplyingControlledConfiguration else { return }
+            requestedConfigurationDidChange()
         }
     }
 
     override public var appearance: NSAppearance? {
         didSet {
-            guard appearance !== oldValue,
-                  !isApplyingControlledConfiguration,
-                  let controller = effectController
-            else { return }
-            controller.configuration.appearance =
-                Self.controlledAppearance(for: appearance)
+            guard appearance !== oldValue else { return }
+            refreshNowAndAfterSystemRestamp()
+            guard !isApplyingControlledConfiguration else { return }
+            requestedConfigurationDidChange()
         }
     }
 
     override public var tintColor: NSColor? {
         get { requestedTintColor }
         set {
+            guard !Self.colorsMatch(requestedTintColor, newValue) else { return }
             requestedTintColor = newValue
-            guard let controller = effectController else {
+            guard effectController != nil else {
                 super.tintColor = newValue
                 materialStrength.tintColor = newValue
                 return
             }
-            controller.configuration.tint = newValue
+            requestedConfigurationDidChange()
+        }
+    }
+
+    private static func colorsMatch(_ lhs: NSColor?, _ rhs: NSColor?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            true
+        case let (lhs?, rhs?):
+            lhs.isEqual(rhs)
+        default:
+            false
+        }
+    }
+
+    override public var cornerRadius: CGFloat {
+        didSet {
+            guard cornerRadius != oldValue else { return }
+            refreshNowAndAfterSystemRestamp()
+            updateRequiredWindowInset()
         }
     }
 
@@ -1245,16 +1295,11 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         effectController?.invalidate()
         effectController = nil
 
-        guard let referenceWindow else {
-            status = .idle
-            return
-        }
-
         let controller = GlassEffectController(
             hostWindow: referenceWindow,
             configuration: .init(
                 variant: style == .clear ? .clear : .regular,
-                visibility: Double(effectAmount),
+                visibility: Double(requestedEffectAmount),
                 appearance: Self.controlledAppearance(for: appearance),
                 tint: requestedTintColor,
                 emphasis: effectState == .active ? .normal : .muted
@@ -1268,6 +1313,54 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         effectController = controller
         controller.attach(to: self)
         status = Self.publicStatus(for: controller.status)
+        updateRequiredWindowInset()
+    }
+
+    private func requestedConfigurationDidChange() {
+        if configurationUpdateDepth > 0 {
+            hasDeferredConfigurationUpdate = true
+            return
+        }
+        synchronizeRequestedConfiguration()
+    }
+
+    private func synchronizeRequestedConfiguration() {
+        guard let controller = effectController else { return }
+        controller.configuration = .init(
+            variant: style == .clear ? .clear : .regular,
+            visibility: Double(requestedEffectAmount),
+            appearance: Self.controlledAppearance(for: appearance),
+            tint: requestedTintColor,
+            emphasis: effectState == .active ? .normal : .muted
+        )
+        updateRequiredWindowInset()
+    }
+
+    func updateRequiredWindowInset() {
+        let resolved = effectController?.requiredWindowInset(for: bounds.size)
+            ?? 0
+        requiredWindowInset = resolved
+    }
+
+    private func observeReferenceWindowClose() {
+        let center = NotificationCenter.default
+        if let referenceWindowCloseObserver {
+            center.removeObserver(referenceWindowCloseObserver)
+            self.referenceWindowCloseObserver = nil
+        }
+        guard let referenceWindow else { return }
+        referenceWindowCloseObserver = center.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: referenceWindow,
+            queue: .main
+        ) { [weak self, weak referenceWindow] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.referenceWindow === referenceWindow else {
+                    return
+                }
+                self.referenceWindow = nil
+            }
+        }
     }
 
     private static func controlledAppearance(
@@ -1337,6 +1430,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         isRefreshing = true
         defer { isRefreshing = false }
         materialStrength.refresh()
+        updateRequiredWindowInset()
     }
 
     // Participation and appearance changes rewrite the Recipe *without* a

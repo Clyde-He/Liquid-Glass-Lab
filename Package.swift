@@ -5,7 +5,10 @@ import PackageDescription
 let package = Package(
     name: "AdjustableGlass",
     platforms: [
-        .macOS(.v26),
+        // The product itself is runtime-gated to macOS 26, but keeping the
+        // package consumable from older deployment targets lets applications
+        // preserve their existing Material fallback below macOS 26.
+        .macOS(.v15),
     ],
     products: [
         .library(

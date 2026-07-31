@@ -3,6 +3,7 @@ import Foundation
 import XCTest
 @testable import AdjustableGlass
 
+@available(macOS 26.0, *)
 final class CatalogTests: XCTestCase {
     @MainActor
     func testPackageContainsVerifiedMacOS27Catalog() throws {

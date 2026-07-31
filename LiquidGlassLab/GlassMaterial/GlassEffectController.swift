@@ -12,6 +12,7 @@
 import AppKit
 import OSLog
 
+@available(macOS 26.0, *)
 @MainActor
 final class GlassEffectController {
     /// Provenance of the verified base material. On a supported system,
@@ -244,7 +245,7 @@ final class GlassEffectController {
     private static let tintCommitFailureLimit = 3
 
     convenience init(
-        hostWindow: NSWindow,
+        hostWindow: NSWindow?,
         configuration: Configuration? = nil
     ) {
         self.init(
@@ -257,7 +258,7 @@ final class GlassEffectController {
     }
 
     init(
-        hostWindow: NSWindow,
+        hostWindow: NSWindow?,
         configuration: Configuration?,
         shortSides: [Double] = [48, 64, 96, 128, 160, 200, 320],
         storageURL: URL? = nil,
@@ -335,6 +336,40 @@ final class GlassEffectController {
         applyConfiguration()
     }
 
+    /// Window room required around the glass's visual bounds so its outer
+    /// passes are not clipped by the host window's backing surface.
+    ///
+    /// The view cannot resize an owning panel itself, so the public
+    /// `AdjustableGlassEffectView.requiredWindowInset` forwards this value to
+    /// the consumer. Before a verified atlas is available, return the measured
+    /// conservative Main-On envelope.
+    func requiredWindowInset(for size: CGSize) -> CGFloat {
+        let shortSide = max(0, min(size.width, size.height))
+        let isLight: Bool
+        switch configuration.appearance {
+        case .light:
+            isLight = true
+        case .dark:
+            isLight = false
+        case .system:
+            isLight = glassView.map(GlassMaterialStrength.isLightAppearance)
+                ?? false
+        }
+        let cell = GlassMaterialStyleAtlas.Cell(
+            isLightAppearance: isLight,
+            isClear: configuration.variant == .clear,
+            hasMainParticipation: configuration.emphasis == .normal
+        )
+        if let sample = atlasProvider.atlas.sample(
+            for: cell,
+            at: Double(shortSide)
+        ) {
+            return ceil(max(0, sample.marginWidth)) + 1
+        }
+        guard configuration.emphasis == .normal else { return 1 }
+        return ceil(max(16, 0.35 * shortSide)) + 1
+    }
+
     func recalibrate() {
         calibrationRetryTask?.cancel()
         calibrationRetryIndex = 0
@@ -386,6 +421,7 @@ final class GlassEffectController {
             refreshStatus()
             return
         }
+        defer { glassView.updateRequiredWindowInset() }
 
         glassView.applyControlledConfiguration(
             style: configuration.variant == .clear ? .clear : .regular,

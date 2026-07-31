@@ -1,6 +1,7 @@
 import XCTest
 @testable import AdjustableGlass
 
+@available(macOS 26.0, *)
 final class ControllerConfigurationTests: XCTestCase {
     @MainActor
     func testAppearanceChangeRequiresFullMaterialInstall() {
@@ -103,5 +104,74 @@ final class ControllerConfigurationTests: XCTestCase {
                 to: adjusted
             )
         )
+    }
+
+    @MainActor
+    func testViewCanStartWithoutReferenceAndRebindWithoutReplacingContent() {
+        let view = AdjustableGlassEffectView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 120)
+        )
+        let content = NSView(frame: view.bounds)
+        view.contentView = content
+        let referenceWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+
+        XCTAssertNil(view.referenceWindow)
+        view.referenceWindow = referenceWindow
+        XCTAssertTrue(view.referenceWindow === referenceWindow)
+        XCTAssertTrue(view.contentView === content)
+
+        view.referenceWindow = nil
+        XCTAssertNil(view.referenceWindow)
+        XCTAssertTrue(view.contentView === content)
+    }
+
+    @MainActor
+    func testConfigurationBatchLeavesEveryRequestedPropertyApplied() {
+        let view = AdjustableGlassEffectView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 120)
+        )
+        let tint = NSColor(
+            srgbRed: 0.2,
+            green: 0.4,
+            blue: 0.8,
+            alpha: 0.6
+        )
+
+        view.performConfigurationUpdates {
+            view.style = .clear
+            view.appearance = NSAppearance(named: .darkAqua)
+            view.effectState = .inactive
+            view.effectAmount = 0.42
+            view.tintColor = tint
+        }
+
+        XCTAssertEqual(view.style, .clear)
+        XCTAssertEqual(view.appearance?.name, .darkAqua)
+        XCTAssertEqual(view.effectState, .inactive)
+        XCTAssertEqual(view.effectAmount, 0.42, accuracy: 0.0001)
+        XCTAssertTrue(view.tintColor?.isEqual(tint) == true)
+    }
+
+    @MainActor
+    func testLayoutInsetTracksSelectedParticipation() {
+        let view = AdjustableGlassEffectView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 120)
+        )
+        view.style = .regular
+        view.effectState = .active
+        view.layoutSubtreeIfNeeded()
+        let activeInset = view.requiredWindowInset
+
+        view.effectState = .inactive
+        view.layoutSubtreeIfNeeded()
+        let inactiveInset = view.requiredWindowInset
+
+        XCTAssertGreaterThan(activeInset, inactiveInset)
+        XCTAssertGreaterThanOrEqual(inactiveInset, 1)
     }
 }
