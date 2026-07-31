@@ -180,6 +180,51 @@ extension GlassLabView {
             labeledSlider("Content Width", value: hudContentWidthBinding, in: 120...560)
             labeledSlider("Content Height", value: hudContentHeightBinding, in: 48...320)
 
+            DisclosureGroup(
+                isExpanded: $hudRenderExperimentExpanded
+            ) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 16) {
+                        Toggle(
+                            "Shadow",
+                            isOn: hudRenderPassBinding(.shadow)
+                        )
+                        Toggle(
+                            "Ring Shadow",
+                            isOn: hudRenderPassBinding(.ringShadow)
+                        )
+                        Toggle(
+                            "Bleed",
+                            isOn: hudRenderPassBinding(.bleed)
+                        )
+                        Toggle(
+                            "Outer Refraction",
+                            isOn: hudRenderPassBinding(.outerRefraction)
+                        )
+                    }
+
+                    Toggle("Native Margin", isOn: hudNativeMarginBinding)
+                    labeledSlider(
+                        "Margin Width",
+                        value: hudExperimentalMarginWidthBinding,
+                        in: 0...120
+                    )
+                    .disabled(hudExperimentalMarginWidth == nil)
+
+                    Text(hudRenderExperimentSummary)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+
+                    Text("Debug-only SPI. Pass toggles isolate the frozen material's outer families; Native Margin restores the Atlas value, while the slider replaces marginWidth before the OS-specific safety inset is added.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 8)
+            } label: {
+                Text("Render Experiment (SPI)")
+            }
+
             Text(hudStatusSummary)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
@@ -308,6 +353,10 @@ extension GlassLabView {
                     width: hudContentWidth,
                     height: hudContentHeight
                 ))
+                controller.setRenderExperiment(
+                    outerPasses: hudExperimentalOuterPasses,
+                    marginWidth: hudExperimentalMarginWidth.map(CGFloat.init)
+                )
                 controller.show()
             } else {
                 hudPanelController?.hide()
@@ -355,6 +404,79 @@ extension GlassLabView {
             hudContentHeight = value
             pushHUDContentSize()
         }
+    }
+
+    private func hudRenderPassBinding(
+        _ pass: AdjustableGlassOuterPasses
+    ) -> Binding<Bool> {
+        Binding {
+            hudExperimentalOuterPasses.contains(pass)
+        } set: { enabled in
+            if enabled {
+                hudExperimentalOuterPasses.insert(pass)
+            } else {
+                hudExperimentalOuterPasses.remove(pass)
+            }
+            pushHUDRenderExperiment()
+        }
+    }
+
+    private var hudNativeMarginBinding: Binding<Bool> {
+        Binding {
+            hudExperimentalMarginWidth == nil
+        } set: { usesNativeMargin in
+            if usesNativeMargin {
+                hudExperimentalMarginWidth = nil
+            } else {
+                hudExperimentalMarginWidth = estimatedHUDNativeMarginWidth
+            }
+            pushHUDRenderExperiment()
+        }
+    }
+
+    private var hudExperimentalMarginWidthBinding: Binding<Double> {
+        Binding {
+            hudExperimentalMarginWidth ?? estimatedHUDNativeMarginWidth
+        } set: { value in
+            hudExperimentalMarginWidth = value
+            pushHUDRenderExperiment()
+        }
+    }
+
+    private var estimatedHUDNativeMarginWidth: Double {
+        if let hudPanelController {
+            return max(
+                0,
+                Double(hudPanelController.nativeRequiredWindowInset - 1)
+            )
+        }
+        return max(16, 0.35 * min(hudContentWidth, hudContentHeight))
+    }
+
+    private var hudRenderExperimentSummary: String {
+        let disabled: [String] = [
+            hudExperimentalOuterPasses.contains(.shadow) ? nil : "Shadow",
+            hudExperimentalOuterPasses.contains(.ringShadow) ? nil : "Ring",
+            hudExperimentalOuterPasses.contains(.bleed) ? nil : "Bleed",
+            hudExperimentalOuterPasses.contains(.outerRefraction) ? nil : "Outer",
+        ].compactMap { $0 }
+        let passes = disabled.isEmpty
+            ? "passes: all"
+            : "passes: −" + disabled.joined(separator: ",")
+        let margin = hudExperimentalMarginWidth.map {
+            String(format: "marginWidth: %.0fpt", $0)
+        } ?? "marginWidth: native"
+        let inset = hudPanelController.map {
+            String(format: "window room: %.0fpt", $0.currentInset)
+        } ?? "window room: HUD hidden"
+        return [passes, margin, inset].joined(separator: " · ")
+    }
+
+    private func pushHUDRenderExperiment() {
+        hudPanelController?.setRenderExperiment(
+            outerPasses: hudExperimentalOuterPasses,
+            marginWidth: hudExperimentalMarginWidth.map(CGFloat.init)
+        )
     }
 
     private func pushHUDContentSize() {

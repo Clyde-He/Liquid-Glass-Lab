@@ -157,6 +157,13 @@ struct GlassLabView: View {
     @State var tintLockTask: Task<Void, Never>?
     @State var hudContentWidth = 320.0
     @State var hudContentHeight = 120.0
+    @State var hudRenderExperimentExpanded = false
+    @State var hudExperimentalOuterPasses: AdjustableGlassOuterPasses = [
+        .ringShadow,
+        .bleed,
+        .outerRefraction,
+    ]
+    @State var hudExperimentalMarginWidth: Double? = 0
 
     var body: some View {
         labForm
