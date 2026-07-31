@@ -180,6 +180,7 @@ private final class ConsumerDemoAppDelegate:
     private let frameMonitor = FrameCadenceMonitor()
     private var hudContentSize = CGSize(width: 320, height: 120)
     private var hudCornerRadius: CGFloat = 24
+    private var isLayingOutHUDPanel = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let controlWindow = buildControlWindow()
@@ -192,7 +193,10 @@ private final class ConsumerDemoAppDelegate:
             self?.render(status: status)
         }
         glassView.onRequiredWindowInsetChange = { [weak self] _ in
-            self?.layoutHUDPanel()
+            guard let self else { return }
+            guard !self.isLayingOutHUDPanel else { return }
+            self.layoutHUDPanel()
+            self.updateHUDDetail()
         }
 
         layoutHUDPanel()
@@ -448,12 +452,21 @@ private final class ConsumerDemoAppDelegate:
     }
 
     private func layoutHUDPanel() {
-        guard let panel = hudPanel, let glass = glassView else { return }
+        guard !isLayingOutHUDPanel,
+              let panel = hudPanel,
+              let glass = glassView
+        else { return }
+        isLayingOutHUDPanel = true
+        defer { isLayingOutHUDPanel = false }
+
         let contentSize = hudContentSize
         let previousVisualOrigin = NSPoint(
             x: panel.frame.minX + glass.frame.minX,
             y: panel.frame.minY + glass.frame.minY
         )
+        glass.setFrameSize(contentSize)
+        glass.needsLayout = true
+        glass.layoutSubtreeIfNeeded()
         let inset = glass.requiredWindowInset
         let total = CGSize(
             width: contentSize.width + inset * 2,
@@ -485,27 +498,56 @@ private final class ConsumerDemoAppDelegate:
     private func positionHUDPanel() {
         guard let panel = hudPanel,
               let glass = glassView,
-              let controlWindow
+              let controlWindow,
+              let screen = controlWindow.screen ?? NSScreen.main
         else { return }
         let contentSize = hudContentSize
         let inset = glass.requiredWindowInset
-        let visualOrigin: NSPoint
-        if placementControl.selectedSegment == 1,
-           let screen = controlWindow.screen ?? NSScreen.main {
-            visualOrigin = NSPoint(
+        let candidateOrigin: NSPoint
+        if placementControl.selectedSegment == 1 {
+            candidateOrigin = NSPoint(
                 x: screen.visibleFrame.midX - contentSize.width / 2,
                 y: screen.visibleFrame.maxY - contentSize.height - 12
             )
         } else {
-            visualOrigin = NSPoint(
-                x: controlWindow.frame.maxX + 16,
+            let rightX = controlWindow.frame.maxX + 16
+            let leftX = controlWindow.frame.minX - contentSize.width - 16
+            let fitsOnRight = rightX + contentSize.width
+                <= screen.visibleFrame.maxX
+            let x = fitsOnRight ? rightX : leftX
+            candidateOrigin = NSPoint(
+                x: x,
                 y: controlWindow.frame.midY - contentSize.height / 2
             )
         }
+        let visualOrigin = clampedVisualOrigin(
+            candidateOrigin,
+            contentSize: contentSize,
+            visibleFrame: screen.visibleFrame
+        )
         panel.setFrameOrigin(NSPoint(
             x: visualOrigin.x - inset,
             y: visualOrigin.y - inset
         ))
+    }
+
+    private func clampedVisualOrigin(
+        _ origin: NSPoint,
+        contentSize: CGSize,
+        visibleFrame: NSRect
+    ) -> NSPoint {
+        let maximumX = max(
+            visibleFrame.minX,
+            visibleFrame.maxX - contentSize.width
+        )
+        let maximumY = max(
+            visibleFrame.minY,
+            visibleFrame.maxY - contentSize.height
+        )
+        return NSPoint(
+            x: min(max(origin.x, visibleFrame.minX), maximumX),
+            y: min(max(origin.y, visibleFrame.minY), maximumY)
+        )
     }
 
     private func labeledRow(_ title: String, _ control: NSView) -> NSView {
@@ -604,6 +646,13 @@ private final class ConsumerDemoAppDelegate:
             glassView.hasOuterShadow = outerShadowToggle.state == .on
         }
 
+        layoutHUDPanel()
+        updateHUDDetail()
+        render(status: glassView.status)
+    }
+
+    private func updateHUDDetail() {
+        guard let glassView else { return }
         let tint = tintToggle.state == .on ? "Tint" : "No Tint"
         let shadow = outerShadowToggle.state == .on
             ? "Outer Shadow"
@@ -620,10 +669,8 @@ private final class ConsumerDemoAppDelegate:
                 hudCornerRadius
             ),
             String(format: "Inset %.0f", glassView.requiredWindowInset),
-            String(format: "G %.2f", visibility),
+            String(format: "G %.2f", visibilitySlider.doubleValue),
         ].joined(separator: " · ")
-        layoutHUDPanel()
-        render(status: glassView.status)
     }
 
     private func updateGeometryConfiguration() {
