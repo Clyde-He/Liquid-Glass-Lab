@@ -40,7 +40,7 @@ right vocabulary:
 
 | API | Meaning |
 |---|---|
-| `contentView`, `cornerRadius`, `effectIsInteractive` | Native AppKit behavior |
+| `contentView`, `cornerRadius` | Native AppKit behavior |
 | `style` | Native `.regular` / `.clear` style |
 | `tintColor` | Native property name backed by verified Tint installation |
 | `appearance` | `nil` follows the system; an override pins Light or Dark |

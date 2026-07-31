@@ -117,6 +117,30 @@ private final class ConsumerDemoAppDelegate:
         action: nil
     )
     private let visibilityValue = NSTextField(labelWithString: "1.00")
+    private let widthSlider = NSSlider(
+        value: 320,
+        minValue: 160,
+        maxValue: 640,
+        target: nil,
+        action: nil
+    )
+    private let widthValue = NSTextField(labelWithString: "320")
+    private let heightSlider = NSSlider(
+        value: 120,
+        minValue: 64,
+        maxValue: 320,
+        target: nil,
+        action: nil
+    )
+    private let heightValue = NSTextField(labelWithString: "120")
+    private let cornerRadiusSlider = NSSlider(
+        value: 24,
+        minValue: 0,
+        maxValue: 60,
+        target: nil,
+        action: nil
+    )
+    private let cornerRadiusValue = NSTextField(labelWithString: "24")
     private let tintToggle = NSButton(
         checkboxWithTitle: "Use Tint",
         target: nil,
@@ -154,6 +178,8 @@ private final class ConsumerDemoAppDelegate:
     private var hudPanel: ConsumerHUDPanel?
     private weak var glassView: AdjustableGlassEffectView?
     private let frameMonitor = FrameCadenceMonitor()
+    private var hudContentSize = CGSize(width: 320, height: 120)
+    private var hudCornerRadius: CGFloat = 24
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let controlWindow = buildControlWindow()
@@ -206,7 +232,14 @@ private final class ConsumerDemoAppDelegate:
         variantControl.selectedSegment = 0
         emphasisControl.selectedSegment = 0
         appearanceControl.selectedSegment = 0
-        visibilitySlider.isContinuous = true
+        for slider in [
+            visibilitySlider,
+            widthSlider,
+            heightSlider,
+            cornerRadiusSlider,
+        ] {
+            slider.isContinuous = true
+        }
         outerShadowToggle.state = .off
         panelLevelControl.selectedSegment = 1
         placementControl.selectedSegment = 0
@@ -228,6 +261,9 @@ private final class ConsumerDemoAppDelegate:
             emphasisControl,
             appearanceControl,
             visibilitySlider,
+            widthSlider,
+            heightSlider,
+            cornerRadiusSlider,
             tintToggle,
             tintWell,
             outerShadowToggle,
@@ -247,6 +283,13 @@ private final class ConsumerDemoAppDelegate:
         visibilityRow.spacing = 10
         visibilityValue.alignment = .right
         visibilityValue.widthAnchor.constraint(equalToConstant: 42).isActive = true
+
+        let widthRow = sliderRow(widthSlider, value: widthValue)
+        let heightRow = sliderRow(heightSlider, value: heightValue)
+        let cornerRadiusRow = sliderRow(
+            cornerRadiusSlider,
+            value: cornerRadiusValue
+        )
 
         let tintRow = NSStackView(views: [tintToggle, tintWell])
         tintRow.orientation = .horizontal
@@ -280,6 +323,9 @@ private final class ConsumerDemoAppDelegate:
             labeledRow("Appearance", appearanceControl),
             labeledRow("Visibility", visibilityRow),
             labeledRow("Tint", tintRow),
+            labeledRow("Width", widthRow),
+            labeledRow("Height", heightRow),
+            labeledRow("Corner Radius", cornerRadiusRow),
             separator(),
             labeledRow("Glass", outerShadowToggle),
             labeledRow("Window", windowRow),
@@ -305,6 +351,9 @@ private final class ConsumerDemoAppDelegate:
             emphasisControl.widthAnchor.constraint(equalToConstant: 430),
             appearanceControl.widthAnchor.constraint(equalToConstant: 430),
             visibilityRow.widthAnchor.constraint(equalToConstant: 430),
+            widthRow.widthAnchor.constraint(equalToConstant: 430),
+            heightRow.widthAnchor.constraint(equalToConstant: 430),
+            cornerRadiusRow.widthAnchor.constraint(equalToConstant: 430),
             windowRow.widthAnchor.constraint(equalToConstant: 430),
         ])
         return window
@@ -313,7 +362,7 @@ private final class ConsumerDemoAppDelegate:
     private func buildHUDPanel(
         relativeTo controlWindow: NSWindow
     ) -> (ConsumerHUDPanel, AdjustableGlassEffectView) {
-        let contentSize = CGSize(width: 320, height: 120)
+        let contentSize = hudContentSize
         let padding: CGFloat = 1
         let panelSize = CGSize(
             width: contentSize.width + padding * 2,
@@ -340,7 +389,7 @@ private final class ConsumerDemoAppDelegate:
             contentSize: contentSize,
             inset: padding
         )
-        container.cornerRadius = 24
+        container.cornerRadius = hudCornerRadius
         let glass = AdjustableGlassEffectView(
             referenceWindow: controlWindow,
             frame: NSRect(
@@ -350,11 +399,12 @@ private final class ConsumerDemoAppDelegate:
                 height: contentSize.height
             )
         )
-        glass.cornerRadius = 24
+        glass.cornerRadius = hudCornerRadius
 
         let hudContent = NSView(
             frame: NSRect(origin: .zero, size: contentSize)
         )
+        hudContent.autoresizingMask = [.width, .height]
         let title = NSTextField(labelWithString: "Product HUD")
         title.font = .systemFont(ofSize: 16, weight: .semibold)
         title.alignment = .center
@@ -364,6 +414,7 @@ private final class ConsumerDemoAppDelegate:
             width: contentSize.width,
             height: 22
         )
+        title.autoresizingMask = [.width, .minYMargin, .maxYMargin]
         hudDetailLabel.font = .monospacedSystemFont(
             ofSize: 11,
             weight: .regular
@@ -376,6 +427,11 @@ private final class ConsumerDemoAppDelegate:
             width: contentSize.width,
             height: 18
         )
+        hudDetailLabel.autoresizingMask = [
+            .width,
+            .minYMargin,
+            .maxYMargin,
+        ]
 
         hudContent.addSubview(title)
         hudContent.addSubview(hudDetailLabel)
@@ -393,7 +449,7 @@ private final class ConsumerDemoAppDelegate:
 
     private func layoutHUDPanel() {
         guard let panel = hudPanel, let glass = glassView else { return }
-        let contentSize = CGSize(width: 320, height: 120)
+        let contentSize = hudContentSize
         let previousVisualOrigin = NSPoint(
             x: panel.frame.minX + glass.frame.minX,
             y: panel.frame.minY + glass.frame.minY
@@ -431,7 +487,7 @@ private final class ConsumerDemoAppDelegate:
               let glass = glassView,
               let controlWindow
         else { return }
-        let contentSize = CGSize(width: 320, height: 120)
+        let contentSize = hudContentSize
         let inset = glass.requiredWindowInset
         let visualOrigin: NSPoint
         if placementControl.selectedSegment == 1,
@@ -463,6 +519,18 @@ private final class ConsumerDemoAppDelegate:
         return row
     }
 
+    private func sliderRow(
+        _ slider: NSSlider,
+        value: NSTextField
+    ) -> NSView {
+        value.alignment = .right
+        value.widthAnchor.constraint(equalToConstant: 42).isActive = true
+        let row = NSStackView(views: [slider, value])
+        row.orientation = .horizontal
+        row.spacing = 10
+        return row
+    }
+
     private func separator() -> NSView {
         let line = NSBox()
         line.boxType = .separator
@@ -473,8 +541,10 @@ private final class ConsumerDemoAppDelegate:
     @objc private func controlChanged(_ sender: Any?) {
         tintWell.isEnabled = tintToggle.state == .on
         applyConfiguration()
-        if let control = sender as? NSSegmentedControl,
-           control === placementControl {
+        if let control = sender as? NSControl,
+           control === placementControl
+            || control === widthSlider
+            || control === heightSlider {
             positionHUDPanel()
         }
     }
@@ -497,14 +567,20 @@ private final class ConsumerDemoAppDelegate:
 
     private func applyConfiguration() {
         guard let glassView else { return }
+        updateGeometryConfiguration()
         let visibility = visibilitySlider.doubleValue
         visibilityValue.stringValue = String(format: "%.2f", visibility)
         hudPanel?.level = panelLevelControl.selectedSegment == 0
             ? .normal
             : .floating
         hudPanel?.hasShadow = panelShadowToggle.state == .on
+        if let container = hudPanel?.contentView
+            as? ConsumerHUDDragContainerView {
+            container.cornerRadius = hudCornerRadius
+        }
 
         glassView.performConfigurationUpdates {
+            glassView.cornerRadius = hudCornerRadius
             glassView.style = variantControl.selectedSegment == 1
                 ? .clear
                 : .regular
@@ -537,11 +613,38 @@ private final class ConsumerDemoAppDelegate:
             emphasisControl.selectedSegment == 1 ? "Muted" : "Normal",
             tint,
             shadow,
+            String(
+                format: "%.0f×%.0f R%.0f",
+                hudContentSize.width,
+                hudContentSize.height,
+                hudCornerRadius
+            ),
             String(format: "Inset %.0f", glassView.requiredWindowInset),
             String(format: "G %.2f", visibility),
         ].joined(separator: " · ")
         layoutHUDPanel()
         render(status: glassView.status)
+    }
+
+    private func updateGeometryConfiguration() {
+        let width = CGFloat(widthSlider.doubleValue.rounded())
+        let height = CGFloat(heightSlider.doubleValue.rounded())
+        hudContentSize = CGSize(width: width, height: height)
+
+        let maximumCornerRadius = min(width, height) / 2
+        cornerRadiusSlider.maxValue = Double(maximumCornerRadius)
+        let cornerRadius = min(
+            CGFloat(cornerRadiusSlider.doubleValue.rounded()),
+            maximumCornerRadius
+        )
+        hudCornerRadius = cornerRadius
+
+        widthSlider.doubleValue = Double(width)
+        heightSlider.doubleValue = Double(height)
+        cornerRadiusSlider.doubleValue = Double(cornerRadius)
+        widthValue.stringValue = String(format: "%.0f", width)
+        heightValue.stringValue = String(format: "%.0f", height)
+        cornerRadiusValue.stringValue = String(format: "%.0f", cornerRadius)
     }
 
     private func render(status: AdjustableGlassEffectView.Status) {
