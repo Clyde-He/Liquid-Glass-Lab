@@ -139,7 +139,7 @@ final class ControllerConfigurationTests: XCTestCase {
     }
 
     @MainActor
-    func testViewControllerOwnedWindowRequiresExplicitReferenceView() {
+    func testViewControllerOwnedWindowAcceptsReferenceViewBeforeAttachment() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
             styleMask: [.titled],
@@ -156,13 +156,19 @@ final class ControllerConfigurationTests: XCTestCase {
         ))
 
         let anchor = NSView(frame: .zero)
-        controller.view.addSubview(anchor)
         let glass = AdjustableGlassEffectView(referenceWindow: window)
         XCTAssertTrue(glass.responds(
             to: NSSelectorFromString("setReferenceView:")
         ))
         glass.setValue(anchor, forKey: "referenceView")
         XCTAssertTrue(glass.referenceView === anchor)
+        XCTAssertTrue(AdjustableGlassEffectView.resolveReferenceView(
+            referenceWindow: window,
+            referenceView: glass.referenceView
+        ) === anchor)
+
+        controller.view.addSubview(anchor)
+        XCTAssertTrue(anchor.window === window)
         XCTAssertTrue(AdjustableGlassEffectView.resolveReferenceView(
             referenceWindow: window,
             referenceView: glass.referenceView

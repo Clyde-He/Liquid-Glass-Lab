@@ -1522,9 +1522,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     ) -> NSView? {
         guard let referenceWindow else { return nil }
         if let referenceView {
-            return referenceView.window === referenceWindow
-                ? referenceView
-                : nil
+            return referenceView
         }
         guard referenceWindow.contentViewController == nil else { return nil }
         return referenceWindow.contentView

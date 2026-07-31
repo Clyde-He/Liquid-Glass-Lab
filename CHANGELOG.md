@@ -8,6 +8,12 @@ those changes will be called out explicitly here.
 
 ## [Unreleased]
 
+### Changed
+
+- Runtime calibration and wider-gamut Tint now require an explicit
+  `referenceView` when the reference window has a `contentViewController`;
+  controller-owned content roots are no longer used as implicit probe hosts.
+
 ## [0.1.0] - 2026-07-31
 
 ### Added
