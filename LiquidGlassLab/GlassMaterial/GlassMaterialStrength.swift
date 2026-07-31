@@ -24,7 +24,7 @@ import OSLog
 ///
 /// Endpoints are read from the live Recipe, so size, appearance, Regular/Clear,
 /// window participation, and subvariant are all followed automatically. Call
-/// `refresh()` after any layout pass or Recipe rebuild; `GlassMaterialEffectView`
+/// `refresh()` after any layout pass or Recipe rebuild; `AdjustableGlassEffectView`
 /// does that for you.
 ///
 /// To *stop* following the window's participation instead — render the Main-On
@@ -89,11 +89,29 @@ import OSLog
 /// `gated-blur-overshoots-by-its-saturation-deficit`.
 @MainActor
 final class GlassMaterialStrength {
+    enum FrozenAppearanceSelection: Equatable, Sendable {
+        case system
+        case light
+        case dark
+
+        func resolves(systemIsLight: Bool) -> Bool {
+            switch self {
+            case .system:
+                systemIsLight
+            case .light:
+                true
+            case .dark:
+                false
+            }
+        }
+    }
+
     private weak var glass: NSGlassEffectView?
     private var baseline: GlassMaterialBaseline?
     private var appliedValue: Double = 1
     private var lastWrittenFilterIdentity: ObjectIdentifier?
     private var frozenMainParticipation = true
+    private var frozenAppearanceSelection: FrozenAppearanceSelection = .system
     private var frozenReassertTask: Task<Void, Never>?
     private var preCommitObserver: CFRunLoopObserver?
     /// The shader vector the last frozen apply wrote, kept as the reassert
@@ -139,7 +157,7 @@ final class GlassMaterialStrength {
 
     /// Updates the controller's requested Tint without applying the complete
     /// frozen style. The product controller uses this immediately before the
-    /// narrow Tint restamp; public `materialTint` writes still take the ordinary
+    /// narrow Tint restamp; public `tintColor` writes still take the ordinary
     /// full apply path.
     fileprivate func stageTintColor(_ color: NSColor?) {
         isStagingTintColor = true
@@ -192,7 +210,9 @@ final class GlassMaterialStrength {
         for glass: NSGlassEffectView
     ) -> GlassMaterialStyleAtlas.Cell {
         GlassMaterialStyleAtlas.Cell(
-            isLightAppearance: Self.isLightAppearance(glass),
+            isLightAppearance: frozenAppearanceSelection.resolves(
+                systemIsLight: Self.isLightAppearance(glass)
+            ),
             isClear: Self.isClear(glass),
             hasMainParticipation: frozenMainParticipation
         )
@@ -294,16 +314,17 @@ final class GlassMaterialStrength {
     ///
     /// Participation is the frozen axis: `mainParticipation` selects which
     /// captured cells serve, independent of the window's real state.
-    /// Appearance and variant remain live — changing the view's
-    /// `NSAppearance` (or following the system for Auto) and switching
-    /// Regular/Clear select different atlas cells with no recapture — and
-    /// size follows by interpolating each cell's samples at the current
-    /// short side.
+    /// Appearance and variant remain selectable without recapture. A forced
+    /// Light/Dark selection addresses the corresponding atlas cell directly;
+    /// System follows the view's effective appearance. Regular/Clear still
+    /// follows the native style, and size follows by interpolating each cell's
+    /// samples at the current short side.
     @discardableResult
     public func freeze(
         atlas: GlassMaterialStyleAtlas,
         mainParticipation: Bool = true,
-        baseGeneration: Int? = nil
+        baseGeneration: Int? = nil,
+        appearanceSelection: FrozenAppearanceSelection = .system
     ) -> Bool {
         guard let glass,
               let environment = atlas.environment,
@@ -338,6 +359,7 @@ final class GlassMaterialStrength {
         frozenAtlas = atlas
         frozenBaseGeneration = baseGeneration
         frozenMainParticipation = mainParticipation
+        frozenAppearanceSelection = appearanceSelection
         baseline = nil
         lastWrittenFilterIdentity = nil
         installPreCommitObserver()
@@ -489,6 +511,7 @@ final class GlassMaterialStrength {
         lastFrozenColors = [:]
         lastFrozenTintMatrix = nil
         frozenAtlas = nil
+        frozenAppearanceSelection = .system
         refresh()
     }
 
@@ -506,6 +529,7 @@ final class GlassMaterialStrength {
         lastFrozenTintMatrix = nil
         baseline = nil
         frozenAtlas = nil
+        frozenAppearanceSelection = .system
         lastWrittenFilterIdentity = nil
     }
 
@@ -613,7 +637,9 @@ final class GlassMaterialStrength {
         on glass: NSGlassEffectView
     ) {
         let isClear = Self.isClear(glass)
-        let isLight = Self.isLightAppearance(glass)
+        let isLight = frozenAppearanceSelection.resolves(
+            systemIsLight: Self.isLightAppearance(glass)
+        )
         let cell = currentCell(for: glass)
         let shortSide = min(glass.bounds.width, glass.bounds.height)
         // Defensive only: freeze(atlas:) rejects an atlas that could miss a
@@ -1023,57 +1049,173 @@ final class GlassMaterialStrength {
     }
 }
 
-/// An `NSGlassEffectView` that keeps its strength controller refreshed across
-/// AppKit's own layout passes.
-///
-/// AppKit can replace the entire private filter/effect subtree after a resize
-/// or context change, and the replacement arrives with system values. Hooking
-/// the end of layout is what makes the authored strength the final writer.
+/// An `NSGlassEffectView` whose visual effect can be adjusted without exposing
+/// the calibration and frozen-material machinery that maintains it.
 @MainActor
-public final class GlassMaterialEffectView: NSGlassEffectView {
-    public enum MaterialStyle: Equatable, Sendable {
-        case regular
-        case clear
+public final class AdjustableGlassEffectView: NSGlassEffectView {
+    public enum EffectState: Equatable, Sendable {
+        case active
+        case inactive
+    }
+
+    public enum UnavailabilityReason: Equatable, Sendable {
+        case calibrationFailed(String)
+        case materialInstallationFailed
+        case tintResolutionFailed
+    }
+
+    public enum Status: Equatable, Sendable {
+        case idle
+        case waitingForReferenceWindow
+        case preparing
+        case ready
+        case unavailable(UnavailabilityReason)
+    }
+
+    /// The ordinary app window whose verified material is held on this view.
+    ///
+    /// A nonactivating HUD cannot become main or key itself, so readiness is
+    /// derived from this reference window.
+    public private(set) weak var referenceWindow: NSWindow?
+
+    /// Product-facing strength in the closed range `0...1`.
+    public var effectAmount: CGFloat {
+        get {
+            if let controller = effectController {
+                return CGFloat(controller.configuration.visibility)
+            }
+            return CGFloat(materialStrength.value)
+        }
+        set {
+            let clamped = min(max(newValue, 0), 1)
+            guard let controller = effectController else {
+                materialStrength.value = Double(clamped)
+                return
+            }
+            controller.configuration.visibility = Double(clamped)
+        }
+    }
+
+    /// Selects the verified active or inactive material independently of the
+    /// HUD window's own main/key participation.
+    public var effectState: EffectState = .active {
+        didSet {
+            guard effectState != oldValue,
+                  let controller = effectController
+            else { return }
+            controller.configuration.emphasis = effectState == .active
+                ? .normal
+                : .muted
+        }
+    }
+
+    public private(set) var status: Status = .idle {
+        didSet {
+            guard status != oldValue else { return }
+            onStatusChange?(status)
+        }
+    }
+
+    public var onStatusChange: ((Status) -> Void)?
+
+    /// Creates an adjustable glass view tied to the app window that provides
+    /// its verified material context.
+    public init(
+        referenceWindow: NSWindow,
+        frame frameRect: NSRect = .zero
+    ) {
+        self.referenceWindow = referenceWindow
+        super.init(frame: frameRect)
+        rebuildEffectController()
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+    }
+
+    @available(*, unavailable, message: "Use init(referenceWindow:frame:)")
+    required init?(coder: NSCoder) {
+        fatalError("Use init(referenceWindow:frame:)")
+    }
+
+    isolated deinit {
+        effectController?.invalidate()
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    /// Rechecks cached or runtime readiness after the reference window or
+    /// display environment changes.
+    public func prepareIfNeeded() {
+        if effectController == nil, referenceWindow != nil {
+            rebuildEffectController()
+        }
+        effectController?.ensureReady()
     }
 
     private(set) lazy var materialStrength = GlassMaterialStrength(glass: self)
 
     private var isRefreshing = false
+    private var isApplyingControlledConfiguration = false
+    private var requestedTintColor: NSColor?
+    private var effectController: GlassEffectController?
+
     /// Internal product-controller hook. `NSView` has no did-move-to-window
     /// notification a separate owner can reliably observe.
     var materialWindowDidChange: (() -> Void)?
 
-    /// Product-facing discrete customization. Switching style selects the
-    /// already verified Main-On atlas cell; it never starts a calibration.
-    public var materialStyle: MaterialStyle = .regular {
+    override public var style: NSGlassEffectView.Style {
         didSet {
-            guard materialStyle != oldValue else { return }
-            GlassMaterialAccess.setVariant(
-                materialStyle == .clear ? 2 : 1,
-                on: self
-            )
+            guard style != oldValue else { return }
             materialStrength.refresh()
+            guard !isApplyingControlledConfiguration,
+                  let controller = effectController
+            else { return }
+            controller.configuration.variant = style == .clear
+                ? .clear
+                : .regular
         }
     }
 
-    /// Product-facing continuous glass visibility (`G`), not view opacity.
-    public var materialVisibility: Double {
-        get { materialStrength.value }
-        set { materialStrength.value = newValue }
+    override public var appearance: NSAppearance? {
+        didSet {
+            guard appearance !== oldValue,
+                  !isApplyingControlledConfiguration,
+                  let controller = effectController
+            else { return }
+            controller.configuration.appearance =
+                Self.controlledAppearance(for: appearance)
+        }
     }
 
-    /// Keeps the public glass tint and the frozen material controller in sync.
-    public var materialTint: NSColor? {
-        get { tintColor }
+    override public var tintColor: NSColor? {
+        get { requestedTintColor }
         set {
-            tintColor = newValue
-            materialStrength.tintColor = newValue
+            requestedTintColor = newValue
+            guard let controller = effectController else {
+                super.tintColor = newValue
+                materialStrength.tintColor = newValue
+                return
+            }
+            controller.configuration.tint = newValue
         }
+    }
+
+    /// Applies native properties and continuous strength without feeding the
+    /// resulting writes back into the owning controller.
+    func applyControlledConfiguration(
+        style: NSGlassEffectView.Style,
+        amount: Double,
+        appearance: NSAppearance?
+    ) {
+        isApplyingControlledConfiguration = true
+        self.appearance = appearance
+        self.style = style
+        materialStrength.value = amount
+        isApplyingControlledConfiguration = false
     }
 
     /// Separates Tint-branch materialization from the frozen writer's
-    /// controlled color. This avoids the public setter's complete style apply
-    /// when the product controller is about to write only the Tint matrix.
+    /// controlled color.
     ///
     /// The native color is pinned by RGB: assigning `tintColor` makes the
     /// system re-resolve the Tint pass and rewrite its matrix at commit, so
@@ -1087,10 +1229,75 @@ public final class GlassMaterialEffectView: NSGlassEffectView {
         nativeColor: NSColor?,
         controlledColor: NSColor?
     ) {
-        if !Self.nativeTintAssignmentIsChurn(from: tintColor, to: nativeColor) {
-            tintColor = nativeColor
+        if !Self.nativeTintAssignmentIsChurn(
+            from: super.tintColor,
+            to: nativeColor
+        ) {
+            super.tintColor = nativeColor
         }
         materialStrength.stageTintColor(controlledColor)
+    }
+
+    private func rebuildEffectController() {
+        effectController?.invalidate()
+        effectController = nil
+
+        guard let referenceWindow else {
+            status = .idle
+            return
+        }
+
+        let controller = GlassEffectController(
+            hostWindow: referenceWindow,
+            configuration: .init(
+                variant: style == .clear ? .clear : .regular,
+                visibility: Double(effectAmount),
+                appearance: Self.controlledAppearance(for: appearance),
+                tint: requestedTintColor,
+                emphasis: effectState == .active ? .normal : .muted
+            )
+        )
+        status = .preparing
+        controller.onStatusChanged = { [weak self, weak controller] value in
+            guard let self, self.effectController === controller else { return }
+            self.status = Self.publicStatus(for: value)
+        }
+        effectController = controller
+        controller.attach(to: self)
+        status = Self.publicStatus(for: controller.status)
+    }
+
+    private static func controlledAppearance(
+        for appearance: NSAppearance?
+    ) -> GlassEffectController.Appearance {
+        guard let appearance else { return .system }
+        return appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? .dark
+            : .light
+    }
+
+    private static func publicStatus(
+        for status: GlassEffectController.Status
+    ) -> Status {
+        switch status {
+        case .idle:
+            .preparing
+        case .waitingForMainWindow:
+            .waitingForReferenceWindow
+        case .calibrating, .lockingTint:
+            .preparing
+        case .ready:
+            .ready
+        case let .fallback(reason):
+            switch reason {
+            case let .calibrationFailed(message):
+                .unavailable(.calibrationFailed(message))
+            case .frozenInstallFailed:
+                .unavailable(.materialInstallationFailed)
+            case .tintNotYetVerified:
+                .unavailable(.tintResolutionFailed)
+            }
+        }
     }
 
     /// True only for the assignments the pin exists to absorb: an opacity drag

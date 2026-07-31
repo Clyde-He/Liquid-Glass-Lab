@@ -1,7 +1,7 @@
-# GlassMaterial
+# AdjustableGlass
 
-A continuous `0...1` material strength for `NSGlassEffectView` — a replacement
-for `alphaValue` when you want "how much glass", not "how opaque".
+An `NSGlassEffectView` subclass with adjustable effect amount and deterministic
+active/inactive material state.
 
 `view.alphaValue = 0.5` fades the finished composite, destroying tint, blur,
 refraction, edge lighting, and contrast together. This coordinates the
@@ -9,42 +9,50 @@ underlying passes instead, so intermediate values still read as glass.
 
 ## Product integration
 
-Add this repository as a Swift Package and link the `GlassHUDMaterial` library.
-The product-facing surface is deliberately small:
-
-- `GlassMaterialEffectView`
-- `GlassHUDMaterialController`
-
-The product owns semantic choices; the controller owns packaged-catalog
-loading, app-scoped base calibration, synchronous macOS 27 Tint synthesis,
-legacy locking, retries, and fail-closed fallback:
+Add this repository as a Swift Package and link the `AdjustableGlass` product.
+The only public top-level type is `AdjustableGlassEffectView`; it privately owns
+catalog loading, calibration, Tint synthesis, material installation, retries,
+and fail-closed fallback.
 
 ```swift
 import AppKit
-import GlassHUDMaterial
+import AdjustableGlass
 
-let hudGlassView = GlassMaterialEffectView()
-let material = GlassHUDMaterialController(
-    hostWindow: settingsWindow,
-    configuration: .init(
-        variant: .clear,
-        visibility: 0.72,              // material G, not alphaValue
-        appearance: .system,           // or .light / .dark
-        tint: pickedColor,
-        emphasis: .normal              // verified Main-On
-    )
+let glassView = AdjustableGlassEffectView(
+    referenceWindow: settingsWindow
 )
-material.onStatusChanged = { status in
-    // .ready / .calibrating / .waitingForMainWindow / .fallback
-}
-material.attach(to: hudGlassView)
+glassView.cornerRadius = 24
+glassView.style = .clear
+glassView.effectAmount = 0.72       // effect strength, not alphaValue
+glassView.appearance = nil          // system; or an NSAppearance override
+glassView.tintColor = pickedColor
+glassView.effectState = .active     // or .inactive
 
-// Deterministic product switches; neither follows HUD focus.
-material.configuration.emphasis = .muted  // paired, verified Main-Off
-material.configuration.variant = .regular
+glassView.onStatusChange = { status in
+    // .idle / .waitingForReferenceWindow / .preparing / .ready
+    // / .unavailable(reason)
+}
 ```
 
-Keep the controller alive for as long as the HUD is alive. The packaged
+The API intentionally follows `NSGlassEffectView` where AppKit already has the
+right vocabulary:
+
+| API | Meaning |
+|---|---|
+| `contentView`, `cornerRadius`, `effectIsInteractive` | Native AppKit behavior |
+| `style` | Native `.regular` / `.clear` style |
+| `tintColor` | Native property name backed by verified Tint installation |
+| `appearance` | `nil` follows the system; an override pins Light or Dark |
+| `effectAmount` | Added continuous glass amount in `0...1` |
+| `effectState` | Added deterministic `.active` / `.inactive` material |
+| `referenceWindow` | Read-only ordinary app window used for verification |
+| `status`, `onStatusChange`, `prepareIfNeeded()` | Readiness and retry surface |
+
+The `referenceWindow` must be an ordinary window that can genuinely become main
+or key, such as Settings or the app's primary window. The rendered glass can
+live in a nonactivating HUD panel and never become main or key itself.
+
+The packaged
 `glass-macos-<major>.json` is discovered from the Swift Package resource bundle
 automatically. On the certified majors (macOS 26 and 27), arbitrary in-gamut
 Tint colors are synthesized synchronously into an in-memory overlay: changing
@@ -53,7 +61,7 @@ calibration and unsupported-major Tint fallback data may still be cached under
 the consumer app's Caches directory; the product does not supply or coordinate
 JSON files.
 
-`normal` and `muted` are product semantics, not trusted labels in a JSON file.
+`active` and `inactive` are product semantics, not trusted labels in a JSON file.
 Both are installed from the same paired atlas transaction. On a certified
 major an in-gamut Tint is available in the same synchronous configuration
 update, resolved from the accepted closed form.
@@ -64,7 +72,7 @@ uncertified macOS major — is resolved by asking the system instead of
 extrapolating: the controller keeps a warm, invisible probe set in the host
 window plus a nonparticipating witness, sets the color, and reads the matrix
 back in one `CATransaction` commit. The first such color pays a one-time probe
-materialization (status reports `lockingTint`); every later color change costs
+materialization (`status` reports `preparing`); every later color change costs
 one commit. Extrapolating the closed form past its certified domain would
 render visibly wrong hues, so the domain guard is deliberate, not
 conservative — see `Documentation/TintParameterizationStudy.md`.
@@ -76,7 +84,7 @@ a successfully configured Tint. Commit-resolved overlays live on an in-memory
 Atlas copy and are never persisted. Commit resolution needs the host window to
 be genuinely main or key at the moment of the pick, which is true while a user
 picks a color in the app's own window; otherwise the color stays withheld and
-`status` reports `waitingForMainWindow`.
+`status` reports `waitingForReferenceWindow`.
 
 Run the independent `GlassHUDConsumerDemo` app scheme from Xcode. To compile it
 from the command line:
@@ -90,7 +98,14 @@ xcodebuild \
 ```
 
 That app target links the local package product and imports only
-`GlassHUDMaterial`; it has no Atlas or Capture API.
+`AdjustableGlass`; it has no Controller, Atlas, Strength, or Capture API. The
+demo's diagnostic display link is disabled by default so it does not create a
+permanent 60 fps workload. Set `ADJUSTABLE_GLASS_FRAME_MONITOR=1` in the scheme
+environment only when collecting `frames/s`, `longestGap`, and dropped-frame
+logs during a Tint drag.
+
+This package intentionally relies on private AppKit implementation details and
+is intended for Direct Distribution, not the Mac App Store.
 
 ## Lab internals
 
@@ -234,7 +249,7 @@ transaction verifies.
 `unfreeze()` returns to live behavior at the next rebuild. One caveat is
 inherited from an open research question: whether AppKit writes an
 intermediate Recipe during active/inactive transitions before the restamp runs
-(roadmap P2). `GlassMaterialEffectView` refreshes on window main/key,
+(roadmap P2). `AdjustableGlassEffectView` refreshes on window main/key,
 application activation, and appearance notifications, plus a follow-up
 main-actor job — this covers the common orderings but does not establish a
 deterministic final writer until that question is settled by capture.
@@ -242,7 +257,7 @@ deterministic final writer until that question is settled by capture.
 ## Take it
 
 Copy this directory. It has no dependency on the rest of Liquid Glass Lab —
-seven Swift files plus any certified JSON catalogs, AppKit only:
+eight Swift files plus any certified JSON catalogs, AppKit only:
 
 | File | Role |
 |---|---|
@@ -251,8 +266,8 @@ seven Swift files plus any certified JSON catalogs, AppKit only:
 | `GlassMaterialAtlas.swift` | The captured style atlas: appearance × variant × participation × size samples, Codable, interpolated |
 | `GlassMaterialAtlasCatalog.swift` | Discovers conventionally named `glass-macos-<major>.json` resources |
 | `GlassMaterialAtlasProvider.swift` | Product calibration: certified catalog loading, paired On/Off proof, atomic persistence, tint-on-pick |
-| `GlassMaterialStrength.swift` | The controller and the `NSGlassEffectView` subclass |
-| `GlassHUDMaterialController.swift` | Product API: configuration, Normal/Muted selection, provider ownership, retries, tint gating, status/fallback |
+| `GlassMaterialStrength.swift` | Internal strength writer plus the public `AdjustableGlassEffectView` |
+| `GlassEffectController.swift` | Internal ownership of active/inactive selection, provider, retries, Tint gating, and status |
 
 The current lab ships `Catalog/glass-macos-27.json`. Its raw JSON is about
 199 KB and compresses to about 6.5 KB; adding one catalog per macOS major is

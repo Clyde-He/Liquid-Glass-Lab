@@ -1,13 +1,18 @@
 import AppKit
-import GlassHUDMaterial
+import AdjustableGlass
 import OSLog
 
 /// Measures what the logs so far could not: whether frames actually reach the
 /// screen at display cadence while Tint is being dragged. A display link ticks
 /// once per delivered frame, so a drop shows up as a gap here even when every
-/// library-side step is fast.
+/// library-side step is fast. It is opt-in because leaving this diagnostic
+/// running also wakes the frozen-state sentinel every frame and makes an idle
+/// demo look like a high-energy product workload.
 @MainActor
 private final class FrameCadenceMonitor {
+    private static let optInEnvironmentKey =
+        "ADJUSTABLE_GLASS_FRAME_MONITOR"
+
     private let log = Logger(
         subsystem: "design.specos.glasshud",
         category: "frames"
@@ -20,6 +25,9 @@ private final class FrameCadenceMonitor {
     private var gapsOverTwoFrames = 0
 
     func start(on view: NSView) {
+        guard ProcessInfo.processInfo.environment[
+            Self.optInEnvironmentKey
+        ] == "1" else { return }
         let link = view.displayLink(
             target: self,
             selector: #selector(tick(_:))
@@ -122,7 +130,7 @@ private final class ConsumerDemoAppDelegate:
 
     private var controlWindow: NSWindow?
     private var hudPanel: ConsumerHUDPanel?
-    private var materialController: GlassHUDMaterialController?
+    private weak var glassView: AdjustableGlassEffectView?
     private let frameMonitor = FrameCadenceMonitor()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -130,15 +138,11 @@ private final class ConsumerDemoAppDelegate:
         let (hudPanel, glassView) = buildHUDPanel(relativeTo: controlWindow)
         self.controlWindow = controlWindow
         self.hudPanel = hudPanel
+        self.glassView = glassView
 
-        let controller = GlassHUDMaterialController(
-            hostWindow: controlWindow
-        )
-        controller.onStatusChanged = { [weak self] status in
+        glassView.onStatusChange = { [weak self] status in
             self?.render(status: status)
         }
-        controller.attach(to: glassView)
-        materialController = controller
 
         hudPanel.orderFront(nil)
         if let hudContent = hudPanel.contentView {
@@ -147,7 +151,7 @@ private final class ConsumerDemoAppDelegate:
         controlWindow.makeKeyAndOrderFront(nil)
         NSApp.activate()
         applyConfiguration()
-        render(status: controller.status)
+        render(status: glassView.status)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(
@@ -169,7 +173,7 @@ private final class ConsumerDemoAppDelegate:
 
         let title = NSTextField(
             wrappingLabelWithString:
-                "This target imports only GlassHUDMaterial. "
+                "This target imports only AdjustableGlass. "
                 + "It has no Capture or Atlas controls."
         )
         title.font = .systemFont(ofSize: 15, weight: .semibold)
@@ -264,7 +268,7 @@ private final class ConsumerDemoAppDelegate:
 
     private func buildHUDPanel(
         relativeTo controlWindow: NSWindow
-    ) -> (ConsumerHUDPanel, GlassMaterialEffectView) {
+    ) -> (ConsumerHUDPanel, AdjustableGlassEffectView) {
         let contentSize = CGSize(width: 320, height: 120)
         let padding: CGFloat = 64
         let panelSize = CGSize(
@@ -288,7 +292,8 @@ private final class ConsumerDemoAppDelegate:
         let container = NSView(
             frame: NSRect(origin: .zero, size: panelSize)
         )
-        let glass = GlassMaterialEffectView(
+        let glass = AdjustableGlassEffectView(
+            referenceWindow: controlWindow,
             frame: NSRect(
                 x: padding,
                 y: padding,
@@ -364,36 +369,37 @@ private final class ConsumerDemoAppDelegate:
         } else {
             hudPanel.orderFront(nil)
             sender.title = "Hide HUD"
-            materialController?.ensureReady()
+            glassView?.prepareIfNeeded()
         }
     }
 
     @objc private func retryReadiness(_ sender: Any?) {
-        materialController?.ensureReady()
+        glassView?.prepareIfNeeded()
     }
 
     private func applyConfiguration() {
-        guard let materialController else { return }
+        guard let glassView else { return }
         let visibility = visibilitySlider.doubleValue
         visibilityValue.stringValue = String(format: "%.2f", visibility)
 
-        materialController.configuration = .init(
-            variant: variantControl.selectedSegment == 1
-                ? .clear
-                : .regular,
-            visibility: visibility,
-            appearance: {
-                switch appearanceControl.selectedSegment {
-                case 1: .light
-                case 2: .dark
-                default: .system
-                }
-            }(),
-            tint: tintToggle.state == .on ? tintWell.color : nil,
-            emphasis: emphasisControl.selectedSegment == 1
-                ? .muted
-                : .normal
-        )
+        glassView.style = variantControl.selectedSegment == 1
+            ? .clear
+            : .regular
+        glassView.effectState = emphasisControl.selectedSegment == 1
+            ? .inactive
+            : .active
+        glassView.appearance = {
+            switch appearanceControl.selectedSegment {
+            case 1:
+                NSAppearance(named: .aqua)
+            case 2:
+                NSAppearance(named: .darkAqua)
+            default:
+                nil
+            }
+        }()
+        glassView.effectAmount = CGFloat(visibility)
+        glassView.tintColor = tintToggle.state == .on ? tintWell.color : nil
 
         let tint = tintToggle.state == .on ? "Tint" : "No Tint"
         hudDetailLabel.stringValue = [
@@ -404,31 +410,7 @@ private final class ConsumerDemoAppDelegate:
         ].joined(separator: " · ")
     }
 
-    private func tintCostSummary() -> String {
-        guard let d = materialController?.tintDiagnostics,
-              d.resolvedColorCount > 0 || d.warmUpMilliseconds != nil
-        else { return "" }
-        var parts: [String] = []
-        if let warm = d.warmUpMilliseconds {
-            parts.append(String(format: "warmUp %.0fms", warm))
-        }
-        if let latency = d.lastLatencyMilliseconds {
-            parts.append(String(format: "latency %.0fms", latency))
-        }
-        if let resolve = d.lastResolveMilliseconds {
-            parts.append(String(format: "commit %.1fms", resolve))
-        }
-        if let install = d.lastInstallMilliseconds {
-            parts.append(String(format: "install %.1fms", install))
-        }
-        parts.append("freeze \(d.fullFreezeCount)/restamp \(d.tintRestampCount)")
-        parts.append("attempts \(d.attemptsForLastColor)")
-        parts.append("resolved \(d.resolvedColorCount)")
-        parts.append("superseded \(d.supersededRequestCount)")
-        return "\n" + parts.joined(separator: " · ")
-    }
-
-    private func render(status: GlassHUDMaterialController.Status) {
+    private func render(status: AdjustableGlassEffectView.Status) {
         let hudState = hudPanel.map {
             $0.isMainWindow || $0.isKeyWindow ? "yes" : "no"
         } ?? "not attached"
@@ -436,37 +418,29 @@ private final class ConsumerDemoAppDelegate:
         switch status {
         case .idle:
             statusLabel.stringValue = prefix + "Status: idle"
-        case .waitingForMainWindow:
+        case .waitingForReferenceWindow:
             statusLabel.stringValue =
-                prefix + "Status: waiting for active host window"
-        case let .calibrating(completed, total):
+                prefix + "Status: waiting for active reference window"
+        case .preparing:
             statusLabel.stringValue =
-                prefix + "Status: calibrating \(completed)/\(total)"
-        case .lockingTint:
-            statusLabel.stringValue = prefix + "Status: locking selected tint"
-        case let .ready(source):
+                prefix + "Status: preparing"
+        case .ready:
+            statusLabel.stringValue = prefix + "Status: ready"
+        case let .unavailable(reason):
             statusLabel.stringValue =
-                prefix + "Status: ready · \(source.rawValue)"
-        case let .fallback(reason):
-            statusLabel.stringValue =
-                prefix + "Status: fallback · \(describe(reason))"
+                prefix + "Status: unavailable · \(describe(reason))"
         }
-        appendCost()
-    }
-
-    private func appendCost() {
-        statusLabel.stringValue += tintCostSummary()
     }
 
     private func describe(
-        _ reason: GlassHUDMaterialController.FallbackReason
+        _ reason: AdjustableGlassEffectView.UnavailabilityReason
     ) -> String {
         switch reason {
         case let .calibrationFailed(message):
             message
-        case .frozenInstallFailed:
+        case .materialInstallationFailed:
             "frozen material install failed"
-        case .tintNotYetVerified:
+        case .tintResolutionFailed:
             "tint is not verified yet"
         }
     }

@@ -681,7 +681,7 @@ final class GlassMaterialAtlasProvider {
     }
 
     /// Final transaction gate: install both participation branches on real
-    /// never-key, never-main `GlassMaterialEffectView` consumers for every
+    /// never-key, never-main `AdjustableGlassEffectView` consumers for every
     /// appearance × variant cell and require the complete readback sentinel.
     /// Capture proof and Normal/Muted consumer proof therefore fail together
     /// before disk.
@@ -694,10 +694,10 @@ final class GlassMaterialAtlasProvider {
               })
         else { return false }
 
-        var consumers: [(glass: GlassMaterialEffectView, hasMain: Bool)] = []
+        var consumers: [(glass: AdjustableGlassEffectView, hasMain: Bool)] = []
         for cell in Self.mainOnCells {
             for hasMain in [true, false] {
-                let glass = GlassMaterialEffectView(frame: NSRect(
+                let glass = AdjustableGlassEffectView(frame: NSRect(
                     x: 0,
                     y: 0,
                     width: probeWidth,
@@ -755,10 +755,10 @@ final class GlassMaterialAtlasProvider {
               })
         else { return false }
 
-        var consumers: [(glass: GlassMaterialEffectView, hasMain: Bool)] = []
+        var consumers: [(glass: AdjustableGlassEffectView, hasMain: Bool)] = []
         for cell in Self.mainOnCells {
             for hasMain in [true, false] {
-                let glass = GlassMaterialEffectView(frame: NSRect(
+                let glass = AdjustableGlassEffectView(frame: NSRect(
                     x: 0,
                     y: 0,
                     width: probeWidth,
@@ -768,7 +768,7 @@ final class GlassMaterialAtlasProvider {
                     named: cell.isLightAppearance ? .aqua : .darkAqua
                 )
                 GlassMaterialAccess.setVariant(cell.isClear ? 2 : 1, on: glass)
-                glass.materialTint = color
+                glass.tintColor = color
                 container.addSubview(glass)
                 consumers.append((glass, hasMain))
             }

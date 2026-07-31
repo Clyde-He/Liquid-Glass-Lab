@@ -265,7 +265,7 @@ delta 3, and maximum synthesized A/B RGB code delta 3. The per-row p99/RMS
 checks stayed within the calibrated compositor-noise envelope.
 
 Product runtime behavior is now switched on macOS 27.
-`GlassHUDMaterialController` synthesizes the selected Normal/Muted context
+`GlassEffectController` synthesizes the selected Normal/Muted context
 matrices synchronously into an in-memory Atlas copy. It does not mutate the
 Provider Atlas or persist a color-bound cache, and a legacy cached matrix
 cannot override the closed form.

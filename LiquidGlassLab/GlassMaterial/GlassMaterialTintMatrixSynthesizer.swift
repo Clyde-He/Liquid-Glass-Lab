@@ -1,6 +1,6 @@
 //
 //  GlassMaterialTintMatrixSynthesizer.swift
-//  GlassHUDMaterial
+//  AdjustableGlass
 //
 //  Closed-form macOS 27 synthesis for NSGlassEffectView's Tint-owned
 //  vibrantColorMatrix. The model is derived from the accepted full-grid,

@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 import XCTest
-@testable import GlassHUDMaterial
+@testable import AdjustableGlass
 
 final class CatalogTests: XCTestCase {
     @MainActor

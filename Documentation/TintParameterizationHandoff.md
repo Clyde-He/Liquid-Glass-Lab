@@ -441,7 +441,7 @@ simply converge close enough to the source to cross the analyzer's
   coefficients. They are final validation evidence.
 - Do not capture another color grid until the existing branch surfaces have
   been exhausted analytically.
-- Do not integrate a synthesis path into `GlassHUDMaterialController` before
+- Do not integrate a synthesis path into `GlassEffectController` before
   both matrix-space and rendered-output validation pass.
 - A failed candidate model must fall back to the existing runtime Tint-lock
   path; it must never silently produce an approximate certified matrix.
@@ -451,7 +451,7 @@ simply converge close enough to the source to cross the analyzer's
 ## Product Integration Status
 
 Both matrix-space and rendered-output acceptance pass on macOS 27, and
-`GlassHUDMaterialController` now uses the result:
+`GlassEffectController` now uses the result:
 
 1. On macOS 27, each configuration update synthesizes the four matrices needed
    by the selected Normal/Muted participation into an in-memory Atlas copy.
@@ -508,12 +508,12 @@ LiquidGlassLab/GlassLab/GlassLabBenchTintStudy.swift
 LiquidGlassLab/GlassLab/GlassLabTintParameterizationSweep.swift
 LiquidGlassLab/GlassLab/GlassLabTintRenderedAB.swift
 LiquidGlassLab/GlassLab/GlassLabView.swift
-LiquidGlassLab/GlassMaterial/GlassHUDMaterialController.swift
+LiquidGlassLab/GlassMaterial/GlassEffectController.swift
 LiquidGlassLab/GlassMaterial/GlassMaterialAtlas.swift
 LiquidGlassLab/GlassMaterial/GlassMaterialStrength.swift
 LiquidGlassLab/GlassMaterial/GlassMaterialTintMatrixSynthesizer.swift
 LiquidGlassLab/GlassMaterial/README.md
-Tests/GlassHUDMaterialTests/TintMatrixSynthesizerTests.swift
+Tests/AdjustableGlassTests/TintMatrixSynthesizerTests.swift
 ```
 
 At the time of this handoff update, these files are intentionally uncommitted.
