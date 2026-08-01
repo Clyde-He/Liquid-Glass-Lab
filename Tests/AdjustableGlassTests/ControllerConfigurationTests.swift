@@ -149,6 +149,28 @@ final class ControllerConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testUnresolvedTintAppliesOnlyWhenResolutionCannotTakeTheRequest() {
+        XCTAssertFalse(
+            GlassEffectController.tintPreflightRequiresApply(
+                tintIsReady: false,
+                hasPendingCommitRequest: true
+            )
+        )
+        XCTAssertTrue(
+            GlassEffectController.tintPreflightRequiresApply(
+                tintIsReady: false,
+                hasPendingCommitRequest: false
+            )
+        )
+        XCTAssertTrue(
+            GlassEffectController.tintPreflightRequiresApply(
+                tintIsReady: true,
+                hasPendingCommitRequest: false
+            )
+        )
+    }
+
+    @MainActor
     func testViewCanStartWithoutReferenceAndRebindWithoutReplacingContent() {
         let view = AdjustableGlassEffectView(
             frame: NSRect(x: 0, y: 0, width: 320, height: 120)

@@ -208,6 +208,16 @@ final class GlassEffectController {
             )
     }
 
+    /// An unresolved Tint may wait only when commit resolution actually
+    /// accepted a request. If no request was enqueued, applying is what hands
+    /// the held color and status machine back to the bounded legacy capture.
+    static func tintPreflightRequiresApply(
+        tintIsReady: Bool,
+        hasPendingCommitRequest: Bool
+    ) -> Bool {
+        tintIsReady || !hasPendingCommitRequest
+    }
+
     private(set) var status: Status = .idle {
         didSet {
             guard status != oldValue else { return }
@@ -582,6 +592,10 @@ final class GlassEffectController {
             // its own Tint readback; reserve the complete audit for full
             // installs and base-context changes.
             refreshStatus(acceptingSuccessfulTintRestamp: true)
+            glassView.materialStrength.requestFrozenStyleAuditAfterPreCommit {
+                [weak self] in
+                self?.refreshStatus()
+            }
             return
         }
         tintDiagnostics.fullFreezeCount += 1
@@ -914,11 +928,14 @@ final class GlassEffectController {
             let tintIsReady = configuration.tint == nil
                 || (atlasProvider.isPairedCoverageComplete
                     && requestedAtlas != nil)
+            shouldApply = Self.tintPreflightRequiresApply(
+                tintIsReady: tintIsReady,
+                hasPendingCommitRequest: pendingTintCommitRequest != nil
+            )
             if tintIsReady {
                 pendingTintCommitRequest = nil
                 pendingTintCommitRequestedAt = nil
                 tintCommitFailureCount = 0
-                shouldApply = true
             }
         }
         guard let request = pendingTintCommitRequest else {
@@ -929,6 +946,10 @@ final class GlassEffectController {
             return
         }
         guard let resolver = tintCommitResolver, resolver.canResolveNow else {
+            // A request gated on participation or warm-up has no work to do
+            // at display cadence. Recovery and warm-up completion already
+            // restart this link when resolution can make progress.
+            stopTintDisplayLink()
             return
         }
         let start = DispatchTime.now().uptimeNanoseconds
