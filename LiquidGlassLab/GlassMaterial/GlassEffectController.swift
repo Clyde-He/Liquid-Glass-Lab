@@ -168,6 +168,14 @@ final class GlassEffectController {
             if configuration.tint != nil, oldValue.tint == nil {
                 prepareTintCommitResolver()
             }
+            if Self.isTintOnlyChange(
+                from: oldValue,
+                to: configuration
+            ) {
+                scheduleTintPresentation()
+                return
+            }
+            pendingTintPresentation = false
             applyConfiguration(
                 allowsTintRestamp: !requiresFullMaterialInstall
             )
@@ -181,6 +189,33 @@ final class GlassEffectController {
         oldConfiguration.variant != newConfiguration.variant
             || oldConfiguration.appearance != newConfiguration.appearance
             || oldConfiguration.emphasis != newConfiguration.emphasis
+    }
+
+    /// Tint is the only continuously streamed configuration axis whose final
+    /// layer write is frame-coalesced. Base-material changes still apply
+    /// synchronously so geometry and participation never trail their controls.
+    static func isTintOnlyChange(
+        from oldConfiguration: Configuration,
+        to newConfiguration: Configuration
+    ) -> Bool {
+        oldConfiguration.variant == newConfiguration.variant
+            && oldConfiguration.visibility == newConfiguration.visibility
+            && oldConfiguration.appearance == newConfiguration.appearance
+            && oldConfiguration.emphasis == newConfiguration.emphasis
+            && !Self.colorsMatch(
+                oldConfiguration.tint,
+                newConfiguration.tint
+            )
+    }
+
+    /// An unresolved Tint may wait only when commit resolution actually
+    /// accepted a request. If no request was enqueued, applying is what hands
+    /// the held color and status machine back to the bounded legacy capture.
+    static func tintPreflightRequiresApply(
+        tintIsReady: Bool,
+        hasPendingCommitRequest: Bool
+    ) -> Bool {
+        tintIsReady || !hasPendingCommitRequest
     }
 
     private(set) var status: Status = .idle {
@@ -214,6 +249,11 @@ final class GlassEffectController {
         color: NSColor,
         sourceColor: GlassMaterialColorValue
     )?
+    /// The latest requested Tint has not yet been presented. Color-panel
+    /// events can arrive faster than display cadence; keeping one bit here
+    /// collapses every intermediate RGB/alpha value into the configuration
+    /// already stored above.
+    private var pendingTintPresentation = false
     /// A resolver that exhausted the bounded commit path stays disabled until
     /// the next participation recovery or Tint session. This prevents a color
     /// drag from recreating the same persistently failing resolver per RGB.
@@ -326,6 +366,7 @@ final class GlassEffectController {
         tintCommitResolver?.invalidate()
         tintCommitResolver = nil
         pendingTintCommitRequest = nil
+        pendingTintPresentation = false
         pendingTintCommitRequestedAt = nil
         tintCommitResolutionUnavailable = false
         tintCommitFailureCount = 0
@@ -450,8 +491,8 @@ final class GlassEffectController {
     // while `NSColorPanel` tracks a drag the main runloop runs in event-tracking
     // mode, where a `Task.sleep` continuation does not resume promptly, so
     // applications collapsed to roughly one per second and the color visibly
-    // dropped out. Configuration is therefore applied synchronously, and the
-    // per-application cost is kept small instead.
+    // dropped out. Base configuration is therefore applied synchronously;
+    // Tint-only changes use the display link registered in common modes.
     private func applyConfiguration(
         allowsTintRestamp: Bool = false
     ) {
@@ -480,7 +521,6 @@ final class GlassEffectController {
             pendingTintCommitRequest = nil
             pendingTintCommitRequestedAt = nil
             tintCommitFailureCount = 0
-            stopTintDisplayLink()
         }
 
         var installableAtlas = requestedAtlas
@@ -544,7 +584,18 @@ final class GlassEffectController {
                 )
             }
             installRetryTask?.cancel()
-            refreshStatus()
+            // AppKit can restamp the base Recipe immediately after a Tint
+            // matrix write. The pre-commit sentinel repairs that expected
+            // transient before presentation, but a synchronous full-style
+            // audit here observes the middle of the handoff and falsely
+            // reports frozenInstallFailed. The narrow write already proved
+            // its own Tint readback; reserve the complete audit for full
+            // installs and base-context changes.
+            refreshStatus(acceptingSuccessfulTintRestamp: true)
+            glassView.materialStrength.requestFrozenStyleAuditAfterPreCommit {
+                [weak self] in
+                self?.refreshStatus()
+            }
             return
         }
         tintDiagnostics.fullFreezeCount += 1
@@ -761,7 +812,7 @@ final class GlassEffectController {
             } else if self.hostParticipates {
                 self.fallBackFromTintCommitResolution()
             }
-            self.applyConfiguration(allowsTintRestamp: true)
+            self.scheduleTintPresentation()
         }
     }
 
@@ -834,6 +885,18 @@ final class GlassEffectController {
         startTintDisplayLink()
     }
 
+    /// All Tint sources share one presentation clock. Certified colors are
+    /// synthesized synchronously, cached RGB receives a new coefficient 18,
+    /// and unresolved colors enqueue commit resolution; none writes the live
+    /// destination more than once per displayed frame.
+    private func scheduleTintPresentation() {
+        if pendingTintPresentation {
+            tintDiagnostics.supersededRequestCount += 1
+        }
+        pendingTintPresentation = true
+        startTintDisplayLink()
+    }
+
     private func startTintDisplayLink() {
         guard tintDisplayLink == nil, let glassView else { return }
         let link = glassView.displayLink(
@@ -851,11 +914,42 @@ final class GlassEffectController {
     }
 
     @objc private func tintDisplayLinkFired(_ sender: CADisplayLink) {
+        var shouldApply = false
+        if pendingTintPresentation {
+            pendingTintPresentation = false
+            // Preflight is value-only: certified colors synthesize here and
+            // cached colors patch coefficient 18 here, while an unresolved
+            // color merely creates pendingTintCommitRequest. Do not touch the
+            // destination until the final Tint for this tick is known.
+            let requestedAtlas = resolvedTintAtlas(
+                for: configuration.tint,
+                emphasis: configuration.emphasis
+            )
+            let tintIsReady = configuration.tint == nil
+                || (atlasProvider.isPairedCoverageComplete
+                    && requestedAtlas != nil)
+            shouldApply = Self.tintPreflightRequiresApply(
+                tintIsReady: tintIsReady,
+                hasPendingCommitRequest: pendingTintCommitRequest != nil
+            )
+            if tintIsReady {
+                pendingTintCommitRequest = nil
+                pendingTintCommitRequestedAt = nil
+                tintCommitFailureCount = 0
+            }
+        }
         guard let request = pendingTintCommitRequest else {
-            stopTintDisplayLink()
+            if shouldApply {
+                applyConfiguration(allowsTintRestamp: true)
+            }
+            if !pendingTintPresentation { stopTintDisplayLink() }
             return
         }
         guard let resolver = tintCommitResolver, resolver.canResolveNow else {
+            // A request gated on participation or warm-up has no work to do
+            // at display cadence. Recovery and warm-up completion already
+            // restart this link when resolution can make progress.
+            stopTintDisplayLink()
             return
         }
         let start = DispatchTime.now().uptimeNanoseconds
@@ -895,6 +989,9 @@ final class GlassEffectController {
             pendingTintCommitRequest = nil
         }
         applyConfiguration(allowsTintRestamp: true)
+        if pendingTintCommitRequest == nil, !pendingTintPresentation {
+            stopTintDisplayLink()
+        }
     }
 
     /// Hands Tint to the bounded legacy path and disables this resolver
@@ -903,6 +1000,7 @@ final class GlassEffectController {
     private func fallBackFromTintCommitResolution() {
         tintCommitResolutionUnavailable = true
         pendingTintCommitRequest = nil
+        pendingTintPresentation = false
         pendingTintCommitRequestedAt = nil
         tintCommitFailureCount = 0
         stopTintDisplayLink()
@@ -1207,7 +1305,9 @@ final class GlassEffectController {
         }
     }
 
-    private func refreshStatus() {
+    private func refreshStatus(
+        acceptingSuccessfulTintRestamp: Bool = false
+    ) {
         guard glassView != nil else {
             status = .idle
             return
@@ -1243,9 +1343,13 @@ final class GlassEffectController {
             status = .calibrating(completed: completed, total: total)
         case .ready:
             guard let glassView else { return }
-            status = glassView.materialStrength.frozenStyleIsCurrentlyApplied
-                ? .ready(source: source)
-                : .fallback(.frozenInstallFailed)
+            if acceptingSuccessfulTintRestamp {
+                status = .ready(source: source)
+            } else {
+                status = glassView.materialStrength.frozenStyleIsCurrentlyApplied
+                    ? .ready(source: source)
+                    : .fallback(.frozenInstallFailed)
+            }
         case let .failed(message):
             status = .fallback(.calibrationFailed(message))
         }

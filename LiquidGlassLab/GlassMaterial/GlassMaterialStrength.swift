@@ -193,6 +193,11 @@ final class GlassMaterialStrength {
     private var frozenAppearanceSelection: FrozenAppearanceSelection = .system
     private var frozenReassertTask: Task<Void, Never>?
     private var preCommitObserver: CFRunLoopObserver?
+    /// A successful narrow Tint restamp is allowed to report ready before the
+    /// system's expected base-Recipe restamp has been repaired. Its strict
+    /// status audit is coalesced here and runs only after the pre-commit
+    /// sentinel has made the frozen payload the turn's final model state.
+    private var pendingPostReassertAudit: (() -> Void)?
     /// The shader vector the last frozen apply wrote, kept as the reassert
     /// sentinel's reference: margin and rim can both survive a system
     /// restamp untouched (a resize carries the rim over, and Clear samples a
@@ -579,8 +584,22 @@ final class GlassMaterialStrength {
             at: min(glass.bounds.width, glass.bounds.height)
         ) else { return }
         let sample = renderExperiment.applying(to: capturedSample)
-        if frozenStateHolds(sample, on: glass) { return }
-        apply()
+        if !frozenStateHolds(sample, on: glass) {
+            apply()
+        }
+        if let audit = pendingPostReassertAudit {
+            pendingPostReassertAudit = nil
+            audit()
+        }
+    }
+
+    /// Coalesces strict status checks behind the final frozen write of the
+    /// current run-loop turn. This preserves the ready-state invariant without
+    /// auditing the transient between AppKit's restamp and our correction.
+    func requestFrozenStyleAuditAfterPreCommit(
+        _ audit: @escaping () -> Void
+    ) {
+        pendingPostReassertAudit = audit
     }
 
     /// Returns to live-read behavior. The frozen values persist on the tree
@@ -589,6 +608,7 @@ final class GlassMaterialStrength {
     /// immediate true restore requires recreating the glass view.
     public func unfreeze() {
         removePreCommitObserver()
+        pendingPostReassertAudit = nil
         frozenReassertTask?.cancel()
         frozenReassertTask = nil
         lastFrozenNumbers = [:]
@@ -606,6 +626,7 @@ final class GlassMaterialStrength {
     /// and recreate the `NSGlassEffectView` for a true restore.
     public func invalidate() {
         removePreCommitObserver()
+        pendingPostReassertAudit = nil
         frozenReassertTask?.cancel()
         frozenReassertTask = nil
         lastFrozenNumbers = [:]
