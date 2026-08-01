@@ -8,6 +8,17 @@ those changes will be called out explicitly here.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-31
+
+### Fixed
+
+- Tint color and opacity updates now share one display-cadence presentation
+  path, preventing streamed opacity changes from racing AppKit's native Recipe
+  restamp and visibly flickering the frozen material.
+- Wider-gamut Tint resolution preserves its legacy-capture fallback, suspends
+  its display link while resolution is gated, and audits the frozen material
+  after the pre-commit reassertion instead of reporting transient failures.
+
 ## [0.2.0] - 2026-07-31
 
 ### Added
@@ -53,6 +64,7 @@ those changes will be called out explicitly here.
 - The implementation relies on private AppKit details and is intended for
   Direct Distribution, not the Mac App Store.
 
-[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.0...HEAD
+[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.1...HEAD
+[0.2.1]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/Clyde-He/Liquid-Glass-Lab/releases/tag/0.1.0
