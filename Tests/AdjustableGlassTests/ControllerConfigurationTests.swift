@@ -107,6 +107,48 @@ final class ControllerConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testOnlyTintChangesUseFrameCoalescedPresentation() {
+        let baseline = GlassEffectController.Configuration(
+            tint: NSColor(
+                srgbRed: 0.2,
+                green: 0.4,
+                blue: 0.8,
+                alpha: 0.3
+            )
+        )
+        var opacity = baseline
+        opacity.tint = baseline.tint?.withAlphaComponent(0.7)
+        var color = baseline
+        color.tint = NSColor(
+            srgbRed: 0.8,
+            green: 0.2,
+            blue: 0.4,
+            alpha: 0.3
+        )
+        var visibilityAndTint = opacity
+        visibilityAndTint.visibility = 0.5
+
+        XCTAssertTrue(
+            GlassEffectController.isTintOnlyChange(
+                from: baseline,
+                to: opacity
+            )
+        )
+        XCTAssertTrue(
+            GlassEffectController.isTintOnlyChange(
+                from: baseline,
+                to: color
+            )
+        )
+        XCTAssertFalse(
+            GlassEffectController.isTintOnlyChange(
+                from: baseline,
+                to: visibilityAndTint
+            )
+        )
+    }
+
+    @MainActor
     func testViewCanStartWithoutReferenceAndRebindWithoutReplacingContent() {
         let view = AdjustableGlassEffectView(
             frame: NSRect(x: 0, y: 0, width: 320, height: 120)
