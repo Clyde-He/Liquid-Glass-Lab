@@ -509,9 +509,9 @@ final class GlassEffectController {
         )
 
         // Fail closed for Tint: an unverified or hue-suppressed matrix is never
-        // presented as the requested color. In-gamut colors resolve from the
-        // certified closed form in this very update; a wider-gamut color needs
-        // one commit on the next runloop turn.
+        // presented as the requested color. Colors inside this major's
+        // certified domain resolve in this very update; an unknown gamut needs
+        // one legal-host commit on the next runloop turn.
         let requestedAtlas = resolvedTintAtlas(
             for: configuration.tint,
             emphasis: configuration.emphasis
@@ -701,9 +701,9 @@ final class GlassEffectController {
         ) {
             return resolved
         }
-        // The closed form does not cover this color (a wider-gamut pick leaves
-        // the certified extended-sRGB domain) or this OS major. Ask the system
-        // itself, synchronously, against warm probes.
+        // The closed form does not cover this color (it leaves the major's
+        // certified gamut) or this OS major. Ask the system itself,
+        // synchronously, against warm probes.
         return commitResolvedTintAtlas(
             for: color,
             emphasis: emphasis,
@@ -978,7 +978,7 @@ final class GlassEffectController {
         }
         let start = DispatchTime.now().uptimeNanoseconds
         tintDiagnostics.attemptsForLastColor += 1
-        guard let matrices = resolver.resolveMatrices(
+        guard let resolution = resolver.resolveMatrices(
             for: request.color,
             sourceColor: request.sourceColor
         ) else {
@@ -993,6 +993,7 @@ final class GlassEffectController {
             applyConfiguration(allowsTintRestamp: true)
             return
         }
+        let matrices = resolution.matrices
         tintDiagnostics.lastResolveMilliseconds = Self.milliseconds(since: start)
         tintDiagnostics.resolvedColorCount += 1
         tintCommitFailureCount = 0
@@ -1009,7 +1010,8 @@ final class GlassEffectController {
         storeCommitMatrices(matrices, for: key)
         if !atlasProvider.persistVerifiedTintMatrices(
             sourceColor: request.sourceColor,
-            matrices: matrices
+            matrices: matrices,
+            captureEnvironment: resolution.environment
         ) {
             GlassMaterialTintLog.signposts.notice(
                 "verified Tint overlay was not persisted; retaining session cache"

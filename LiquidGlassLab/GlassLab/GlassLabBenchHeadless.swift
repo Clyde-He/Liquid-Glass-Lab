@@ -148,12 +148,16 @@ extension GlassLabView {
         let tintSyncFlag = arguments.firstIndex(
             of: "--verify-tint-sync-resolution"
         )
+        let tintWideGamutFlag = arguments.firstIndex(
+            of: "--verify-tint-wide-gamut-model"
+        )
         let captureFlagIndices = [
             sizeFlag,
             resizeFlag,
             removalWarmupFlag,
             goldenFlag,
             atlasFlag,
+            tintWideGamutFlag,
             tintSyncFlag,
             tintRenderedABFlag,
             tintParameterizationHueFlag,
@@ -194,8 +198,13 @@ extension GlassLabView {
 
         var exitCode: Int32 = 0
         do {
-            if tintSyncFlag != nil {
-                let document = try await performTintSyncResolutionCheck()
+            if tintSyncFlag != nil || tintWideGamutFlag != nil {
+                let document: GlassLabTintSyncResolutionDocument
+                if tintWideGamutFlag != nil {
+                    document = try await performTintWideGamutModelCheck()
+                } else {
+                    document = try await performTintSyncResolutionCheck()
+                }
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                 let payload = try encoder.encode(document)

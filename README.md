@@ -88,8 +88,7 @@ Package:
 swift test
 xcodebuild \
   -project LiquidGlassLab.xcodeproj \
-  -scheme GlassHUDConsumerDemo \
-  -destination 'platform=macOS' \
+  -target GlassHUDConsumerDemo \
   build
 ```
 

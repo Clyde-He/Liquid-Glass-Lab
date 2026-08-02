@@ -258,8 +258,15 @@ function pastelEndpoint(source, isBright) {
   }
   return source.map((component) => {
     const hueFraction = (component - minimum) / chroma;
-    return targetLightness +
+    const provisional = targetLightness +
       chroma * chromaScale * (hueFraction - 0.5);
+    const lowerBound = isBright
+      ? (-5 / 12) * component
+      : (5 / 4) * component - 1 / 4;
+    const upperBound = isBright
+      ? (17 - 5 * component) / 12
+      : (5 / 4) * component;
+    return Math.min(Math.max(provisional, lowerBound), upperBound);
   });
 }
 

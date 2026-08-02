@@ -446,6 +446,7 @@ final class GlassMaterialAtlasProvider {
                 completion(false)
                 return
             }
+            candidate.environment = .current(for: self.hostWindow?.screen)
             self.atlas = candidate
             do {
                 try self.persist()
@@ -473,15 +474,26 @@ final class GlassMaterialAtlasProvider {
     @discardableResult
     func persistVerifiedTintMatrices(
         sourceColor: GlassMaterialColorValue,
-        matrices: [GlassMaterialStyleAtlas.Cell: [Float]]
+        matrices: [GlassMaterialStyleAtlas.Cell: [Float]],
+        captureEnvironment: GlassMaterialStyleAtlas.Environment
     ) -> Bool {
+        let currentEnvironment = GlassMaterialStyleAtlas.Environment.current(
+            for: hostWindow?.screen
+        )
         guard !isInvalidated,
               isPairedCoverageComplete,
-              let candidate = atlas.addingVerifiedTintMatrixSet(
+              captureEnvironment.isCompatible(with: currentEnvironment),
+              var candidate = atlas.addingVerifiedTintMatrixSet(
                   sourceColor: sourceColor,
                   matrices: matrices
               )
         else { return false }
+
+        // Scope the runtime overlay to the environment that produced the
+        // paired proof. A bundled base may carry an older diagnostic build or
+        // display signature while still matching the major-scoped admission
+        // contract; it must not become the overlay's provenance by accident.
+        candidate.environment = captureEnvironment
 
         do {
             try persist(candidate)

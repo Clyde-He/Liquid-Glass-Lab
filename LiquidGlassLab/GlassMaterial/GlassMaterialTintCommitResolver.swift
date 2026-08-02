@@ -3,8 +3,8 @@
 //  AdjustableGlass
 //
 //  Synchronous Tint resolution for colors the certified closed form does not
-//  cover — anything outside the extended-sRGB unit domain (a Display P3 or
-//  wider-gamut pick), or an OS major that has not been certified yet.
+//  cover — for example a gamut beyond Display P3 on macOS 27, P3 on macOS 26,
+//  or an OS major that has not been certified yet.
 //
 //  The accepted `Golden/macOS-26/tint-sync-resolution.json` evidence shows the
 //  system resolves the Tint matrix in-process at CA commit: on already
@@ -45,6 +45,11 @@ private final class GlassMaterialTintWitnessWindow: NSPanel {
 @available(macOS 26.0, *)
 @MainActor
 final class GlassMaterialTintCommitResolver {
+    struct Resolution {
+        var matrices: [GlassMaterialStyleAtlas.Cell: [Float]]
+        var environment: GlassMaterialStyleAtlas.Environment
+    }
+
     private struct ProbePair {
         var mainOnCell: GlassMaterialStyleAtlas.Cell
         var mainOn: NSGlassEffectView
@@ -174,7 +179,7 @@ final class GlassMaterialTintCommitResolver {
     func resolveMatrices(
         for color: NSColor,
         sourceColor: GlassMaterialColorValue
-    ) -> [GlassMaterialStyleAtlas.Cell: [Float]]? {
+    ) -> Resolution? {
         guard !pairs.isEmpty, isWarm else {
             refusals.probesCold += 1
             GlassMaterialTintLog.signposts.notice("resolve refused: probes cold")
@@ -280,7 +285,10 @@ final class GlassMaterialTintCommitResolver {
 
         lastResolvedMatrices = matrices
         lastResolvedSourceColor = sourceColor
-        return matrices
+        return Resolution(
+            matrices: matrices,
+            environment: .current(for: hostWindow?.screen)
+        )
     }
 
     /// Materializes the Tint branch ahead of need, without reading anything

@@ -493,13 +493,17 @@ struct GlassMaterialStyleAtlas: Codable, Sendable {
         _ a: GlassMaterialColorValue,
         _ b: GlassMaterialColorValue
     ) -> Bool {
-        let tolerance = 0.001
-        return abs(a.red - b.red) <= tolerance
-            && abs(a.green - b.green) <= tolerance
-            && abs(a.blue - b.blue) <= tolerance
+        // Match the controller's SIMD3 cache key exactly. These components
+        // are the persisted extended-sRGB identity of a resolved hue; a
+        // tolerance can make a nearby, never-verified picker value inherit
+        // the wrong matrices. Alpha is deliberately excluded and patched via
+        // coefficient 18 at apply time.
+        a.red == b.red
+            && a.green == b.green
+            && a.blue == b.blue
     }
 
-    private static func tintColorPrecedes(
+    nonisolated private static func tintColorPrecedes(
         _ a: GlassMaterialColorValue,
         _ b: GlassMaterialColorValue
     ) -> Bool {

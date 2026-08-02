@@ -21,6 +21,34 @@ The question under investigation is whether an arbitrary Tint color can be
 converted directly into the required `ColorMatrix4x5`, avoiding a live
 per-color Main-On calibration.
 
+## 2026-08-01 Display P3 outcome
+
+The original handoff below certifies the extended-sRGB unit cube. The later
+macOS 27 cold-start investigation extended that result to the complete
+Display P3 gamut without clamping the source color.
+
+Only the out-of-unit `pastel` family was missing a rule. Applying the existing
+provisional endpoint and then these component-relative bounds reproduces the
+live system matrix:
+
+```text
+bright(x) = clamp(p_bright(x), -5x/12, (17 - 5x)/12)
+dark(x)   = clamp(p_dark(x), 5x/4 - 1/4, 5x/4)
+```
+
+`Golden/macOS-27/tint-wide-gamut-model.json` contains 27 fixed Display P3
+boundary colors and 24 predeclared Halton holdouts over all eight cells. All
+408 rows pass paired proof and synchronous/settled equality; the worst model
+residual is `9.16e-7`, and the holdout-pastel maximum is `5.64e-7`.
+
+Product admission is gamut-shaped, not a loose extended-RGB range: source
+extended-sRGB values must round-trip through bounded Display P3 within the
+measured Float conversion tolerance. macOS 27 runtime order is now certified
+model → exact compatible cache → legal-host resolver → wait. The exact cache
+remains a fallback for resolver-proven colors beyond Display P3; it is not the
+general P3 solution. macOS 26 remains unit-domain-only until equivalent full
+P3 evidence exists.
+
 ## Correction: What Did and Did Not Fail
 
 The earlier statement that “Tint colors cannot be parameterized” was not
@@ -292,7 +320,8 @@ fit-independent RGB holdout maximum: below 5e-7 on luma-endpoint rows
 
 The worst row is the intentionally adversarial chroma-`0.0006` boundary
 sample. The 99th percentile complete-matrix residual is approximately
-`2.1e-6`. No per-color matrix cache is required by this macOS 27 model.
+`2.1e-6`. No per-color matrix cache is required inside this original
+unit-domain model; the later Display P3 extension above has the same property.
 
 ### Rendered acceptance
 
@@ -454,18 +483,18 @@ Both matrix-space and rendered-output acceptance pass on macOS 27, and
 `GlassEffectController` now uses the result:
 
 1. On macOS 27, each configuration update synthesizes the four matrices needed
-   by the selected Normal/Muted participation into an in-memory Atlas copy.
-   The closed-form path does not mutate or persist the Provider Atlas, and
-   legacy cached matrices cannot override it. A complete commit-resolved
-   eight-cell set for an out-of-domain color is separately promoted to the
-   bounded, major-scoped runtime Tint overlay.
-2. `lockingTint` remains only as a fail-closed fallback for unsupported system
+   by the selected Normal/Muted participation into an in-memory Atlas copy for
+   any color in the certified Display P3 domain. The closed-form path does not
+   mutate or persist the Provider Atlas, and cached matrices cannot override
+   it.
+2. A complete commit-resolved eight-cell set outside that domain is separately
+   promoted to the bounded, exact-RGB, major-scoped runtime Tint overlay.
+3. `lockingTint` remains only as a fail-closed fallback for unsupported system
    majors or colors outside the certified synthesis input domain.
-3. Keep synthesis major-scoped. macOS 26 still needs a reduced certification
-   grid before it can reuse these endpoint formulas with its different context
-   selection table.
+4. macOS 26 has the complete unit-domain selection/formula certification, but
+   keeps P3 on exact cache/live resolution pending a full P3 boundary sweep.
 
-No additional macOS 27 color grid is required by the current evidence.
+No additional macOS 27 P3 color grid is required by the current evidence.
 
 ## Git and Worktree State
 

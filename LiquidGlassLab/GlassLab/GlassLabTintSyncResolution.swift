@@ -29,8 +29,9 @@ private final class GlassLabTintSyncWitnessWindow: NSPanel {
 struct GlassLabTintSyncResolutionRow: Codable, Sendable {
     var colorID: String
     var sourceColor: GlassMaterialColorValue
-    /// Whether every requested component sits inside the certified
-    /// synthesis domain. Out-of-domain rows are the point of the experiment.
+    /// Historical JSON key: whether every requested component sits inside the
+    /// original extended-sRGB unit cube. The later macOS 27 Display P3 model
+    /// certifies many rows where this remains false.
     var isInCertifiedDomain: Bool
     var cell: GlassLabTintSweepCell
     /// Read immediately after `layout` + `CATransaction.flush()`.
@@ -78,7 +79,7 @@ struct GlassLabTintSyncResolutionDocument: Codable, Sendable {
             "Rows: \(rows.count) · compared: \(compared.count)",
             "Passed: \(rows.filter(\.passed).count)/\(rows.count)",
             "Worst flush-vs-settled difference: \(worst)",
-            "Out-of-domain rows: \(outOfDomain.count) · worst: "
+            "Outside extended-sRGB unit cube: \(outOfDomain.count) · worst: "
                 + "\(worstOutOfDomain)",
             "Paired proof at flush: "
                 + "\(rows.filter(\.pairedProofAtFlush).count)/\(rows.count)",
@@ -110,60 +111,118 @@ struct GlassLabTintSyncResolutionDocument: Codable, Sendable {
 }
 
 extension GlassLabView {
-    /// Colors chosen to separate the two questions: in-domain colors check
-    /// that a flush read agrees with today's accepted procedure, and P3
-    /// colors (which leave the certified domain once converted to extended
-    /// sRGB) check that the system resolver covers what synthesis cannot.
+    private static func tintSweepColor(
+        _ id: String,
+        _ nsColor: NSColor,
+        alpha: Double = 0.8
+    ) -> GlassLabTintSweepColor? {
+        guard let value = GlassMaterialColorValue(
+            nsColor.withAlphaComponent(alpha)
+        ) else { return nil }
+        return GlassLabTintSweepColor(
+            id: id,
+            label: id,
+            red: value.red,
+            green: value.green,
+            blue: value.blue,
+            alpha: value.alpha
+        )
+    }
+
+    /// Colors chosen to separate the original two questions: unit-domain
+    /// colors check that a flush read agrees with today's accepted procedure,
+    /// and P3 colors leave that unit cube once converted to extended sRGB.
     private static var tintSyncResolutionColors: [GlassLabTintSweepColor] {
-        func color(
-            _ id: String,
-            _ nsColor: NSColor,
-            alpha: Double = 0.8
-        ) -> GlassLabTintSweepColor? {
-            guard let value = GlassMaterialColorValue(
-                nsColor.withAlphaComponent(alpha)
-            ) else { return nil }
-            return GlassLabTintSweepColor(
-                id: id,
-                label: id,
-                red: value.red,
-                green: value.green,
-                blue: value.blue,
-                alpha: value.alpha
-            )
-        }
         return [
-            color("srgb-coral", NSColor(
+            tintSweepColor("srgb-coral", NSColor(
                 srgbRed: 0.92, green: 0.18, blue: 0.38, alpha: 1
             )),
-            color("srgb-teal", NSColor(
+            tintSweepColor("srgb-teal", NSColor(
                 srgbRed: 0.10, green: 0.72, blue: 0.55, alpha: 1
             )),
-            color("srgb-gray-500", NSColor(
+            tintSweepColor("srgb-gray-500", NSColor(
                 srgbRed: 0.5, green: 0.5, blue: 0.5, alpha: 1
             )),
-            color("p3-c7cd28", NSColor(
+            tintSweepColor("p3-c7cd28", NSColor(
                 displayP3Red: 199 / 255.0,
                 green: 205 / 255.0,
                 blue: 40 / 255.0,
                 alpha: 1
             )),
-            color("p3-pure-red", NSColor(
+            tintSweepColor("p3-pure-red", NSColor(
                 displayP3Red: 1, green: 0, blue: 0, alpha: 1
             )),
-            color("p3-vivid-green", NSColor(
+            tintSweepColor("p3-vivid-green", NSColor(
                 displayP3Red: 0.1, green: 0.95, blue: 0.2, alpha: 1
             )),
         ].compactMap { $0 } + Self.outOfDomainAlphaSweepColors
     }
 
+    /// A fixed boundary/holdout plan for certifying the Display P3 extension
+    /// independently from the three colors that exposed the missing pastel
+    /// bounds. The boundary set covers every corner, edge midpoint, face
+    /// center, and the cube center. The Halton set is a deterministic holdout
+    /// distributed through the native Display P3 cube.
+    private static var tintWideGamutModelColors: [GlassLabTintSweepColor] {
+        let levels = [0.0, 0.5, 1.0]
+        var colors: [GlassLabTintSweepColor] = []
+        for red in levels {
+            for green in levels {
+                for blue in levels {
+                    let id = String(
+                        format: "boundary-p3-r%03d-g%03d-b%03d",
+                        Int(red * 100),
+                        Int(green * 100),
+                        Int(blue * 100)
+                    )
+                    if let color = tintSweepColor(id, NSColor(
+                        displayP3Red: red,
+                        green: green,
+                        blue: blue,
+                        alpha: 1
+                    )) {
+                        colors.append(color)
+                    }
+                }
+            }
+        }
+
+        func radicalInverse(_ index: Int, base: Int) -> Double {
+            var index = index
+            var denominator = Double(base)
+            var result = 0.0
+            while index > 0 {
+                result += Double(index % base) / denominator
+                index /= base
+                denominator *= Double(base)
+            }
+            return result
+        }
+        for index in 1...24 {
+            let red = radicalInverse(index, base: 2)
+            let green = radicalInverse(index, base: 3)
+            let blue = radicalInverse(index, base: 5)
+            let id = String(format: "holdout-p3-%03d", index)
+            if let color = tintSweepColor(id, NSColor(
+                displayP3Red: red,
+                green: green,
+                blue: blue,
+                alpha: 1
+            )) {
+                colors.append(color)
+            }
+        }
+        return colors
+    }
+
     /// The alpha-only contract — alpha is coefficient 18 and touches nothing
-    /// else — was certified from a fixed-RGB alpha sweep over **in-domain**
+    /// else — was first certified from a fixed-RGB alpha sweep over
+    /// **unit-domain**
     /// colors. The product's commit path applies the same contract to
     /// wider-gamut colors: the resolution cache is keyed by RGB and the
     /// requested alpha is patched in, which is what makes dragging an opacity
     /// slider free. This sweep tests that assumption where it is being used,
-    /// by resolving the same out-of-domain RGB at several alphas.
+    /// by resolving the same out-of-unit RGB at several alphas.
     private static var outOfDomainAlphaSweepColors: [GlassLabTintSweepColor] {
         let bases: [(String, NSColor)] = [
             ("p3-c7cd28", NSColor(
@@ -194,6 +253,21 @@ extension GlassLabView {
 
     func performTintSyncResolutionCheck() async throws
         -> GlassLabTintSyncResolutionDocument {
+        try await performTintSyncResolutionCheck(
+            colors: Self.tintSyncResolutionColors
+        )
+    }
+
+    func performTintWideGamutModelCheck() async throws
+        -> GlassLabTintSyncResolutionDocument {
+        try await performTintSyncResolutionCheck(
+            colors: Self.tintWideGamutModelColors
+        )
+    }
+
+    private func performTintSyncResolutionCheck(
+        colors: [GlassLabTintSweepColor]
+    ) async throws -> GlassLabTintSyncResolutionDocument {
         guard let hostWindow = state.testWindow.liveControlWindow else {
             throw GlassLabTintSweepError.noHostWindow
         }
@@ -205,7 +279,7 @@ extension GlassLabView {
             hostWindow: hostWindow,
             mainProbeHost: probeHost
         )
-        let rows = try await session.run(colors: Self.tintSyncResolutionColors)
+        let rows = try await session.run(colors: colors)
         let timings = session.timings
         let current = GlassMaterialStyleAtlas.Environment.current(
             for: hostWindow.screen
@@ -309,7 +383,9 @@ private final class GlassLabTintSyncSession {
         pairs: [ProbePair]
     ) async throws -> [GlassLabTintSyncResolutionRow] {
         guard let mainProbeHost else { return [] }
-        let inDomain = [color.red, color.green, color.blue]
+        let isInExtendedSRGBUnitDomain = [
+            color.red, color.green, color.blue,
+        ]
             .allSatisfy { $0 >= 0 && $0 <= 1 }
 
         let tStart = DispatchTime.now().uptimeNanoseconds
@@ -473,7 +549,7 @@ private final class GlassLabTintSyncSession {
                         blue: color.blue,
                         alpha: color.alpha
                     ),
-                    isInCertifiedDomain: inDomain,
+                    isInCertifiedDomain: isInExtendedSRGBUnitDomain,
                     cell: GlassLabTintSweepCell(cell),
                     flushMatrix: flush,
                     settledMatrix: reference,

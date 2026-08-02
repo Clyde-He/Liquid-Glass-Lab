@@ -138,22 +138,30 @@ final class CatalogTests: XCTestCase {
     }
 
     @MainActor
-    func testVerifiedWideGamutTintPersistsAndRebuildsWithoutHostWindow() throws {
+    func testVerifiedUncertifiedGamutTintPersistsAndRebuildsWithoutHostWindow()
+        throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let (certifiedURL, _) = try makeCertifiedFixture(in: directory)
         let cacheURL = directory.appendingPathComponent("runtime.json")
         let color = NSColor(
-            displayP3Red: 1,
-            green: 0,
-            blue: 0,
-            alpha: 0.6
+            colorSpace: .extendedSRGB,
+            components: [1.4, -0.4, 0.2, 0.6],
+            count: 4
         )
         let sourceColor = try XCTUnwrap(GlassMaterialColorValue(color))
         XCTAssertFalse(
             [sourceColor.red, sourceColor.green, sourceColor.blue]
                 .allSatisfy { 0...1 ~= $0 }
         )
+        XCTAssertFalse(
+            GlassMaterialTintMatrixSynthesizer
+                .isWithinCertifiedSynthesisDomain(
+                    sourceColor,
+                    osMajorVersion: 27
+                )
+        )
+        let verifiedMatrices = tintMatrices(for: sourceColor, seed: 0.15)
 
         let provider = GlassMaterialAtlasProvider(
             hostWindow: nil,
@@ -165,7 +173,8 @@ final class CatalogTests: XCTestCase {
         XCTAssertTrue(
             provider.persistVerifiedTintMatrices(
                 sourceColor: sourceColor,
-                matrices: tintMatrices(for: sourceColor, seed: 0.15)
+                matrices: verifiedMatrices,
+                captureEnvironment: .current(for: nil)
             )
         )
 
@@ -183,6 +192,12 @@ final class CatalogTests: XCTestCase {
         rebuilt.ensureCaptured()
         XCTAssertEqual(rebuilt.state, .ready)
         XCTAssertEqual(rebuilt.atlasSource, .certified)
+        for cell in GlassMaterialStyleAtlas.allTintCells {
+            XCTAssertEqual(
+                rebuilt.atlas.tintMatrix(for: cell, matching: color),
+                verifiedMatrices[cell]
+            )
+        }
 
         let resolved = try XCTUnwrap(
             GlassEffectController.resolvedTintAtlas(
@@ -194,7 +209,10 @@ final class CatalogTests: XCTestCase {
             )
         )
         for cell in GlassMaterialStyleAtlas.allTintCells {
-            XCTAssertNotNil(resolved.tintMatrix(for: cell, matching: color))
+            XCTAssertEqual(
+                resolved.tintMatrix(for: cell, matching: color),
+                verifiedMatrices[cell]
+            )
         }
     }
 
@@ -225,7 +243,8 @@ final class CatalogTests: XCTestCase {
         XCTAssertFalse(
             provider.persistVerifiedTintMatrices(
                 sourceColor: sourceColor,
-                matrices: partial
+                matrices: partial,
+                captureEnvironment: .current(for: nil)
             )
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
@@ -238,7 +257,8 @@ final class CatalogTests: XCTestCase {
         XCTAssertFalse(
             provider.persistVerifiedTintMatrices(
                 sourceColor: sourceColor,
-                matrices: invalid
+                matrices: invalid,
+                captureEnvironment: .current(for: nil)
             )
         )
 
@@ -289,7 +309,8 @@ final class CatalogTests: XCTestCase {
         XCTAssertTrue(
             provider.persistVerifiedTintMatrices(
                 sourceColor: sourceColor,
-                matrices: matrices
+                matrices: matrices,
+                captureEnvironment: .current(for: nil)
             )
         )
 
@@ -323,6 +344,55 @@ final class CatalogTests: XCTestCase {
                 matching: differentRGB
             )
         )
+        let nearbyUnverified = GlassMaterialColorValue(
+            red: sourceColor.red + 0.0005,
+            green: sourceColor.green,
+            blue: sourceColor.blue,
+            alpha: 0.9
+        )
+        XCTAssertNil(
+            provider.atlas.tintMatrix(
+                for: cell,
+                matching: nearbyUnverified.nsColor
+            )
+        )
+    }
+
+    @MainActor
+    func testTintPersistenceRejectsIncompatibleCaptureEnvironment() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (certifiedURL, _) = try makeCertifiedFixture(in: directory)
+        let cacheURL = directory.appendingPathComponent("runtime.json")
+        let provider = GlassMaterialAtlasProvider(
+            hostWindow: nil,
+            storageURL: cacheURL,
+            certifiedAtlasURLs: [certifiedURL]
+        )
+        provider.ensureCaptured()
+
+        let sourceColor = GlassMaterialColorValue(
+            red: 1.4,
+            green: -0.4,
+            blue: 0.2,
+            alpha: 0.6
+        )
+        var incompatible = GlassMaterialStyleAtlas.Environment.current(
+            for: nil
+        )
+        incompatible.osMajorVersion =
+            ProcessInfo.processInfo.operatingSystemVersion.majorVersion + 1
+        incompatible.osBuild = "Version 999.0 (incompatible)"
+
+        XCTAssertFalse(
+            provider.persistVerifiedTintMatrices(
+                sourceColor: sourceColor,
+                matrices: tintMatrices(for: sourceColor, seed: 0.5),
+                captureEnvironment: incompatible
+            )
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
+        XCTAssertEqual(provider.atlas.tintMatrixColorCount, 0)
     }
 
     @MainActor
@@ -354,7 +424,8 @@ final class CatalogTests: XCTestCase {
                     matrices: tintMatrices(
                         for: sourceColor,
                         seed: Float(index) * 0.01
-                    )
+                    ),
+                    captureEnvironment: .current(for: nil)
                 )
             )
         }
