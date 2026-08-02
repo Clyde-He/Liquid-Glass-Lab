@@ -23,8 +23,7 @@ does not contain a version number; SwiftPM resolves versions from Git tags.
    ```sh
    xcodebuild \
      -project LiquidGlassLab.xcodeproj \
-     -scheme GlassHUDConsumerDemo \
-     -destination 'platform=macOS' \
+     -target GlassHUDConsumerDemo \
      build
    ```
 
