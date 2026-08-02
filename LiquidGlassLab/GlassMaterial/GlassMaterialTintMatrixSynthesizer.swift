@@ -282,8 +282,9 @@ enum GlassMaterialTintMatrixSynthesizer {
             // the unit cube, which is why the original sweeps could not
             // identify them. Display P3 boundary probes activate both sides:
             // negative extended-sRGB components hit the zero-side bound and
-            // components above one hit the one-side bound. All 51 boundary /
-            // holdout colors match the live macOS 27 matrix within 9.2e-7.
+            // components above one hit the one-side bound. Display P3
+            // boundary/holdout sweeps certify these bounds on both supported
+            // majors; see the handoff for per-major residuals.
             let lowerBound: Double
             let upperBound: Double
             if isBright {

@@ -683,10 +683,10 @@ final class GlassEffectController {
     /// Returns the provider Atlas plus the matrices required by the requested
     /// Tint, without mutating or persisting the provider's reusable base.
     ///
-    /// macOS 27 always prefers the accepted closed form, even if a legacy
-    /// runtime cache happens to contain the same RGB. Unsupported colors or OS
-    /// majors fall back to a complete captured overlay; partial coverage stays
-    /// nil and therefore fail-closed.
+    /// Certified macOS majors always prefer the accepted closed form, even if
+    /// a legacy runtime cache happens to contain the same RGB. Unsupported
+    /// colors or OS majors fall back to a complete captured overlay; partial
+    /// coverage stays nil and therefore fail-closed.
     private func resolvedTintAtlas(
         for color: NSColor?,
         emphasis: Emphasis,

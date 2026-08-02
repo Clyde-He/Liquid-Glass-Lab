@@ -488,19 +488,20 @@ simply converge close enough to the source to cross the analyzer's
 Both matrix-space and rendered-output acceptance pass on macOS 27, and
 `GlassEffectController` now uses the result:
 
-1. On macOS 27, each configuration update synthesizes the four matrices needed
-   by the selected Normal/Muted participation into an in-memory Atlas copy for
-   any color in the certified Display P3 domain. The closed-form path does not
-   mutate or persist the Provider Atlas, and cached matrices cannot override
-   it.
+1. On macOS 26 and 27, each configuration update synthesizes the four matrices
+   needed by the selected Normal/Muted participation into an in-memory Atlas
+   copy for any color in the certified Display P3 domain. The closed-form path
+   does not mutate or persist the Provider Atlas, and cached matrices cannot
+   override it.
 2. A complete commit-resolved eight-cell set outside that domain is separately
    promoted to the bounded, exact-RGB, major-scoped runtime Tint overlay.
 3. `lockingTint` remains only as a fail-closed fallback for unsupported system
    majors or colors outside the certified synthesis input domain.
-4. macOS 26 has the complete unit-domain selection/formula certification, but
-   keeps P3 on exact cache/live resolution pending a full P3 boundary sweep.
+4. Both supported majors have complete Display P3 boundary/holdout
+   certification. Exact cache/live resolution remains the fallback beyond
+   Display P3.
 
-No additional macOS 27 P3 color grid is required by the current evidence.
+No additional Display P3 color grid is required by the current evidence.
 
 ## Git and Worktree State
 

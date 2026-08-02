@@ -78,11 +78,10 @@ host. A plain AppKit window with no `contentViewController` may omit
 
 The packaged
 `glass-macos-<major>.json` is discovered from the Swift Package resource bundle
-automatically. On macOS 27, every color representable by Display P3 is
+automatically. On macOS 26 and 27, every color representable by Display P3 is
 synthesized synchronously from its original extended-sRGB components into an
 in-memory overlay; no clamp, ordinary-sRGB conversion, capture, or per-color
-write is involved. macOS 26 retains the earlier extended-sRGB unit-domain
-certification. A color outside the current major's certified domain is
+write is involved. A color outside the current major's certified domain is
 resolved only through the genuinely participating probe pair; after the
 complete eight-cell result passes frozen readback, the Provider may atomically
 retain it in the consumer app's bounded, exact-RGB, macOS-major-scoped runtime
@@ -96,8 +95,8 @@ major an in-gamut Tint is available in the same synchronous configuration
 update, resolved from the accepted closed form.
 
 A color the closed form does not cover — for example a gamut wider than
-Display P3 on macOS 27, a P3 color on macOS 26, or any color on an uncertified
-major — is resolved by asking the system instead of extrapolating: the
+Display P3 on macOS 26 or 27, or any color on an uncertified major — is
+resolved by asking the system instead of extrapolating: the
 controller keeps a warm, invisible probe set in the host window plus a
 nonparticipating witness, sets the color, and reads the matrix back in one
 `CATransaction` commit. The first such color pays a one-time probe
