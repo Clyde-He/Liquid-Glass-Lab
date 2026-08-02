@@ -44,8 +44,10 @@ final class GlassMaterialAtlasProvider {
         didSet { onStateChanged?(state) }
     }
 
-    /// Fires only for a complete, paired, verified atlas or a completed tint
-    /// transaction. Partial base-calibration batches are never published.
+    /// Fires only for a complete, paired, verified atlas or a completed legacy
+    /// Tint transaction. Partial base-calibration batches are never published;
+    /// the narrow commit-resolved Tint persistence seam updates its atlas
+    /// synchronously without requesting a full-material callback.
     public var onAtlasUpdated: ((GlassMaterialStyleAtlas) -> Void)?
     public var onStateChanged: ((State) -> Void)?
 
@@ -426,6 +428,11 @@ final class GlassMaterialAtlasProvider {
                     for: Self.mainOffCell(for: cell)
                 )
             }
+            candidate.removeIncompleteTintMatrices()
+            candidate.retainTintMatrices(
+                upTo: GlassMaterialStyleAtlas.tintMatrixColorLimit,
+                keeping: GlassMaterialColorValue(color)
+            )
             guard await self.validateFrozenTintRoundTrip(
                 candidate,
                 color: color
@@ -439,6 +446,7 @@ final class GlassMaterialAtlasProvider {
                 completion(false)
                 return
             }
+            candidate.environment = .current(for: self.hostWindow?.screen)
             self.atlas = candidate
             do {
                 try self.persist()
@@ -451,6 +459,49 @@ final class GlassMaterialAtlasProvider {
             self.onAtlasUpdated?(self.atlas)
             completion(true)
         }
+    }
+
+    /// Promotes one complete, commit-resolved Tint set into the runtime
+    /// overlay. The resolver has already proved all eight Main-On/Main-Off
+    /// pairs before calling this seam; the atlas performs a second structural
+    /// gate, then the candidate is encoded and atomically written before it
+    /// replaces the provider's in-memory value.
+    ///
+    /// This intentionally does not invoke `onAtlasUpdated`: a Tint overlay is
+    /// a color-only update and must not turn the controller's narrow restamp
+    /// into a full base-material freeze. The provider's atlas is updated
+    /// synchronously and is therefore available to the next controller lookup.
+    @discardableResult
+    func persistVerifiedTintMatrices(
+        sourceColor: GlassMaterialColorValue,
+        matrices: [GlassMaterialStyleAtlas.Cell: [Float]],
+        captureEnvironment: GlassMaterialStyleAtlas.Environment
+    ) -> Bool {
+        let currentEnvironment = GlassMaterialStyleAtlas.Environment.current(
+            for: hostWindow?.screen
+        )
+        guard !isInvalidated,
+              isPairedCoverageComplete,
+              captureEnvironment.isCompatible(with: currentEnvironment),
+              var candidate = atlas.addingVerifiedTintMatrixSet(
+                  sourceColor: sourceColor,
+                  matrices: matrices
+              )
+        else { return false }
+
+        // Scope the runtime overlay to the environment that produced the
+        // paired proof. A bundled base may carry an older diagnostic build or
+        // display signature while still matching the major-scoped admission
+        // contract; it must not become the overlay's provenance by accident.
+        candidate.environment = captureEnvironment
+
+        do {
+            try persist(candidate)
+        } catch {
+            return false
+        }
+        atlas = candidate
+        return true
     }
 
     // MARK: - Candidate loading
@@ -483,7 +534,7 @@ final class GlassMaterialAtlasProvider {
         from url: URL
     ) -> GlassMaterialStyleAtlas? {
         guard let data = try? Data(contentsOf: url),
-              let candidate = try? JSONDecoder().decode(
+              var candidate = try? JSONDecoder().decode(
                 GlassMaterialStyleAtlas.self,
                 from: data
               ),
@@ -493,6 +544,14 @@ final class GlassMaterialAtlasProvider {
               ),
               candidate.hasVerifiedMainOnCoverage(shortSides: shortSides)
         else { return nil }
+        // Schema-2 caches can contain a malformed or partial runtime overlay
+        // even when their base atlas is valid. Sanitize Tint independently so
+        // the certified/base readiness path survives and no incomplete color
+        // set can be served after a restart.
+        candidate.removeIncompleteTintMatrices()
+        candidate.retainTintMatrices(
+            upTo: GlassMaterialStyleAtlas.tintMatrixColorLimit
+        )
         return candidate
     }
 
@@ -1004,6 +1063,10 @@ final class GlassMaterialAtlasProvider {
     // MARK: - Persistence
 
     private func persist() throws {
+        try persist(atlas)
+    }
+
+    private func persist(_ value: GlassMaterialStyleAtlas) throws {
         guard let storageURL else { return }
         try FileManager.default.createDirectory(
             at: storageURL.deletingLastPathComponent(),
@@ -1011,7 +1074,7 @@ final class GlassMaterialAtlasProvider {
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        try encoder.encode(atlas).write(to: storageURL, options: .atomic)
+        try encoder.encode(value).write(to: storageURL, options: .atomic)
     }
 }
 #endif

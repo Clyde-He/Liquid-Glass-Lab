@@ -298,6 +298,92 @@
       "role": "canonical"
     },
     {
+      "id": "tint-sync-resolution",
+      "file": "tint-sync-resolution.json",
+      "sha256": "64b98f00afc9791b8357a9cb64bf661afd141758b7c535aefcc6fc98025da7d6",
+      "formatVersion": 1,
+      "entryCount": 128,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-08-02T05:29:30Z",
+      "axes": {
+        "sourceColors": {
+          "inUnitDomain": 3,
+          "displayP3Anchors": 3,
+          "displayP3AlphaVariants": 10
+        },
+        "appearance": [
+          "Light",
+          "Dark"
+        ],
+        "material": [
+          "Regular",
+          "Clear"
+        ],
+        "mainParticipation": [
+          false,
+          true
+        ]
+      },
+      "environment": {
+        "displaySignature": "Studio Display XDR @2.0x",
+        "atlasSchemaVersion": 2
+      },
+      "notes": [
+        "All 128 matrices read immediately after CATransaction.flush() are bit-identical to settled readback and retain paired Main-On proof.",
+        "The 104 rows outside the extended-sRGB unit cube include two fixed P3 RGB values at five alpha values each.",
+        "Across the P3 alpha sweep, only coefficient 18 changes and it equals the requested alpha exactly."
+      ],
+      "role": "canonical"
+    },
+    {
+      "id": "tint-wide-gamut-model",
+      "file": "tint-wide-gamut-model.json",
+      "sha256": "de226c1015b76157c8328ac4c46924ab5a5b0a1eda7f17122d587d5cd9a528ca",
+      "formatVersion": 1,
+      "entryCount": 408,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-08-02T05:25:38Z",
+      "axes": {
+        "sourceColors": {
+          "displayP3BoundaryGrid": 27,
+          "displayP3HaltonHoldouts": 24
+        },
+        "appearance": [
+          "Light",
+          "Dark"
+        ],
+        "material": [
+          "Regular",
+          "Clear"
+        ],
+        "mainParticipation": [
+          false,
+          true
+        ]
+      },
+      "environment": {
+        "displaySignature": "Studio Display XDR @2.0x",
+        "atlasSchemaVersion": 2
+      },
+      "notes": [
+        "Complete 51-color × eight-cell Display P3 boundary/holdout fixture captured through a genuine main/key host and paired nonparticipating witness.",
+        "All 408 flush matrices are bit-identical to settled readback and all paired Main-On proofs hold; 288 rows leave the extended-sRGB unit cube.",
+        "The channel-relative pastel endpoint bounds reconstruct every row within 9.2e-7; the 24 predeclared Halton holdout pastel rows remain within 5.7e-7.",
+        "This certifies the complete Display P3 domain on macOS 27 only; unknown wider gamuts and other majors remain fail-closed."
+      ],
+      "role": "canonical"
+    },
+    {
       "id": "formula-analysis",
       "file": "formula-analysis.json",
       "sha256": "7695ddc86cc277f50b2df370135bbfc0f4b868cd184f32de1db818bf97d6af26",

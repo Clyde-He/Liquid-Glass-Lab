@@ -2,9 +2,11 @@
 //  GlassMaterialTintMatrixSynthesizer.swift
 //  AdjustableGlass
 //
-//  Closed-form macOS 27 synthesis for NSGlassEffectView's Tint-owned
-//  vibrantColorMatrix. The model is derived from the accepted full-grid,
-//  focused-boundary, and hue-fraction sweeps under Golden/macOS-27.
+//  Closed-form macOS 26/27 synthesis for NSGlassEffectView's Tint-owned
+//  vibrantColorMatrix. The unit-domain model is derived from the accepted
+//  full-grid, focused-boundary, and hue-fraction sweeps. macOS 26 and 27 also
+//  certify the complete Display P3 gamut through independent boundary /
+//  holdout sweeps under their respective Golden directories.
 //
 
 #if os(macOS)
@@ -34,6 +36,11 @@ enum GlassMaterialTintMatrixSynthesizer {
     // near-white pastel rows as standard.
     private static let achromaticChromaThreshold = 0.00035
     private static let rec709Luma = [0.2126, 0.7152, 0.0722]
+    /// `NSColor`'s P3 → extended-sRGB conversion is Float-backed on the
+    /// certified systems. A round trip can therefore move a boundary
+    /// component by several ulps. This tolerance admits that representation
+    /// noise, not nearby colors outside Display P3.
+    private static let displayP3RoundTripTolerance = 0.000002
 
     static func matrix(
         for color: NSColor,
@@ -57,12 +64,14 @@ enum GlassMaterialTintMatrixSynthesizer {
             return nil
         }
         let rgb = [source.red, source.green, source.blue]
-        guard rgb.allSatisfy({
-            $0.isFinite && $0 >= 0 && $0 <= 1
-        }), source.alpha.isFinite,
+        guard rgb.allSatisfy(\.isFinite), source.alpha.isFinite,
         source.alpha >= 0, source.alpha <= 1 else {
             return nil
         }
+        guard isWithinCertifiedSynthesisDomain(
+            source,
+            osMajorVersion: osMajorVersion
+        ) else { return nil }
 
         switch family(
             for: rgb,
@@ -96,6 +105,51 @@ enum GlassMaterialTintMatrixSynthesizer {
                 value: rgb.reduce(0, +) / 3,
                 alpha: source.alpha
             )
+        }
+    }
+
+    /// The original closed form is certified over the extended-sRGB unit
+    /// cube on macOS 26 and 27. The wider per-major studies certify exactly
+    /// the colors representable by Display P3 — not an axis-aligned
+    /// extended-RGB box. Round-tripping through bounded Display P3 keeps
+    /// arbitrary HDR or other-gamut values fail-closed even when one component
+    /// happens to sit inside the observed P3 extrema.
+    static func isWithinCertifiedSynthesisDomain(
+        _ source: GlassMaterialColorValue,
+        osMajorVersion: Int
+    ) -> Bool {
+        guard supportedOSMajorVersions.contains(osMajorVersion) else {
+            return false
+        }
+        let sourceRGB = [source.red, source.green, source.blue]
+        guard sourceRGB.allSatisfy(\.isFinite) else { return false }
+        if sourceRGB.allSatisfy({ $0 >= 0 && $0 <= 1 }) {
+            return true
+        }
+
+        // Both supported majors have complete Display P3 boundary/holdout
+        // certification. Exact cache/live resolution remains the fallback for
+        // colors outside that gamut.
+        guard let displayP3 = source.nsColor.usingColorSpace(.displayP3),
+              let roundTrip = displayP3.usingColorSpace(.extendedSRGB)
+        else { return false }
+
+        let p3 = [
+            Double(displayP3.redComponent),
+            Double(displayP3.greenComponent),
+            Double(displayP3.blueComponent),
+        ]
+        let reconstructed = [
+            Double(roundTrip.redComponent),
+            Double(roundTrip.greenComponent),
+            Double(roundTrip.blueComponent),
+        ]
+        let tolerance = displayP3RoundTripTolerance
+        guard p3.allSatisfy({
+            $0.isFinite && $0 >= -tolerance && $0 <= 1 + tolerance
+        }) else { return false }
+        return zip(sourceRGB, reconstructed).allSatisfy {
+            abs($0 - $1) <= tolerance
         }
     }
 
@@ -222,8 +276,25 @@ enum GlassMaterialTintMatrixSynthesizer {
 
         return source.map { component in
             let hueFraction = (component - minimum) / chroma
-            return targetLightness
+            let provisional = targetLightness
                 + chroma * chromaScale * (hueFraction - 0.5)
+            // These channel-relative endpoint bounds are dormant throughout
+            // the unit cube, which is why the original sweeps could not
+            // identify them. Display P3 boundary probes activate both sides:
+            // negative extended-sRGB components hit the zero-side bound and
+            // components above one hit the one-side bound. Display P3
+            // boundary/holdout sweeps certify these bounds on both supported
+            // majors; see the handoff for per-major residuals.
+            let lowerBound: Double
+            let upperBound: Double
+            if isBright {
+                lowerBound = -5.0 / 12.0 * component
+                upperBound = (17.0 - 5.0 * component) / 12.0
+            } else {
+                lowerBound = 5.0 / 4.0 * component - 1.0 / 4.0
+                upperBound = 5.0 / 4.0 * component
+            }
+            return min(max(provisional, lowerBound), upperBound)
         }
     }
 

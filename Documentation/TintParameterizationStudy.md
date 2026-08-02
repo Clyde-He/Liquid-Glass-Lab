@@ -264,11 +264,16 @@ failures, maximum live matrix residual `1.963973e-4`, maximum A/A RGB code
 delta 3, and maximum synthesized A/B RGB code delta 3. The per-row p99/RMS
 checks stayed within the calibrated compositor-noise envelope.
 
-Product runtime behavior is now switched on macOS 27.
+Product runtime behavior is now switched on macOS 26 and 27.
 `GlassEffectController` synthesizes the selected Normal/Muted context
-matrices synchronously into an in-memory Atlas copy. It does not mutate the
-Provider Atlas or persist a color-bound cache, and a legacy cached matrix
-cannot override the closed form.
+matrices synchronously into an in-memory Atlas copy. The closed-form path does
+not mutate the Provider Atlas or persist a color-bound cache, and a legacy
+cached matrix cannot override it. The original certification covered the
+extended-sRGB unit cube; the per-major Display P3 extensions and their
+independent evidence are recorded below. Colors outside the major's certified
+domain still use the
+commit resolver; only a complete, paired eight-cell result is promoted to the
+Provider's bounded, exact-RGB, major-scoped runtime Tint overlay.
 
 The original grid capture, structure classification, and endpoint fitting
 steps are complete. The cross-version check has since been executed in full:
@@ -335,14 +340,13 @@ setting `tintColor` and after `layoutSubtreeIfNeeded`, and present
 immediately after `[CATransaction flush]` — no render-server round trip and
 no multi-frame settle. Further runloop turns do not change the value.
 
-**Consequence — a better permanent route.** Instead of extrapolating the
-endpoint formulas per gamut, make the *capture* synchronous: set the color on
-a probe in the genuinely main host window, flush the transaction, read the
-resolved matrix. The system computes it, so any color in any present or
-future gamut is covered, and the cost collapses from the current
-debounce + settle + stable-read + frozen-validation sequence (~2.5 s) toward
-a small number of frames. The Main-On participation proof (paired witness)
-must stay: flush determinism says nothing about which branch resolved.
+**Consequence at this stage.** The evidence justified making *capture*
+synchronous rather than blindly extrapolating the then-incomplete endpoint
+formula: set the color on a probe in the genuinely main host window, flush the
+transaction, and read the resolved matrix. That remains the generic fallback
+for unknown gamuts. The later macOS 26/27 boundary/holdout studies recovered
+the missing Display P3 branch exactly, so ordinary P3 no longer needs a host
+or a per-color capture on either certified major.
 
 Open item: the flush behavior above was measured on a non-participating
 window (a plain CLI binary cannot become main/key). Confirming it under
@@ -384,11 +388,12 @@ Also of note: `CAColorMatrixMakeColorSourceOver` and friends in QuartzCore
 take four floats (`s0`–`s3`) and return the struct indirectly via `x8`; they
 implement plain alpha compositing, not the glass form.
 
-**Where this leaves the two routes.** A callable oracle now requires
-disassembling `SDFLayer.updateSDFEffects` to recover the endpoint arithmetic
-(a bounded reverse-engineering task, and `maxColorComponent` is the thread to
-pull). The synchronous-capture route needs no symbol at all, covers every
-present and future gamut by construction, and is the cheaper permanent fix.
+**Where this left the two routes.** A callable oracle would have required
+disassembling `SDFLayer.updateSDFEffects`. Synchronous capture required no
+symbol and therefore remained the safe generic route. The subsequent P3 sweep
+showed that `maxColorComponent` manifests as simple channel-relative bounds on
+the already recovered pastel endpoint; no callable private oracle was needed
+for the certified P3 domain.
 
 ### Confirmed under genuine Main-On: commit-time resolution is exact
 
@@ -413,19 +418,85 @@ the certified closed form, the flush-resolved matrices agree to 1.7e-7
 certified domain would have rendered visibly wrong hues; the system resolver
 is right by construction.
 
-**Implication for the gamut axis.** The permanent fix is not to extend the
-fitted formulas gamut by gamut (sRGB → P3 → Rec. 2020), but to resolve
-unsupported colors through one synchronous commit against real probes. Closed
-form stays the fast path where it is certified; commit-time resolution covers
-every color in every present and future gamut. Neither path needs the current
-multi-second lock.
+**Implication at the time.** One synchronous commit against real probes was
+the first safe general solution. It remains the path for unseen colors outside
+the current certification. It is no longer the primary macOS 27 Display P3
+solution after the complete-domain result below.
 
-Open items before changing the product path: the probes must live in a
-window that is genuinely main at the moment of the pick (true while a user
-picks a color in the app's own window, false for a background app), the
-eight-cell probe set has a one-time materialization cost that should be
-measured, and the rendered A/B harness should gate the new path exactly as it
-gates synthesis today.
+### macOS 26/27 Display P3 extension: the missing rule was bounded pastel
+
+The cold-launch failure exposed a practical limit in the commit-first design:
+a HUD-only menu-bar app may have no ordinary main/key reference window after
+restart. Persisting exact verified colors fixes repeats but leaves every unseen
+P3 value dependent on Settings. The wider-domain study therefore tested the
+formula itself rather than treating all out-of-unit values as one unknown
+class.
+
+The existing model was already exact for every measured P3 `standard` and
+`neutralSuppression` cell. Only the `pastel` endpoint was incomplete. Let
+`p(x)` be the existing provisional pastel endpoint for one extended-sRGB
+component `x`. The complete macOS 27 rule is:
+
+```text
+bright(x) = clamp(p_bright(x), -5x/12, (17 - 5x)/12)
+dark(x)   = clamp(p_dark(x), 5x/4 - 1/4, 5x/4)
+```
+
+These bounds are dormant for the entire `[0, 1]³` source domain, so adding
+them changes none of the 3,496 previously accepted rows. They activate for
+negative components and components above one without clamping or converting
+the source color itself.
+
+`Golden/macOS-27/tint-wide-gamut-model.json` captures a predeclared plan of 27
+Display P3 boundary-grid colors plus 24 Halton holdouts through a genuine
+main/key host and paired nonparticipating witness:
+
+```sh
+LiquidGlassLab.app/Contents/MacOS/LiquidGlassLab \
+  --verify-tint-wide-gamut-model /path/to/output.json
+```
+
+```text
+colors: 51
+rows: 408/408 flush == settled and paired proof passed
+rows outside extended-sRGB [0, 1]³: 288
+maximum complete-matrix residual: 9.16e-7
+maximum holdout pastel residual: 5.64e-7
+```
+
+`Golden/macOS-26/tint-wide-gamut-model.json` repeats the same 51-color plan on
+macOS 26.6 (Build 25G70). All 408 rows pass synchronous/settled and paired
+proof gates, including 288 rows outside the historical unit cube. With the 26
+family/context table retained, the 280 genuinely chromatic out-of-unit rows
+have maximum residual `9.16e-7`; the 192 Halton holdout rows have maximum
+residual `5.63e-7`. Black, gray 0.5, and Float-round-tripped white retain the
+known 26 achromatic-family residual (`6.57e-5` maximum), below the existing
+26 complete-matrix gate of `2e-4` and unrelated to the P3 bounded-pastel rule.
+
+The synthesis admission gate is the actual Display P3 gamut, not an
+axis-aligned extended-sRGB range: a candidate is reconstructed in extended
+sRGB, converted to bounded Display P3, and round-tripped. Only a float-precise
+round trip is admitted. This preserves negative/>1 extended-sRGB components
+while rejecting nearby HDR, Rec. 2020, or arbitrary extended values. The P3
+extension is certified independently on macOS 26 and 27. Exact cache or
+legal-host resolution remains the fallback outside Display P3.
+
+The resulting runtime order is:
+
+```text
+certified model → exact compatible cache → legal-host resolver → wait
+```
+
+Thus the reported Display P3 Tint can become ready during a HUD-only cold
+launch with no reference window and no stored per-color overlay. The cache is
+still valuable for complete resolver-proven colors outside Display P3, but it
+is a bounded memoized fallback rather than the general P3 architecture.
+
+The commit path still keeps its original constraints: probes must live in a
+window that is genuinely main at the moment of the pick, the eight-cell set
+has a one-time materialization cost, and rendered acceptance must gate any new
+resolver behavior. Those constraints now apply only after both the certified
+model and exact compatible cache miss.
 
 ### The alpha-only contract also holds outside the certified domain
 
@@ -441,6 +512,12 @@ out-of-domain Display P3 colors resolved at five alphas each (0.15 / 0.4 /
 (color, cell) groups: coefficient 18 equals the requested alpha everywhere,
 and the other nineteen coefficients are **bit-identical** (maximum difference
 exactly `0`). The assumption is now measured where it is used.
+
+`Golden/macOS-27/tint-sync-resolution.json` repeats the same contract on the
+target system. All 128 rows pass synchronous-versus-settled and paired-proof
+gates; its 104 out-of-unit rows include the two P3 RGB values at all five
+alphas. Coefficient 18 again equals the requested alpha and the other nineteen
+coefficients are bit-identical within each fixed-RGB/cell group.
 
 ### Correction: the narrow write path was not narrow until `086489c`
 

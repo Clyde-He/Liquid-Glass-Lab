@@ -64,9 +64,10 @@ When supplied, `referenceWindow` must be an ordinary window that can genuinely
 become main or key, such as Settings or the app's primary window. The rendered
 glass can live in a nonactivating HUD panel and never become main or key itself.
 The reference may be nil at launch and replaced later without recreating the
-glass or its `contentView`. A certified base atlas and supported in-gamut Tint
-can become ready without it; runtime calibration and system-resolved
-wider-gamut Tint wait until a reference window is available and participating.
+glass or its `contentView`. A certified base atlas, a Tint inside the major's
+certified synthesis domain, and a previously verified exact cached Tint can
+become ready without it; new runtime calibration or an unseen Tint outside
+that domain waits until a reference window is available and participating.
 
 When `referenceWindow` is managed by SwiftUI, provide `referenceView` from an
 `NSViewRepresentable` installed in that window's content. AppKit does not
@@ -77,38 +78,42 @@ host. A plain AppKit window with no `contentViewController` may omit
 
 The packaged
 `glass-macos-<major>.json` is discovered from the Swift Package resource bundle
-automatically. On the certified majors (macOS 26 and 27), arbitrary in-gamut
-Tint colors are synthesized synchronously into an in-memory overlay: changing
-a color neither captures nor writes a per-color matrix cache. Runtime base
-calibration and unsupported-major Tint fallback data may still be cached under
-the consumer app's Caches directory; the product does not supply or coordinate
-JSON files.
+automatically. On macOS 26 and 27, every color representable by Display P3 is
+synthesized synchronously from its original extended-sRGB components into an
+in-memory overlay; no clamp, ordinary-sRGB conversion, capture, or per-color
+write is involved. A color outside the current major's certified domain is
+resolved only through the genuinely participating probe pair; after the
+complete eight-cell result passes frozen readback, the Provider may atomically
+retain it in the consumer app's bounded, exact-RGB, macOS-major-scoped runtime
+cache. Runtime base calibration and these verified Tint overlays may therefore
+be cached under the consumer app's Caches directory; the product does not
+supply or coordinate JSON files.
 
 `active` and `inactive` are product semantics, not trusted labels in a JSON file.
 Both are installed from the same paired atlas transaction. On a certified
 major an in-gamut Tint is available in the same synchronous configuration
 update, resolved from the accepted closed form.
 
-A color the closed form does not cover — a Display P3 or wider-gamut pick,
-whose extended-sRGB components leave the certified `[0, 1]` domain, or any
-uncertified macOS major — is resolved by asking the system instead of
-extrapolating: the controller keeps a warm, invisible probe set in the host
-window plus a nonparticipating witness, sets the color, and reads the matrix
-back in one `CATransaction` commit. The first such color pays a one-time probe
+A color the closed form does not cover — for example a gamut wider than
+Display P3 on macOS 26 or 27, or any color on an uncertified major — is
+resolved by asking the system instead of extrapolating: the
+controller keeps a warm, invisible probe set in the host window plus a
+nonparticipating witness, sets the color, and reads the matrix back in one
+`CATransaction` commit. The first such color pays a one-time probe
 materialization (`status` reports `preparing`); every later color change costs
-one commit. Extrapolating the closed form past its certified domain would
-render visibly wrong hues, so the domain guard is deliberate, not
-conservative — see the
+one commit. Unknown domains remain fail-closed — see the
 [Tint Parameterization Study](../../Documentation/TintParameterizationStudy.md).
 
-Both paths fail closed. The requested color appears only once every cell of
-the selected participation has a verified matrix, proven against the paired
-Main-Off witness; the product never presents a hue-suppressed live fallback as
-a successfully configured Tint. Commit-resolved overlays live on an in-memory
-Atlas copy and are never persisted. Commit resolution needs the host window to
-be genuinely main or key at the moment of the pick, which is true while a user
-picks a color in the app's own window; otherwise the color stays withheld and
-`status` reports `waitingForReferenceWindow`.
+All sources fail closed. Resolution order is certified model → exact compatible
+cache → legal-host resolver → wait. The requested color appears only once
+every cell of the selected participation has a verified matrix; the product
+never presents a hue-suppressed live fallback as a configured Tint. A commit
+result first lives on a temporary Atlas copy for the current presentation,
+then only a complete, paired eight-cell result is promoted to the bounded
+runtime overlay. Partial/unverified results, nearby RGB values, and mismatched
+schema/macOS-major environments are never reused. Commit resolution needs the
+host window to be genuinely main or key at the moment of the pick; otherwise
+the color stays withheld and `status` reports `waitingForReferenceWindow`.
 
 Run the independent `GlassHUDConsumerDemo` app scheme from Xcode. To compile it
 from the command line:
@@ -116,8 +121,7 @@ from the command line:
 ```sh
 xcodebuild \
   -project LiquidGlassLab.xcodeproj \
-  -scheme GlassHUDConsumerDemo \
-  -destination 'platform=macOS' \
+  -target GlassHUDConsumerDemo \
   build
 ```
 
