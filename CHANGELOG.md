@@ -8,6 +8,18 @@ those changes will be called out explicitly here.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-02
+
+### Fixed
+
+- Display P3 Tint now uses the certified closed-form matrix synthesis on both
+  macOS 26 and macOS 27, preserving the original extended-sRGB components
+  without requiring a reference window, cache warm-up, or sRGB clamping.
+- Complete matrix sets for verified Tints beyond the certified Display P3
+  domain are now retained in a bounded, exact-RGB, macOS-major-scoped runtime
+  cache, allowing HUD-only apps to restore them on cold launch without an
+  ordinary main or key window.
+
 ## [0.2.1] - 2026-07-31
 
 ### Fixed
@@ -64,7 +76,8 @@ those changes will be called out explicitly here.
 - The implementation relies on private AppKit details and is intended for
   Direct Distribution, not the Mac App Store.
 
-[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.1...HEAD
+[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.2...HEAD
+[0.2.2]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.1...0.2.2
 [0.2.1]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/Clyde-He/Liquid-Glass-Lab/releases/tag/0.1.0
