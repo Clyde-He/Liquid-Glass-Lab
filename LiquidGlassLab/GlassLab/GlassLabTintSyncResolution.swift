@@ -30,8 +30,8 @@ struct GlassLabTintSyncResolutionRow: Codable, Sendable {
     var colorID: String
     var sourceColor: GlassMaterialColorValue
     /// Historical JSON key: whether every requested component sits inside the
-    /// original extended-sRGB unit cube. The later macOS 27 Display P3 model
-    /// certifies many rows where this remains false.
+    /// original extended-sRGB unit cube. The later macOS 26/27 Display P3
+    /// models certify many rows where this remains false.
     var isInCertifiedDomain: Bool
     var cell: GlassLabTintSweepCell
     /// Read immediately after `layout` + `CATransaction.flush()`.

@@ -4,9 +4,9 @@
 //
 //  Closed-form macOS 26/27 synthesis for NSGlassEffectView's Tint-owned
 //  vibrantColorMatrix. The unit-domain model is derived from the accepted
-//  full-grid, focused-boundary, and hue-fraction sweeps. macOS 27 additionally
-//  certifies the complete Display P3 gamut through an independent boundary /
-//  holdout sweep under Golden/macOS-27.
+//  full-grid, focused-boundary, and hue-fraction sweeps. macOS 26 and 27 also
+//  certify the complete Display P3 gamut through independent boundary /
+//  holdout sweeps under their respective Golden directories.
 //
 
 #if os(macOS)
@@ -109,11 +109,11 @@ enum GlassMaterialTintMatrixSynthesizer {
     }
 
     /// The original closed form is certified over the extended-sRGB unit
-    /// cube on macOS 26 and 27. The wider macOS 27 study certifies exactly the
-    /// colors representable by Display P3 — not an axis-aligned extended-RGB
-    /// box. Round-tripping through bounded Display P3 keeps arbitrary HDR or
-    /// other-gamut values fail-closed even when one component happens to sit
-    /// inside the observed P3 extrema.
+    /// cube on macOS 26 and 27. The wider per-major studies certify exactly
+    /// the colors representable by Display P3 — not an axis-aligned
+    /// extended-RGB box. Round-tripping through bounded Display P3 keeps
+    /// arbitrary HDR or other-gamut values fail-closed even when one component
+    /// happens to sit inside the observed P3 extrema.
     static func isWithinCertifiedSynthesisDomain(
         _ source: GlassMaterialColorValue,
         osMajorVersion: Int
@@ -127,11 +127,10 @@ enum GlassMaterialTintMatrixSynthesizer {
             return true
         }
 
-        // The extended gamut has a complete boundary/holdout certification
-        // on 27 only. macOS 26 retains the exact verified-cache/live-resolver
-        // fallback for wider colors until equivalent evidence exists.
-        guard osMajorVersion == 27,
-              let displayP3 = source.nsColor.usingColorSpace(.displayP3),
+        // Both supported majors have complete Display P3 boundary/holdout
+        // certification. Exact cache/live resolution remains the fallback for
+        // colors outside that gamut.
+        guard let displayP3 = source.nsColor.usingColorSpace(.displayP3),
               let roundTrip = displayP3.usingColorSpace(.extendedSRGB)
         else { return false }
 

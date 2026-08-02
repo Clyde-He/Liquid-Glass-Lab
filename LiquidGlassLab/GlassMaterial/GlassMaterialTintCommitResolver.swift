@@ -3,8 +3,8 @@
 //  AdjustableGlass
 //
 //  Synchronous Tint resolution for colors the certified closed form does not
-//  cover — for example a gamut beyond Display P3 on macOS 27, P3 on macOS 26,
-//  or an OS major that has not been certified yet.
+//  cover — for example a gamut beyond Display P3 on macOS 26/27, or an OS
+//  major that has not been certified yet.
 //
 //  The accepted `Golden/macOS-26/tint-sync-resolution.json` evidence shows the
 //  system resolves the Tint matrix in-process at CA commit: on already

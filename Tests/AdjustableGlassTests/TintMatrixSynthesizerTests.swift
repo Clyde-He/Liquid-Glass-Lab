@@ -164,6 +164,98 @@ final class TintMatrixSynthesizerTests: XCTestCase {
     }
 
     @MainActor
+    func testMacOS26DisplayP3BoundaryAndHoldoutPassExtendedModelGate()
+        throws {
+        let document = try loadWideGamutDocument(
+            named: "tint-wide-gamut-model.json",
+            directory: "Golden/macOS-26"
+        )
+        var worst = Residual(
+            value: 0,
+            colorID: "",
+            coefficient: 0,
+            fixture: "Golden/macOS-26/tint-wide-gamut-model.json"
+        )
+        var worstExtendedChromatic = worst
+        var worstHoldout = worst
+
+        for row in document.rows {
+            let reference = try XCTUnwrap(
+                row.flushMatrix,
+                "Missing live matrix for \(row.colorID)"
+            )
+            let synthesized = try XCTUnwrap(
+                GlassMaterialTintMatrixSynthesizer.matrix(
+                    for: row.sourceColor,
+                    cell: row.cell,
+                    osMajorVersion: 26
+                ),
+                "No synthesized matrix for \(row.colorID)"
+            )
+            XCTAssertEqual(synthesized.count, reference.count)
+            let sourceRGB = [
+                row.sourceColor.red,
+                row.sourceColor.green,
+                row.sourceColor.blue,
+            ]
+            let chroma = (sourceRGB.max() ?? 0) - (sourceRGB.min() ?? 0)
+            for coefficient in reference.indices {
+                let residual = abs(
+                    Double(synthesized[coefficient])
+                        - Double(reference[coefficient])
+                )
+                let observation = Residual(
+                    value: residual,
+                    colorID: row.colorID,
+                    coefficient: coefficient,
+                    fixture: worst.fixture
+                )
+                if residual > worst.value { worst = observation }
+                if !row.isInCertifiedDomain, chroma > 0.00035,
+                   residual > worstExtendedChromatic.value {
+                    worstExtendedChromatic = observation
+                }
+                if row.colorID.hasPrefix("holdout-p3-"),
+                   residual > worstHoldout.value {
+                    worstHoldout = observation
+                }
+            }
+        }
+
+        let chromaticOutsideRows = document.rows.filter { row in
+            let sourceRGB = [
+                row.sourceColor.red,
+                row.sourceColor.green,
+                row.sourceColor.blue,
+            ]
+            return !row.isInCertifiedDomain
+                && (sourceRGB.max() ?? 0) - (sourceRGB.min() ?? 0) > 0.00035
+        }
+        XCTAssertEqual(document.rows.count, 408)
+        XCTAssertEqual(
+            document.rows.filter { !$0.isInCertifiedDomain }.count,
+            288
+        )
+        XCTAssertEqual(chromaticOutsideRows.count, 280)
+        XCTAssertLessThanOrEqual(
+            worst.value,
+            0.0002,
+            failureDescription(for: worst)
+        )
+        XCTAssertLessThanOrEqual(
+            worstExtendedChromatic.value,
+            0.000002,
+            "Extended chromatic "
+                + failureDescription(for: worstExtendedChromatic)
+        )
+        XCTAssertLessThanOrEqual(
+            worstHoldout.value,
+            0.000001,
+            "Holdout " + failureDescription(for: worstHoldout)
+        )
+    }
+
+    @MainActor
     func testMacOS27DisplayP3GoldenAlphaSweepOnlyChangesCoefficient18()
         throws {
         let document = try loadWideGamutDocument(
@@ -517,11 +609,11 @@ final class TintMatrixSynthesizerTests: XCTestCase {
     }
 
     @MainActor
-    func testDisplayP3ColorsUseCertifiedMacOS27DomainWithoutClamping()
+    func testDisplayP3ColorsUseCertifiedDomainsWithoutClamping()
         throws {
         // The reported #C7CD28 in Display P3, plus two saturated P3 colors.
         // Their extended-sRGB components leave [0, 1], but remain in the
-        // independently certified Display P3 domain on macOS 27.
+        // independently certified Display P3 domain on macOS 26 and 27.
         let wideGamut = [
             NSColor(
                 displayP3Red: 199 / 255.0,
@@ -539,47 +631,35 @@ final class TintMatrixSynthesizerTests: XCTestCase {
                 components.allSatisfy { $0 >= 0 && $0 <= 1 },
                 "expected an out-of-domain component in \(components)"
             )
-            XCTAssertTrue(
-                GlassMaterialTintMatrixSynthesizer
-                    .isWithinCertifiedSynthesisDomain(
-                        source,
-                        osMajorVersion: 27
-                    )
-            )
-            XCTAssertFalse(
-                GlassMaterialTintMatrixSynthesizer
-                    .isWithinCertifiedSynthesisDomain(
-                        source,
-                        osMajorVersion: 26
-                    )
-            )
-
-            for cell in cells(hasMainParticipation: true) {
-                let matrix = try XCTUnwrap(
-                    GlassMaterialTintMatrixSynthesizer.matrix(
-                        for: source,
-                        cell: cell,
-                        osMajorVersion: 27
-                    )
-                )
-                if cell.isLightAppearance && !cell.isClear {
-                    for row in 0..<3 {
-                        let bright = matrix[(row * 5)...(row * 5 + 2)]
-                            .reduce(matrix[row * 5 + 4], +)
-                        XCTAssertEqual(
-                            Double(bright),
-                            components[row],
-                            accuracy: 0.000002
+            for osMajorVersion in [26, 27] {
+                XCTAssertTrue(
+                    GlassMaterialTintMatrixSynthesizer
+                        .isWithinCertifiedSynthesisDomain(
+                            source,
+                            osMajorVersion: osMajorVersion
                         )
+                )
+
+                for cell in cells(hasMainParticipation: true) {
+                    let matrix = try XCTUnwrap(
+                        GlassMaterialTintMatrixSynthesizer.matrix(
+                            for: source,
+                            cell: cell,
+                            osMajorVersion: osMajorVersion
+                        )
+                    )
+                    if cell.isLightAppearance && !cell.isClear {
+                        for row in 0..<3 {
+                            let bright = matrix[(row * 5)...(row * 5 + 2)]
+                                .reduce(matrix[row * 5 + 4], +)
+                            XCTAssertEqual(
+                                Double(bright),
+                                components[row],
+                                accuracy: 0.000002
+                            )
+                        }
                     }
                 }
-                XCTAssertNil(
-                    GlassMaterialTintMatrixSynthesizer.matrix(
-                        for: source,
-                        cell: cell,
-                        osMajorVersion: 26
-                    )
-                )
             }
         }
     }
@@ -769,14 +849,15 @@ final class TintMatrixSynthesizerTests: XCTestCase {
     }
 
     private func loadWideGamutDocument(
-        named name: String
+        named name: String,
+        directory: String = "Golden/macOS-27"
     ) throws -> WideGamutDocument {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let url = repositoryRoot
-            .appendingPathComponent("Golden/macOS-27")
+            .appendingPathComponent(directory)
             .appendingPathComponent(name)
         return try JSONDecoder().decode(
             WideGamutDocument.self,

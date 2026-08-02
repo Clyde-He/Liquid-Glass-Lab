@@ -264,13 +264,14 @@ failures, maximum live matrix residual `1.963973e-4`, maximum A/A RGB code
 delta 3, and maximum synthesized A/B RGB code delta 3. The per-row p99/RMS
 checks stayed within the calibrated compositor-noise envelope.
 
-Product runtime behavior is now switched on macOS 27.
+Product runtime behavior is now switched on macOS 26 and 27.
 `GlassEffectController` synthesizes the selected Normal/Muted context
 matrices synchronously into an in-memory Atlas copy. The closed-form path does
 not mutate the Provider Atlas or persist a color-bound cache, and a legacy
 cached matrix cannot override it. The original certification covered the
-extended-sRGB unit cube; the Display P3 extension and its independent evidence
-are recorded below. Colors outside the major's certified domain still use the
+extended-sRGB unit cube; the per-major Display P3 extensions and their
+independent evidence are recorded below. Colors outside the major's certified
+domain still use the
 commit resolver; only a complete, paired eight-cell result is promoted to the
 Provider's bounded, exact-RGB, major-scoped runtime Tint overlay.
 
@@ -343,9 +344,9 @@ no multi-frame settle. Further runloop turns do not change the value.
 synchronous rather than blindly extrapolating the then-incomplete endpoint
 formula: set the color on a probe in the genuinely main host window, flush the
 transaction, and read the resolved matrix. That remains the generic fallback
-for unknown gamuts. The later macOS 27 boundary/holdout study below recovered
+for unknown gamuts. The later macOS 26/27 boundary/holdout studies recovered
 the missing Display P3 branch exactly, so ordinary P3 no longer needs a host
-or a per-color capture on that major.
+or a per-color capture on either certified major.
 
 Open item: the flush behavior above was measured on a non-participating
 window (a plain CLI binary cannot become main/key). Confirming it under
@@ -422,7 +423,7 @@ the first safe general solution. It remains the path for unseen colors outside
 the current certification. It is no longer the primary macOS 27 Display P3
 solution after the complete-domain result below.
 
-### macOS 27 Display P3 extension: the missing rule was bounded pastel
+### macOS 26/27 Display P3 extension: the missing rule was bounded pastel
 
 The cold-launch failure exposed a practical limit in the commit-first design:
 a HUD-only menu-bar app may have no ordinary main/key reference window after
@@ -463,13 +464,22 @@ maximum complete-matrix residual: 9.16e-7
 maximum holdout pastel residual: 5.64e-7
 ```
 
+`Golden/macOS-26/tint-wide-gamut-model.json` repeats the same 51-color plan on
+macOS 26.6 (Build 25G70). All 408 rows pass synchronous/settled and paired
+proof gates, including 288 rows outside the historical unit cube. With the 26
+family/context table retained, the 280 genuinely chromatic out-of-unit rows
+have maximum residual `9.16e-7`; the 192 Halton holdout rows have maximum
+residual `5.63e-7`. Black, gray 0.5, and Float-round-tripped white retain the
+known 26 achromatic-family residual (`6.57e-5` maximum), below the existing
+26 complete-matrix gate of `2e-4` and unrelated to the P3 bounded-pastel rule.
+
 The synthesis admission gate is the actual Display P3 gamut, not an
 axis-aligned extended-sRGB range: a candidate is reconstructed in extended
 sRGB, converted to bounded Display P3, and round-tripped. Only a float-precise
 round trip is admitted. This preserves negative/>1 extended-sRGB components
 while rejecting nearby HDR, Rec. 2020, or arbitrary extended values. The P3
-extension is certified on macOS 27 only; macOS 26 continues to use exact cache
-or legal-host resolution for P3.
+extension is certified independently on macOS 26 and 27. Exact cache or
+legal-host resolution remains the fallback outside Display P3.
 
 The resulting runtime order is:
 

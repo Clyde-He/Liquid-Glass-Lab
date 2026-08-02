@@ -21,11 +21,11 @@ The question under investigation is whether an arbitrary Tint color can be
 converted directly into the required `ColorMatrix4x5`, avoiding a live
 per-color Main-On calibration.
 
-## 2026-08-01 Display P3 outcome
+## 2026-08-02 macOS 26/27 Display P3 outcome
 
 The original handoff below certifies the extended-sRGB unit cube. The later
-macOS 27 cold-start investigation extended that result to the complete
-Display P3 gamut without clamping the source color.
+per-major cold-start investigations extended that result to the complete
+Display P3 gamut without clamping the source color on macOS 26 and 27.
 
 Only the out-of-unit `pastel` family was missing a rule. Applying the existing
 provisional endpoint and then these component-relative bounds reproduces the
@@ -41,13 +41,19 @@ boundary colors and 24 predeclared Halton holdouts over all eight cells. All
 408 rows pass paired proof and synchronous/settled equality; the worst model
 residual is `9.16e-7`, and the holdout-pastel maximum is `5.64e-7`.
 
+`Golden/macOS-26/tint-wide-gamut-model.json` repeats the same plan on macOS
+26.6. All 408 rows pass capture-integrity gates. Retaining the 26 family and
+context selection while enabling the same Display P3 bounds gives a maximum
+chromatic out-of-unit residual of `9.16e-7` and a maximum Halton-holdout
+residual of `5.63e-7`. The larger `6.57e-5` all-row maximum is confined to the
+already-certified 26 achromatic family and remains below its `2e-4` gate.
+
 Product admission is gamut-shaped, not a loose extended-RGB range: source
 extended-sRGB values must round-trip through bounded Display P3 within the
-measured Float conversion tolerance. macOS 27 runtime order is now certified
-model → exact compatible cache → legal-host resolver → wait. The exact cache
-remains a fallback for resolver-proven colors beyond Display P3; it is not the
-general P3 solution. macOS 26 remains unit-domain-only until equivalent full
-P3 evidence exists.
+measured Float conversion tolerance. The macOS 26/27 runtime order is now
+certified model → exact compatible cache → legal-host resolver → wait. The
+exact cache remains a fallback for resolver-proven colors beyond Display P3;
+it is not the general P3 solution.
 
 ## Correction: What Did and Did Not Fail
 
