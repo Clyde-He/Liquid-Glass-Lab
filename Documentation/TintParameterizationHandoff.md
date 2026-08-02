@@ -455,8 +455,10 @@ Both matrix-space and rendered-output acceptance pass on macOS 27, and
 
 1. On macOS 27, each configuration update synthesizes the four matrices needed
    by the selected Normal/Muted participation into an in-memory Atlas copy.
-   The Provider Atlas is not mutated or persisted, and legacy cached matrices
-   cannot override the closed form.
+   The closed-form path does not mutate or persist the Provider Atlas, and
+   legacy cached matrices cannot override it. A complete commit-resolved
+   eight-cell set for an out-of-domain color is separately promoted to the
+   bounded, major-scoped runtime Tint overlay.
 2. `lockingTint` remains only as a fail-closed fallback for unsupported system
    majors or colors outside the certified synthesis input domain.
 3. Keep synthesis major-scoped. macOS 26 still needs a reduced certification

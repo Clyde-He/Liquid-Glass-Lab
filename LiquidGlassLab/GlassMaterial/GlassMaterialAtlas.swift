@@ -191,8 +191,9 @@ struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
 
 /// The captured style atlas: one entry per context cell, each holding samples
 /// at several short sides plus optional color-bound Tint matrices. Persisted
-/// overlays come from verified capture; the product controller may also add a
-/// supported-major synthesized overlay to an in-memory value-semantic copy.
+/// overlays come only from complete, verified capture/commit results; the
+/// product controller may also add a supported-major synthesized overlay to an
+/// in-memory value-semantic copy.
 ///
 /// An atlas is a versioned material snapshot. Product catalogs intentionally
 /// pin one accepted snapshot per macOS major release: minor/beta builds and
@@ -293,6 +294,29 @@ struct GlassMaterialStyleAtlas: Codable, Sendable {
         }
     }
 
+    /// The Tint resolver always reads a paired set: every appearance ×
+    /// variant cell in both participation branches. Keeping this list in the
+    /// atlas makes the persistence seam use the same complete-set definition
+    /// as the live resolver instead of accepting whichever emphasis happened
+    /// to be visible when a cache was written.
+    static var allTintCells: [Cell] {
+        [true, false].flatMap { isLight in
+            [false, true].flatMap { isClear in
+                [true, false].map { hasMainParticipation in
+                    Cell(
+                        isLightAppearance: isLight,
+                        isClear: isClear,
+                        hasMainParticipation: hasMainParticipation
+                    )
+                }
+            }
+        }
+    }
+
+    /// Match the controller's in-memory Tint cache bound. A persisted cache
+    /// must not grow without limit as a color picker streams new RGB values.
+    static let tintMatrixColorLimit = 8
+
     /// A resolved Tint matrix bound to its source color. The
     /// transition only animates coefficient 18 (alpha); the 19 hue
     /// coefficients are context-resolved constants, and a non-main window
@@ -332,7 +356,8 @@ struct GlassMaterialStyleAtlas: Codable, Sendable {
     /// Adds a resolved Tint matrix for the cell, replacing any entry with the
     /// same source RGB. Persisted runtime overlays accumulate independently of
     /// the size samples; synchronous product synthesis applies this mutation
-    /// only to a short-lived Atlas copy.
+    /// only to a short-lived Atlas copy, while the Provider admits a complete
+    /// verified set through its persistence seam.
     public mutating func addTintMatrix(_ matrix: TintMatrix, for cell: Cell) {
         var entries = tintMatrices[cell] ?? []
         entries.removeAll {
@@ -352,18 +377,99 @@ struct GlassMaterialStyleAtlas: Codable, Sendable {
         tintMatrices.values.contains { !$0.isEmpty }
     }
 
+    /// Number of complete color-bound overlays currently retained. Invalid or
+    /// partial decoded entries are intentionally not counted.
+    var tintMatrixColorCount: Int {
+        completeTintMatrixSets().count
+    }
+
+    /// Builds a candidate containing one resolver-proven complete Tint set.
+    /// The caller must only invoke this with matrices returned after the live
+    /// Main-On/Main-Off proof; this method supplies the structural and
+    /// persistence gates and never mutates the receiver on failure.
+    func addingVerifiedTintMatrixSet(
+        sourceColor: GlassMaterialColorValue,
+        matrices: [Cell: [Float]]
+    ) -> GlassMaterialStyleAtlas? {
+        guard Self.isValidTintSourceColor(sourceColor),
+              Set(matrices.keys) == Set(Self.allTintCells),
+              matrices.values.allSatisfy({
+                  Self.isValidTintMatrix($0, sourceColor: sourceColor)
+              })
+        else { return nil }
+
+        var candidate = self
+        for cell in Self.allTintCells {
+            guard let matrix = matrices[cell] else { return nil }
+            candidate.addTintMatrix(
+                TintMatrix(sourceColor: sourceColor, matrix: matrix),
+                for: cell
+            )
+        }
+        candidate.removeIncompleteTintMatrices()
+        candidate.retainTintMatrices(
+            upTo: Self.tintMatrixColorLimit,
+            keeping: sourceColor
+        )
+        return candidate
+    }
+
     /// Applies only the reusable tint overlay from a compatible runtime cache
     /// to a newly bundled certified base. The catalog remains authoritative
-    /// for every style sample; cache data can only add well-formed color-bound
-    /// matrices.
+    /// for every style sample; cache data can only add complete, well-formed
+    /// color-bound matrix sets.
     public mutating func mergeTintMatrices(
         from compatibleCache: GlassMaterialStyleAtlas
     ) {
-        for (cell, entries) in compatibleCache.tintMatrices {
-            for entry in entries where entry.matrix.count == 20 {
+        for entries in compatibleCache.completeTintMatrixSets().values {
+            for (cell, entry) in entries {
                 addTintMatrix(entry, for: cell)
             }
         }
+        removeIncompleteTintMatrices()
+        retainTintMatrices(upTo: Self.tintMatrixColorLimit)
+    }
+
+    /// Discards every decoded Tint entry that is not part of a complete,
+    /// structurally valid eight-cell set. This is deliberately separate from
+    /// base-atlas validation: a bad runtime overlay must never make a
+    /// certified base unusable, but it also must never become installable.
+    mutating func removeIncompleteTintMatrices() {
+        let completeSets = completeTintMatrixSets()
+        var sanitized: [Cell: [TintMatrix]] = [:]
+        for entries in completeSets.values {
+            for (cell, entry) in entries {
+                sanitized[cell, default: []].append(entry)
+            }
+        }
+        tintMatrices = sanitized
+    }
+
+    /// Enforces the bounded runtime policy using a stable RGB ordering. A
+    /// newly committed color is optionally kept first; the remainder are
+    /// retained deterministically so loading the same cache is repeatable.
+    mutating func retainTintMatrices(
+        upTo maximumColorCount: Int,
+        keeping sourceColor: GlassMaterialColorValue? = nil
+    ) {
+        removeIncompleteTintMatrices()
+        guard maximumColorCount > 0 else {
+            tintMatrices = [:]
+            return
+        }
+
+        let completeSets = completeTintMatrixSets()
+        var colors = completeSets.keys.sorted(by: Self.tintColorPrecedes)
+        if let sourceColor,
+           completeSets[sourceColor] != nil {
+            colors.removeAll { $0 == sourceColor }
+            colors.insert(sourceColor, at: 0)
+        }
+        let retained = Set(colors.prefix(maximumColorCount))
+        tintMatrices = tintMatrices.mapValues { entries in
+            entries.filter { retained.contains($0.sourceColor) }
+        }
+        tintMatrices = tintMatrices.filter { !$0.value.isEmpty }
     }
 
     /// The captured Tint matrix for a cell, but only when it was resolved for
@@ -391,6 +497,59 @@ struct GlassMaterialStyleAtlas: Codable, Sendable {
         return abs(a.red - b.red) <= tolerance
             && abs(a.green - b.green) <= tolerance
             && abs(a.blue - b.blue) <= tolerance
+    }
+
+    private static func tintColorPrecedes(
+        _ a: GlassMaterialColorValue,
+        _ b: GlassMaterialColorValue
+    ) -> Bool {
+        if a.red != b.red { return a.red < b.red }
+        if a.green != b.green { return a.green < b.green }
+        if a.blue != b.blue { return a.blue < b.blue }
+        return a.alpha < b.alpha
+    }
+
+    private static func isValidTintSourceColor(
+        _ sourceColor: GlassMaterialColorValue
+    ) -> Bool {
+        sourceColor.red.isFinite
+            && sourceColor.green.isFinite
+            && sourceColor.blue.isFinite
+            && sourceColor.alpha.isFinite
+            && sourceColor.alpha >= 0
+            && sourceColor.alpha <= 1
+    }
+
+    private static func isValidTintMatrix(
+        _ matrix: [Float],
+        sourceColor: GlassMaterialColorValue
+    ) -> Bool {
+        matrix.count == 20
+            && matrix.allSatisfy(\.isFinite)
+            && isValidTintSourceColor(sourceColor)
+            // The system's Tint transition owns coefficient 18. Requiring
+            // the capture alpha here rejects a complete-looking but
+            // unverified/random matrix while preserving the RGB-only cache
+            // key and the controller's later alpha patch.
+            && abs(Double(matrix[18]) - sourceColor.alpha) <= 0.0001
+    }
+
+    private func completeTintMatrixSets()
+        -> [GlassMaterialColorValue: [Cell: TintMatrix]] {
+        var grouped: [GlassMaterialColorValue: [Cell: TintMatrix]] = [:]
+        for (cell, entries) in tintMatrices {
+            for entry in entries
+            where Self.isValidTintMatrix(
+                entry.matrix,
+                sourceColor: entry.sourceColor
+            ) {
+                grouped[entry.sourceColor, default: [:]][cell] = entry
+            }
+        }
+        let requiredCells = Set(Self.allTintCells)
+        return grouped.filter { _, entries in
+            Set(entries.keys) == requiredCells
+        }
     }
 
     public func sampleShortSides(for cell: Cell) -> [Double] {

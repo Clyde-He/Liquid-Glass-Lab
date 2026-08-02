@@ -16,8 +16,9 @@ import OSLog
 @MainActor
 final class GlassEffectController {
     /// Provenance of the verified base material. On a supported system,
-    /// color-specific Tint matrices are synthesized synchronously and are not
-    /// persisted; older fallback paths may still use the app-scoped cache.
+    /// color-specific in-domain Tint matrices are synthesized synchronously;
+    /// verified commit-resolved overlays may also be supplied by the
+    /// app-scoped runtime cache.
     enum Source: String, Equatable, Sendable {
         case certifiedCatalog
         case runtimeCache
@@ -746,8 +747,10 @@ final class GlassEffectController {
 
         let hasMainParticipation = emphasis == .normal
         var resolved = atlasProvider.atlas
-        // Same discipline as synthesis: a live-resolved overlay lives only on
-        // this value-semantic copy and is never persisted.
+        // Same discipline as synthesis: this value-semantic copy is only the
+        // display candidate. A complete successful resolver result is
+        // promoted separately through the Provider persistence seam below;
+        // this method itself never makes a temporary copy authoritative.
         resolved.removeAllTintMatrices()
         for (cell, matrix) in matrices {
             resolved.addTintMatrix(
@@ -832,11 +835,32 @@ final class GlassEffectController {
         } else {
             return nil
         }
-        return entry.mapValues { matrix in
-            var patched = matrix
-            patched[18] = Float(sourceColor.alpha)
-            return patched
+        var patched: [GlassMaterialStyleAtlas.Cell: [Float]] = [:]
+        for (cell, matrix) in entry {
+            guard let value = Self.tintMatrixByPatchingAlpha(
+                matrix,
+                sourceColor: sourceColor
+            ) else { return nil }
+            patched[cell] = value
         }
+        return patched
+    }
+
+    /// Applies the requested alpha without changing the captured RGB-bound
+    /// coefficients. This is the same coefficient-18 contract used by both
+    /// the in-memory and persisted Tint overlays.
+    static func tintMatrixByPatchingAlpha(
+        _ matrix: [Float],
+        sourceColor: GlassMaterialColorValue
+    ) -> [Float]? {
+        guard matrix.count == 20,
+              sourceColor.alpha.isFinite,
+              sourceColor.alpha >= 0,
+              sourceColor.alpha <= 1
+        else { return nil }
+        var patched = matrix
+        patched[18] = Float(sourceColor.alpha)
+        return patched
     }
 
     /// Resolves one color on its own runloop turn, outside any layout pass,
@@ -983,6 +1007,14 @@ final class GlassEffectController {
         let key = Self.rgbKey(for: request.sourceColor)
         tintCommitResolutionUnavailable = false
         storeCommitMatrices(matrices, for: key)
+        if !atlasProvider.persistVerifiedTintMatrices(
+            sourceColor: request.sourceColor,
+            matrices: matrices
+        ) {
+            GlassMaterialTintLog.signposts.notice(
+                "verified Tint overlay was not persisted; retaining session cache"
+            )
+        }
         displayedTintMatrices = (key, matrices)
         if let newest = pendingTintCommitRequest,
            Self.rgbKey(for: newest.sourceColor) == key {
@@ -1012,7 +1044,8 @@ final class GlassEffectController {
         _ matrices: [GlassMaterialStyleAtlas.Cell: [Float]],
         for key: SIMD3<Double>
     ) {
-        if tintCommitCacheOrder.count >= 8,
+        if tintCommitCacheOrder.count
+            >= GlassMaterialStyleAtlas.tintMatrixColorLimit,
            let oldest = tintCommitCacheOrder.first {
             tintCommitCacheOrder.removeFirst()
             tintCommitCache[oldest] = nil

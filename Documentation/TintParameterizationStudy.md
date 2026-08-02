@@ -266,9 +266,11 @@ checks stayed within the calibrated compositor-noise envelope.
 
 Product runtime behavior is now switched on macOS 27.
 `GlassEffectController` synthesizes the selected Normal/Muted context
-matrices synchronously into an in-memory Atlas copy. It does not mutate the
-Provider Atlas or persist a color-bound cache, and a legacy cached matrix
-cannot override the closed form.
+matrices synchronously into an in-memory Atlas copy. The closed-form path does
+not mutate the Provider Atlas or persist a color-bound cache, and a legacy
+cached matrix cannot override it. Colors outside that certified domain still
+use the commit resolver; only a complete, paired eight-cell result is
+promoted to the Provider's bounded, major-scoped runtime Tint overlay.
 
 The original grid capture, structure classification, and endpoint fitting
 steps are complete. The cross-version check has since been executed in full:

@@ -64,9 +64,10 @@ When supplied, `referenceWindow` must be an ordinary window that can genuinely
 become main or key, such as Settings or the app's primary window. The rendered
 glass can live in a nonactivating HUD panel and never become main or key itself.
 The reference may be nil at launch and replaced later without recreating the
-glass or its `contentView`. A certified base atlas and supported in-gamut Tint
-can become ready without it; runtime calibration and system-resolved
-wider-gamut Tint wait until a reference window is available and participating.
+glass or its `contentView`. A certified base atlas, supported in-gamut Tint,
+and a previously verified cached wider-gamut Tint can become ready without it;
+new runtime calibration or an unseen system-resolved wider-gamut Tint waits
+until a reference window is available and participating.
 
 When `referenceWindow` is managed by SwiftUI, provide `referenceView` from an
 `NSViewRepresentable` installed in that window's content. AppKit does not
@@ -79,10 +80,13 @@ The packaged
 `glass-macos-<major>.json` is discovered from the Swift Package resource bundle
 automatically. On the certified majors (macOS 26 and 27), arbitrary in-gamut
 Tint colors are synthesized synchronously into an in-memory overlay: changing
-a color neither captures nor writes a per-color matrix cache. Runtime base
-calibration and unsupported-major Tint fallback data may still be cached under
-the consumer app's Caches directory; the product does not supply or coordinate
-JSON files.
+such a color neither captures nor writes a per-color matrix cache. A color the
+closed form cannot cover is resolved only through the genuinely participating
+probe pair; after the complete eight-cell result passes frozen readback, the
+Provider may atomically retain it in the consumer app's bounded, macOS-major
+scoped runtime cache. Runtime base calibration and these verified Tint
+overlays may therefore be cached under the consumer app's Caches directory;
+the product does not supply or coordinate JSON files.
 
 `active` and `inactive` are product semantics, not trusted labels in a JSON file.
 Both are installed from the same paired atlas transaction. On a certified
@@ -104,11 +108,13 @@ conservative — see the
 Both paths fail closed. The requested color appears only once every cell of
 the selected participation has a verified matrix, proven against the paired
 Main-Off witness; the product never presents a hue-suppressed live fallback as
-a successfully configured Tint. Commit-resolved overlays live on an in-memory
-Atlas copy and are never persisted. Commit resolution needs the host window to
-be genuinely main or key at the moment of the pick, which is true while a user
-picks a color in the app's own window; otherwise the color stays withheld and
-`status` reports `waitingForReferenceWindow`.
+a successfully configured Tint. A commit result first lives on a temporary
+Atlas copy for the current presentation, then only a complete, verified
+eight-cell result is promoted to the bounded runtime overlay; partial or
+unverified results are never written. Commit resolution needs the host window
+to be genuinely main or key at the moment of the pick, which is true while a
+user picks a color in the app's own window; otherwise the color stays withheld
+and `status` reports `waitingForReferenceWindow`.
 
 Run the independent `GlassHUDConsumerDemo` app scheme from Xcode. To compile it
 from the command line:
