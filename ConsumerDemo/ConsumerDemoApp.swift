@@ -190,6 +190,12 @@ private final class ConsumerDemoAppDelegate:
     private var hudContentSize = CGSize(width: 320, height: 120)
     private var hudCornerRadius: CGFloat = 24
     private var isLayingOutHUDPanel = false
+    private var lastHUDLayoutSignature: HUDLayoutSignature?
+
+    private struct HUDLayoutSignature: Equatable {
+        let contentSize: CGSize
+        let requiredWindowInset: CGFloat
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let controlWindow = buildControlWindow()
@@ -475,17 +481,31 @@ private final class ConsumerDemoAppDelegate:
               let panel = hudPanel,
               let glass = glassView
         else { return }
+
+        let contentSize = hudContentSize
+        let proposedSignature = HUDLayoutSignature(
+            contentSize: contentSize,
+            requiredWindowInset: glass.requiredWindowInset
+        )
+        // Material-only controls such as Visibility and Tint stream through
+        // this same convergence point. If neither consumer-owned geometry nor
+        // the Package's public inset contract changed, touching the panel or
+        // forcing an NSView layout would only provoke an unrelated AppKit
+        // Recipe rebuild on every control event.
+        guard proposedSignature != lastHUDLayoutSignature else { return }
+
         isLayingOutHUDPanel = true
         defer { isLayingOutHUDPanel = false }
 
-        let contentSize = hudContentSize
         let previousVisualOrigin = NSPoint(
             x: panel.frame.minX + glass.frame.minX,
             y: panel.frame.minY + glass.frame.minY
         )
-        glass.setFrameSize(contentSize)
-        glass.needsLayout = true
-        glass.layoutSubtreeIfNeeded()
+        if lastHUDLayoutSignature == nil || glass.frame.size != contentSize {
+            glass.setFrameSize(contentSize)
+            glass.needsLayout = true
+            glass.layoutSubtreeIfNeeded()
+        }
         let inset = glass.requiredWindowInset
         let total = CGSize(
             width: contentSize.width + inset * 2,
@@ -500,6 +520,10 @@ private final class ConsumerDemoAppDelegate:
             x: previousVisualOrigin.x - inset,
             y: previousVisualOrigin.y - inset
         ))
+        lastHUDLayoutSignature = HUDLayoutSignature(
+            contentSize: contentSize,
+            requiredWindowInset: inset
+        )
     }
 
     private func glassFrame(
