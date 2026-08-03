@@ -328,6 +328,10 @@ final class GlassEffectController {
             hostWindow: hostWindow,
             probeHostView: probeHostView
         )
+        tintPipeline.updateRequestedTint(
+            self.configuration.tint,
+            emphasis: self.configuration.emphasis
+        )
         tintPipeline.onWarmUpCompleted = { [weak self] warm in
             guard let self else { return }
             self.mergePipelineDiagnostics()
@@ -840,6 +844,7 @@ final class GlassEffectController {
     private func scheduleTintPresentation() {
         if pendingTintPresentation {
             presentationSupersededCount += 1
+            mergePipelineDiagnostics()
         }
         pendingTintPresentation = true
         startTintDisplayLink()
