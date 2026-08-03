@@ -10,6 +10,7 @@
 #if os(macOS)
 import AppKit
 import QuartzCore
+import os
 
 @available(macOS 26.0, *)
 @MainActor
