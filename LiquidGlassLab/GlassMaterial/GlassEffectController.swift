@@ -1285,14 +1285,20 @@ final class GlassEffectController {
 
     /// True when the last successful install already covers this exact
     /// request: identical configuration, identical verified base, complete
-    /// paired coverage, and the same Tint that would be displayed now — held
-    /// or resolved — already written. Pure state comparison, no tree access
-    /// and no enqueued work.
+    /// paired coverage, the same Tint that would be displayed now — held or
+    /// resolved — already written, and the frozen style still physically
+    /// installed on the AppKit tree. The live-tree read is what keeps the
+    /// skip safe: the applied record is historical, and AppKit can rebuild
+    /// or drop the private tree while every requested axis stays identical.
+    /// Without the readback, an early return would strand the HUD on the
+    /// system material with `frozenInstallFailed` and no retry. This check
+    /// never enqueues resolution work.
     private func isRedundantApply() -> Bool {
         guard let applied = appliedMaterialState,
               applied.configuration == configuration,
               applied.baseGeneration == baseAtlasGeneration,
-              atlasProvider.isPairedCoverageComplete
+              atlasProvider.isPairedCoverageComplete,
+              glassView?.materialStrength.frozenStyleIsCurrentlyApplied == true
         else { return false }
         return applied.displayedTintKey == displayedTintKeyForCurrentState
     }

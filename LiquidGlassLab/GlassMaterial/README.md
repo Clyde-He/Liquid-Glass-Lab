@@ -50,6 +50,7 @@ right vocabulary:
 | `hasOuterShadow` | Retains the bounds-extending shadow; when `false`, the safety inset is 0pt on macOS 26 and 1pt on macOS 27 |
 | `referenceWindow` | Optional, replaceable ordinary app window used for verification |
 | `referenceView` | Optional consumer-owned AppKit insertion point for invisible verification probes |
+| `setReferenceHost(window:view:)` | Atomically replaces the reference window and probe view as one host transition |
 | `requiredWindowInset`, `onRequiredWindowInsetChange` | Transparent room required around the visual glass bounds |
 | `status`, `onStatusChange`, `prepareIfNeeded()` | Readiness and retry surface |
 | `performConfigurationUpdates(_:)` | Applies several property changes as one material transaction |
@@ -68,6 +69,15 @@ glass or its `contentView`. A certified base atlas, a Tint inside the major's
 certified synthesis domain, and a previously verified exact cached Tint can
 become ready without it; new runtime calibration or an unseen Tint outside
 that domain waits until a reference window is available and participating.
+
+Change a window and its probe view together with
+`setReferenceHost(window:view:)` — one host transition, unlike two separate
+property writes. The reference host is a calibration/resolver capability, not
+ownership of the rendered material: detaching it (including when the
+reference window itself closes) leaves an already verified, frozen material
+and a resolved Tint on screen unchanged, while genuinely unresolved
+calibration or Tint work waits for a participating replacement host. Rebinding
+the same host pair is a no-op.
 
 When `referenceWindow` is managed by SwiftUI, provide `referenceView` from an
 `NSViewRepresentable` installed in that window's content. AppKit does not

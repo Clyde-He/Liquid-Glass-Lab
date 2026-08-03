@@ -129,11 +129,19 @@ final class ReferenceLifecycleTests: XCTestCase {
     }
 
     @MainActor
-    func testRepeatedEnsureReadyDoesNotRefreeze() throws {
-        let view = makeGlassView()
+    func testRepeatedEnsureReadyDoesNotRefreeze() async throws {
+        let (window, glass) = makeRealWindowAndGlass()
+        defer {
+            window.orderOut(nil)
+            glass.materialStrength.invalidate()
+        }
         let controller = try makeController()
-        controller.attach(to: view)
+        controller.attach(to: glass)
         controller.ensureReady()
+        guard await waitForFrozenStyle(on: glass) else {
+            XCTFail("frozen style never installed on the real tree")
+            return
+        }
         let freezeCount = controller.tintDiagnostics.fullFreezeCount
 
         // Duplicate readiness work for an unchanged controller must not re-run
@@ -161,22 +169,30 @@ final class ReferenceLifecycleTests: XCTestCase {
     }
 
     @MainActor
-    func testControllerDetachAndReplacementKeepVerifiedBaseAndSkipFreeze() throws {
-        let view = makeGlassView()
+    func testControllerDetachAndReplacementKeepVerifiedBaseAndSkipFreeze() async throws {
+        let (window, glass) = makeRealWindowAndGlass()
+        defer {
+            window.orderOut(nil)
+            glass.materialStrength.invalidate()
+        }
         let controller = try makeController()
-        controller.attach(to: view)
+        controller.attach(to: glass)
         controller.ensureReady()
-        let (window, anchor) = makeReferenceHost()
-        controller.rebindReferenceHost(hostWindow: window, probeHostView: anchor)
+        guard await waitForFrozenStyle(on: glass) else {
+            XCTFail("frozen style never installed on the real tree")
+            return
+        }
+        let (hostWindow, anchor) = makeReferenceHost()
+        controller.rebindReferenceHost(hostWindow: hostWindow, probeHostView: anchor)
         let freezeCount = controller.tintDiagnostics.fullFreezeCount
-        let insetBefore = view.experimentalNativeRequiredWindowInset
+        let insetBefore = glass.experimentalNativeRequiredWindowInset
 
         // Detaching the host must not invalidate the installed material or
         // re-run the freeze for unchanged state.
         controller.rebindReferenceHost(hostWindow: nil, probeHostView: nil)
         XCTAssertNil(controller.hostWindow)
         XCTAssertEqual(controller.tintDiagnostics.fullFreezeCount, freezeCount)
-        XCTAssertEqual(view.experimentalNativeRequiredWindowInset, insetBefore)
+        XCTAssertEqual(glass.experimentalNativeRequiredWindowInset, insetBefore)
 
         // A replacement host re-targets calibration without restamping.
         let (replacement, replacementAnchor) = makeReferenceHost()
@@ -190,23 +206,72 @@ final class ReferenceLifecycleTests: XCTestCase {
     }
 
     @MainActor
-    func testUnresolvedTintWaitsForHostWhileBaseMaterialHolds() throws {
-        let view = makeGlassView()
+    func testUnresolvedTintWaitsForHostWhileBaseMaterialHolds() async throws {
+        let (window, glass) = makeRealWindowAndGlass()
+        defer {
+            window.orderOut(nil)
+            glass.materialStrength.invalidate()
+        }
         let controller = try makeController(
             tint: outOfDomainColor()
         )
-        controller.attach(to: view)
+        controller.attach(to: glass)
         controller.ensureReady()
-        let (window, anchor) = makeReferenceHost()
-        controller.rebindReferenceHost(hostWindow: window, probeHostView: anchor)
+        guard await waitForFrozenStyle(on: glass) else {
+            XCTFail("frozen style never installed on the real tree")
+            return
+        }
+        let (hostWindow, anchor) = makeReferenceHost()
+        controller.rebindReferenceHost(hostWindow: hostWindow, probeHostView: anchor)
         let freezeCount = controller.tintDiagnostics.fullFreezeCount
 
         // The certified base is installed once; the out-of-domain Tint has no
         // verified matrices and no participating host, so the controller must
         // wait — without re-freezing the base.
-        view.prepareIfNeeded()
+        controller.ensureReady()
         XCTAssertEqual(controller.tintDiagnostics.fullFreezeCount, freezeCount)
-        XCTAssertGreaterThan(view.experimentalNativeRequiredWindowInset, 0)
+        XCTAssertGreaterThan(glass.experimentalNativeRequiredWindowInset, 0)
+    }
+
+    @MainActor
+    func testRedundantApplyRequiresLiveFrozenStyle() async throws {
+        let (window, glass) = makeRealWindowAndGlass()
+        defer {
+            window.orderOut(nil)
+            glass.materialStrength.invalidate()
+        }
+        let controller = try makeController()
+        controller.attach(to: glass)
+        controller.ensureReady()
+        guard await waitForFrozenStyle(on: glass) else {
+            XCTFail("frozen style never installed on the real tree")
+            return
+        }
+        let installedCount = controller.tintDiagnostics.fullFreezeCount
+
+        // The requested state stays identical; only the material-strength
+        // frozen state is dropped, as if AppKit rebuilt the private tree.
+        glass.materialStrength.invalidate()
+        XCTAssertFalse(glass.materialStrength.frozenStyleIsCurrentlyApplied)
+
+        // The live-tree check must turn the redundant apply into a real
+        // re-freeze that restores the frozen style.
+        controller.ensureReady()
+        XCTAssertEqual(
+            controller.tintDiagnostics.fullFreezeCount,
+            installedCount + 1
+        )
+        guard await waitForFrozenStyle(on: glass) else {
+            XCTFail("re-freeze did not restore the frozen style")
+            return
+        }
+
+        // With the style restored, the next identical ensure is idempotent.
+        controller.ensureReady()
+        XCTAssertEqual(
+            controller.tintDiagnostics.fullFreezeCount,
+            installedCount + 1
+        )
     }
 
     @MainActor
@@ -299,6 +364,44 @@ final class ReferenceLifecycleTests: XCTestCase {
         AdjustableGlassEffectView(
             frame: NSRect(x: 0, y: 0, width: 320, height: 120)
         )
+    }
+
+    /// A window ordered front so AppKit materializes the private glass tree,
+    /// which `frozenStyleIsCurrentlyApplied` and the freeze readback need.
+    @MainActor
+    private func makeRealWindowAndGlass() -> (NSWindow, AdjustableGlassEffectView) {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        let glass = AdjustableGlassEffectView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 120)
+        )
+        window.contentView?.addSubview(glass)
+        window.orderFront(nil)
+        return (window, glass)
+    }
+
+    /// Polls until the frozen style reads back on the real tree. The strength
+    /// writer heals AppKit's margin re-derivation on its own beats, so the
+    /// first poll that sees the full style holds is the stable one.
+    @MainActor
+    private func waitForFrozenStyle(
+        on glass: AdjustableGlassEffectView,
+        timeoutNanoseconds: UInt64 = 2_000_000_000
+    ) async -> Bool {
+        let start = DispatchTime.now().uptimeNanoseconds
+        while DispatchTime.now().uptimeNanoseconds - start < timeoutNanoseconds {
+            glass.layoutSubtreeIfNeeded()
+            if glass.materialStrength.frozenStyleIsCurrentlyApplied {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return false
     }
 
     @MainActor
