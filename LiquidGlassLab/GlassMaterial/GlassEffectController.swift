@@ -476,6 +476,15 @@ final class GlassEffectController {
             .marginWidthOverride {
             return windowInset(for: margin)
         }
+        // Main-Off intentionally suppresses the outer shadow. Some certified
+        // atlases retain a small measured margin for the inactive recipe, but
+        // that value describes the captured private tree rather than the
+        // product's selected no-shadow layout contract. Resolve the muted
+        // branch before consulting atlas samples so every supported major uses
+        // only the platform safety inset here.
+        guard configuration.emphasis == .normal else {
+            return windowInset(for: 0)
+        }
         let shortSide = max(0, min(size.width, size.height))
         let isLight: Bool
         switch configuration.appearance {
@@ -497,9 +506,6 @@ final class GlassEffectController {
             at: Double(shortSide)
         ) {
             return windowInset(for: sample.marginWidth)
-        }
-        guard configuration.emphasis == .normal else {
-            return windowInset(for: 0)
         }
         return windowInset(
             for: atlasProvider.conservativeMainOnMargin(for: shortSide)
