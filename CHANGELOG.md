@@ -8,6 +8,37 @@ those changes will be called out explicitly here.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-03
+
+### Added
+
+- Added `setReferenceHost(window:view:)` as the preferred atomic way to replace
+  or detach the calibration host without exposing an intermediate window/view
+  pair.
+
+### Changed
+
+- Tint resolution, resolved-material planning, and live-tree installation now
+  have separate internal owners, with side-effect-free planning and
+  generation-bound asynchronous work.
+
+### Fixed
+
+- Closing, replacing, or reopening a reference window now preserves an already
+  verified material and cached Tint while unresolved work waits for and resumes
+  on a participating host.
+- Redundant applies now validate the live frozen tree, and stale calibration,
+  Tint warm-up, legacy-capture, and installation-retry work can no longer
+  mutate or clear a replacement generation.
+- macOS 27 contained glass preserves its required half-point internal sampling
+  margin while exposing the documented one-point consumer window inset; muted
+  glass continues to use the platform safety inset.
+- Clear glass now settles pending native Recipe layout before the coalesced Tint
+  presentation writer, preventing streamed NSColorPanel updates from exposing
+  a transient native Main-Off frame.
+- The Consumer Demo remains usable when its reference window closes and avoids
+  unrelated panel geometry work during material-only updates.
+
 ## [0.2.2] - 2026-08-02
 
 ### Fixed
@@ -76,7 +107,8 @@ those changes will be called out explicitly here.
 - The implementation relies on private AppKit details and is intended for
   Direct Distribution, not the Mac App Store.
 
-[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.2...HEAD
+[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.0...HEAD
+[0.3.0]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.2...0.3.0
 [0.2.2]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.1...0.2.2
 [0.2.1]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.1.0...0.2.0
