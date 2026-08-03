@@ -846,11 +846,23 @@ final class GlassEffectController {
     /// and unresolved colors enqueue commit resolution; none writes the live
     /// destination more than once per displayed frame.
     private func scheduleTintPresentation() {
-        if pendingTintPresentation {
+        let presentationWasPending = pendingTintPresentation
+        pendingTintPresentation = true
+
+        if presentationWasPending {
             presentationSupersededCount += 1
             mergePipelineDiagnostics()
+        } else if let glassView {
+            // Settle AppKit's pending native Recipe layout before the display-
+            // link beat becomes the frozen material's final writer. Leaving
+            // this work until CA commit lets a Clear Main-Off restamp land
+            // after the Package write during NSColorPanel Value tracking,
+            // exposing one native frame. This is glass-tree synchronization,
+            // not consumer window geometry; callers must not need an
+            // incidental layout to preserve the frozen Main-On contract.
+            glassView.needsLayout = true
+            glassView.layoutSubtreeIfNeeded()
         }
-        pendingTintPresentation = true
         startTintDisplayLink()
     }
 
