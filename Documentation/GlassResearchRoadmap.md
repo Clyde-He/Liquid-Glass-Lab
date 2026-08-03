@@ -40,10 +40,92 @@ work, not an optional refinement.
 | P2 | Recipe-axis closure | Fixed macOS 26/27 products captured; targeted axes remain |
 | P3 | Pass injection/transplant | Deferred, high risk, not required for Override |
 | P4 | Broader SwiftUI private authoring | Role inventory and fixed-context trees complete |
+| Product | AdjustableGlass after 0.3.0 | Released baseline accepted on macOS 26/27; performance measurement active, cleanup bounded, experiments evidence-gated |
 
 “Complete” in P0 means complete for the observed `NSGlassEffectView` Recipe
 domain and selected real system surfaces. It does not mean enumerating every
 private QuartzCore/SwiftUICore class present in the operating system.
+
+## Product track — AdjustableGlass after 0.3.0
+
+AdjustableGlass 0.3.0 completed the first three Package architecture steps:
+Tint resolution has one producer authority, resolved material planning and
+public status derivation are side-effect-free, and live-tree installation plus
+committed identity have one reconciliation owner. These boundaries are the
+baseline for follow-up work, not an invitation to reopen the migration.
+
+None of the items below is a 0.3.0 correctness or release blocker. Work starts
+from measurement or a current reproducible failure, and each item remains an
+independent stopping point.
+
+### Active — Tint streaming performance
+
+A controlled Dyno consumer A/B on macOS 27 isolated a color-dependent cost
+after the public `tintColor` setter. With the same SwiftUI input and Observation
+path, bypassing the final Package write kept Brightness dragging at roughly
+55–60 display-link callbacks per second. Restoring the Package write reduced
+Brightness dragging to roughly 33–38 callbacks per second with repeated
+50–73 ms main-run-loop gaps, while Hue remained at 60–61 callbacks per second.
+Input, Observation, and setter-reached counts stayed effectively 1:1, so this
+is not evidence of consumer-side sample loss.
+
+This trace localizes the remaining cost only to work after the public setter;
+it does not yet identify a specific Package stage:
+
+- [ ] reproduce Brightness, Hue, and Opacity sweeps in the Consumer Demo with
+  matched Display P3 input, glass style, geometry, and update cadence;
+- [ ] time the layout-settle fence, plan build and closed-form synthesis,
+  narrow Tint restamp/readback, full-freeze fallback, pre-commit enforcement,
+  and perpetual audit independently;
+- [ ] compare 60 Hz and 120 Hz frame pacing on macOS 26 and macOS 27, recording
+  app main-thread time separately from WindowServer/render-server cost and
+  counting physical writes rather than input callbacks;
+- [ ] optimize only the measured dominant stage while preserving fail-closed
+  Tint, latest-value display-cadence coalescing, verified readback, the Clear
+  final-writer layout fence, and at most one presentation write per frame.
+
+### Queued — bounded architecture hygiene
+
+- [ ] Consolidate the duplicated reference-host participation checks behind a
+  Package-local `ProbeHost` only after its ownership contract is explicit. It
+  may own effective host identity, participation, generation, and
+  generation-bound probe leases; base calibration, commit resolution, and
+  stable legacy capture must continue to own separate proof-run mutable state.
+- [ ] Remove producer progression details such as a pending commit request from
+  `ResolvedMaterialPlan` when that seam is next touched. A plan describes the
+  source-neutral material to display, not why resolution is still pending.
+- [ ] Let the installation reconciler derive no-op, narrow restamp, or full
+  freeze from desired identity, committed identity, and authoritative live-tree
+  health. Retire caller event flags such as `allowsTintRestamp` and
+  `checksCurrentIdentity` only with table tests covering every delta.
+- [ ] Extract a dedicated progression owner only if measurement shows a net
+  reduction in coordination. `StatusMapper` remains pure; producer work stays
+  behind explicit request/service channels; enforcement never selects a Tint
+  source or advances resolution inside its final-writer turn.
+
+### Gated — correctness investigations
+
+- [ ] Reopen persistent native Tint-branch materialization only if a post-0.3.0
+  Tint on/off or RGB transition still reproduces a presented whole-Recipe
+  Main-Off frame. Before implementation, prove alpha-zero pixel equivalence,
+  black-native-to-cross-RGB matrix transplantation, acceptable steady-state
+  pass cost, and zero visible setter-driven replacement on both certified
+  macOS majors.
+- [ ] Reopen Outer Shadow ordering only with Tint held stationary and panel
+  geometry fixed large enough that the public inset callback performs no
+  resize. Test the internal macOS 27 half-point sampling margin separately from
+  the external one-point contained window inset, then add geometry as a second
+  independent variable.
+- [ ] When model-tree recovery logs cannot establish whether a wrong frame was
+  presented, add transition IDs plus presentation/pixel evidence. Repeated
+  audit reads are not frame counts, and synchronous write readback is not a
+  presentation receipt.
+
+Every follow-up preserves the 0.3.0 acceptance baseline: atomic reference-host
+replacement without controller rebuild, verified material and Tint survival
+across host detach, atomic committed identity publication, one-turn successful
+restamp receipt followed by live-tree authority, platform-specific contained
+margin/inset behavior, and the supported public API.
 
 ## P0 — AppKit observed-pass completeness and control
 
@@ -860,28 +942,10 @@ same surface area, display, backdrop, Recipe, and update rate, record:
 - event-driven restamp cost after setting, Recipe/context, renderer, and
   geometry changes.
 
-#### TODO — Tint brightness streaming cost
-
-A controlled Dyno consumer A/B on macOS 27 isolated a color-dependent cost
-after the public `tintColor` setter. With the same SwiftUI input and Observation
-path, bypassing the final Package write kept brightness dragging at roughly
-55–60 display-link callbacks per second. Restoring the Package write reduced
-brightness dragging to roughly 33–38 callbacks per second with repeated
-50–73 ms main-run-loop gaps, while Hue remained at 60–61 callbacks per second.
-Input, Observation, and setter-reached counts stayed effectively 1:1, so this
-is not evidence of consumer-side sample loss.
-
-This trace localizes the remaining cost only to work after the public setter;
-it does not yet identify a specific Package stage. Before changing behavior:
-
-- [ ] reproduce Brightness and Hue sweeps in the Consumer Demo with matched
-  Display P3 input, glass style, geometry, and update cadence;
-- [ ] time the synchronous `layoutSubtreeIfNeeded()` fence, closed-form
-  snapshot/synthesis, narrow Tint restamp/readback, and full-freeze fallback
-  independently;
-- [ ] optimize only the measured stage, preserving the Clear final-writer
-  guarantee, verified readback, one-write-per-display-frame coalescing, and
-  fail-closed Tint resolution.
+The active AdjustableGlass/Dyno streaming-cost case and its stage-level timing
+checklist live in **Product track — AdjustableGlass after 0.3.0** above. P1.4
+provides the broader runtime-cost method; the product track owns the concrete
+reproduction and optimization gate.
 
 Production code must not rewrite material values on every unrelated HUD metric
 sample.
@@ -1104,76 +1168,6 @@ SwiftUI replaces an AppKit production backdrop only if it yields the desired
 continuous fade with a small authoring surface, stable reconstruction, and
 equal or better measured cost. If it requires recursively restamping a larger
 multi-pass graph, it remains a research renderer.
-
-## AdjustableGlass post-0.3.0 follow-ups
-
-AdjustableGlass 0.3.0 completed the first three Package architecture steps:
-Tint resolution has one producer authority, resolved material planning and
-public status derivation are side-effect-free, and live-tree installation plus
-committed identity have one reconciliation owner. These boundaries are the
-baseline for follow-up work, not an invitation to reopen the migration.
-
-None of the items below is a 0.3.0 correctness or release blocker. Work starts
-from measurement or a current reproducible failure, and each item remains an
-independent stopping point.
-
-### Measure before changing behavior
-
-- [ ] Complete the matched Consumer Demo reproduction and stage timing in
-  **P1.4 — Runtime and performance**, using Dyno only as an external pressure
-  case. Time the layout-settle fence, plan build and closed-form synthesis,
-  narrow Tint restamp/readback, full-freeze fallback, pre-commit enforcement,
-  and perpetual audit independently.
-- [ ] Compare 60 Hz and 120 Hz frame pacing on macOS 26 and macOS 27 for Hue,
-  Brightness, and Opacity streams. Record app main-thread time separately from
-  WindowServer/render-server cost and count physical writes rather than input
-  callbacks.
-- [ ] Optimize only a measured dominant stage. Preserve fail-closed Tint,
-  latest-value display-cadence coalescing, verified readback, the Clear
-  final-writer layout fence, and at most one presentation write per frame.
-
-### Bounded architecture hygiene
-
-- [ ] Consolidate the duplicated reference-host participation checks behind a
-  Package-local `ProbeHost` only after its ownership contract is explicit. It
-  may own effective host identity, participation, generation, and
-  generation-bound probe leases; base calibration, commit resolution, and
-  stable legacy capture must continue to own separate proof-run mutable state.
-- [ ] Remove producer progression details such as a pending commit request from
-  `ResolvedMaterialPlan` when that seam is next touched. A plan describes the
-  source-neutral material to display, not why resolution is still pending.
-- [ ] Let the installation reconciler derive no-op, narrow restamp, or full
-  freeze from desired identity, committed identity, and authoritative live-tree
-  health. Retire caller event flags such as `allowsTintRestamp` and
-  `checksCurrentIdentity` only with table tests covering every delta.
-- [ ] Extract a dedicated progression owner only if measurement shows a net
-  reduction in coordination. `StatusMapper` remains pure; producer work stays
-  behind explicit request/service channels; enforcement never selects a Tint
-  source or advances resolution inside its final-writer turn.
-
-### Evidence-gated investigations
-
-- [ ] Reopen persistent native Tint-branch materialization only if a post-0.3.0
-  Tint on/off or RGB transition still reproduces a presented whole-Recipe
-  Main-Off frame. Before implementation, prove alpha-zero pixel equivalence,
-  black-native-to-cross-RGB matrix transplantation, acceptable steady-state
-  pass cost, and zero visible setter-driven replacement on both certified
-  macOS majors.
-- [ ] Reopen Outer Shadow ordering only with Tint held stationary and panel
-  geometry fixed large enough that the public inset callback performs no
-  resize. Test the internal macOS 27 half-point sampling margin separately from
-  the external one-point contained window inset, then add geometry as a second
-  independent variable.
-- [ ] When model-tree recovery logs cannot establish whether a wrong frame was
-  presented, add transition IDs plus presentation/pixel evidence. Repeated
-  audit reads are not frame counts, and synchronous write readback is not a
-  presentation receipt.
-
-Every follow-up preserves the 0.3.0 acceptance baseline: atomic reference-host
-replacement without controller rebuild, verified material and Tint survival
-across host detach, atomic committed identity publication, one-turn successful
-restamp receipt followed by live-tree authority, platform-specific contained
-margin/inset behavior, and the supported public API.
 
 ## Evidence and maintenance rules
 
