@@ -99,8 +99,8 @@ final class GlassEffectController {
     /// attributed instead of guessed. Resolution itself measures ~7 ms on the
     /// certification host; anything larger here is orchestration.
     ///
-    /// The resolution-side fields are forwarded from the pipeline's
-    /// diagnostics; install counters stay controller-owned below.
+    /// Resolution and installation fields are forwarded from their owning
+    /// collaborators; the controller retains only the public snapshot.
     struct TintDiagnostics: Equatable, Sendable {
         /// Request-to-displayed latency for the most recent resolved color.
         var lastLatencyMilliseconds: Double?
@@ -241,14 +241,16 @@ final class GlassEffectController {
     /// Owns every Tint resolution source: certified synthesis precedence, the
     /// verified RGB cache, commit resolution against warm probes, the bounded
     /// legacy capture fallback, and the persistence seam. The controller stays
-    /// the owner of the display clock, held-color presentation, installation,
-    /// live-tree checks, product status, and reference-host authority.
+    /// the owner of the display clock, held-color presentation, product
+    /// status, and reference-host authority.
     private let tintPipeline: TintResolutionPipeline
+    /// Sole authority for committed-plan identity, live destination health,
+    /// freeze/restamp installation, and installation retry policy.
+    private let installationReconciler = MaterialInstallationReconciler()
 
     private(set) weak var hostWindow: NSWindow?
     private(set) weak var probeHostView: NSView?
     private var observers: [NSObjectProtocol] = []
-    private var installRetryTask: Task<Void, Never>?
     private var calibrationRetryTask: Task<Void, Never>?
     /// The latest requested Tint has not yet been presented. Color-panel
     /// events can arrive faster than display cadence; keeping one bit here
@@ -269,21 +271,6 @@ final class GlassEffectController {
     /// color-only change reuses the base the writer already validated.
     private var baseAtlasGeneration = 0
     private var calibrationRetryIndex = 0
-    private var requestedCalibrationAfterInstallFailure = false
-
-    /// The requested state the last install decided for. Written whenever a
-    /// full freeze or narrow Tint restamp accepts the request, so a duplicate
-    /// `applyConfiguration` for bit-identical requested and displayed state
-    /// can skip the entire install path. The displayed Tint is tracked by
-    /// RGB key, not the requested color, so a held last-verified color or a
-    /// still-unresolved Tint is not mistaken for a state that needs work.
-    private struct AppliedMaterialState {
-        var configuration: Configuration
-        var baseGeneration: Int
-        var displayedTintKey: SIMD3<Double>?
-    }
-
-    private var appliedMaterialState: AppliedMaterialState?
 
     private static let calibrationRetryMilliseconds = [
         1_000, 2_000, 5_000, 10_000, 30_000,
@@ -359,6 +346,39 @@ final class GlassEffectController {
         tintPipeline.onLegacyCaptureCompleted = { [weak self] in
             self?.applyConfiguration(allowsTintRestamp: true)
         }
+        installationReconciler.onHealthChanged = { [weak self] in
+            guard let self else { return }
+            let plan = self.buildPlan()
+            let outcome = self.reconcileDesiredState(
+                plan: plan,
+                allowsTintRestamp: false,
+                checksCurrentIdentity: true
+            )
+            self.continueResolutionAfterInstall(outcome, plan: plan)
+        }
+        installationReconciler.onRetryRequested = { [weak self] in
+            guard let self else { return }
+            let plan = self.buildPlan()
+            let outcome = self.reconcileDesiredState(
+                plan: plan,
+                allowsTintRestamp: false,
+                checksCurrentIdentity: true
+            )
+            self.continueResolutionAfterInstall(outcome, plan: plan)
+        }
+        installationReconciler.retryShouldStop = { [weak self] in
+            guard let self else { return true }
+            if case .ready = self.status { return true }
+            if case .lockingTint = self.status { return true }
+            return false
+        }
+        installationReconciler.shouldRequestRecalibration = { [weak self] in
+            guard let self else { return false }
+            return self.atlasProvider.atlasSource != .runtimeCalibration
+        }
+        installationReconciler.onRecalibrationRequested = { [weak self] in
+            self?.atlasProvider.recalibrate()
+        }
         connectProvider()
         observeRecoveryOpportunities()
     }
@@ -377,12 +397,9 @@ final class GlassEffectController {
             self.glassView?.materialWindowDidChange = nil
             self.glassView?.materialStrength.invalidate()
             tintPipeline.resetLegacyCaptureBudget()
-            // The previous install belongs to the old view's tree; the new
-            // view must receive the full transaction even for identical
-            // requested state.
-            appliedMaterialState = nil
         }
         self.glassView = glassView
+        installationReconciler.attach(to: glassView)
         glassView.materialWindowDidChange = { [weak self, weak glassView] in
             guard let self, self.glassView === glassView else { return }
             self.applyConfiguration()
@@ -394,8 +411,7 @@ final class GlassEffectController {
 
     func invalidate() {
         atlasProvider.invalidate()
-        installRetryTask?.cancel()
-        installRetryTask = nil
+        installationReconciler.invalidate()
         calibrationRetryTask?.cancel()
         calibrationRetryTask = nil
         calibrationRetryIndex = 0
@@ -405,7 +421,6 @@ final class GlassEffectController {
         tintPipeline.invalidate()
         pendingTintPresentation = false
         lastVerifiedTintColor = nil
-        appliedMaterialState = nil
         glassView?.materialWindowDidChange = nil
         glassView?.materialStrength.invalidate()
         glassView = nil
@@ -578,7 +593,7 @@ final class GlassEffectController {
     private func applyConfiguration(
         allowsTintRestamp: Bool = false
     ) {
-        guard let glassView else {
+        guard glassView != nil else {
             refreshStatus()
             return
         }
@@ -594,17 +609,15 @@ final class GlassEffectController {
         // its pure decision requests recovery: an unresolved Tint that only
         // ever reaches this early return would otherwise stall forever.
         let plan = buildPlan()
-        if isRedundantApply(plan: plan) {
+        if installationReconciler.isAlreadyCurrent(
+            plan: plan,
+            configuration: configuration,
+            baseGeneration: baseAtlasGeneration,
+            pairedCoverageComplete: atlasProvider.isPairedCoverageComplete
+        ) {
             refreshStatus(plan: plan)
             return
         }
-        defer { glassView.updateRequiredWindowInset() }
-
-        glassView.applyControlledConfiguration(
-            style: configuration.variant == .clear ? .clear : .regular,
-            amount: configuration.visibility
-        )
-
         // Fail closed for Tint: an unverified or hue-suppressed matrix is never
         // presented as the requested color. The plan is side-effect-free; only
         // the explicit request channel may enqueue.
@@ -617,13 +630,43 @@ final class GlassEffectController {
         if plan.tintIsReady {
             lastVerifiedTintColor = configuration.tint
         }
+        let installOutcome = reconcileDesiredState(
+            plan: plan,
+            allowsTintRestamp: allowsTintRestamp,
+            checksCurrentIdentity: false
+        )
+        if !atlasProvider.isPairedCoverageComplete {
+            atlasProvider.ensureCaptured()
+        }
+        continueResolutionAfterInstall(installOutcome, plan: plan)
+    }
+
+    /// Converges an immutable, already-resolved desired plan with the live
+    /// destination. Resolution producers, display cadence, and provider
+    /// scheduling are deliberately outside this entry point, so
+    /// enforcement callbacks and retry beats cannot accidentally advance the
+    /// Tint pipeline.
+    @discardableResult
+    private func reconcileDesiredState(
+        plan: ResolvedMaterialPlan,
+        allowsTintRestamp: Bool,
+        checksCurrentIdentity: Bool
+    ) -> MaterialInstallationReconciler.Outcome {
+        guard let glassView else {
+            refreshStatus(plan: plan)
+            return .failed
+        }
+        defer { glassView.updateRequiredWindowInset() }
+
+        glassView.applyControlledConfiguration(
+            style: configuration.variant == .clear ? .clear : .regular,
+            amount: configuration.visibility
+        )
         // Setting a tint for the first time makes AppKit insert the whole Tint
-        // branch into the private tree (five passes become nine). Until that
-        // exists, the narrow restamp has no destination and every color falls
-        // back to the full transaction — which is what made the first drag
-        // after enabling Tint cost tens of milliseconds per color. Request the
-        // branch immediately at alpha 0: the coefficient-18 contract makes that
-        // visually identical to no tint, so nothing unverified is presented.
+        // branch into the private tree. An unresolved color is staged at alpha
+        // zero, which materializes the destination without presenting an
+        // unverified matrix. Keeping staging inside reconciliation also lets a
+        // tree-health retry rebuild a branch AppKit replaced.
         glassView.stageMaterialTint(
             nativeColor: plan.nativeTintColor,
             controlledColor: plan.displayedTint
@@ -631,92 +674,51 @@ final class GlassEffectController {
 
         guard atlasProvider.isPairedCoverageComplete else {
             refreshStatus(plan: plan)
-            atlasProvider.ensureCaptured()
-            return
+            return .failed
         }
-
-        let hasMainParticipation = configuration.emphasis == .normal
-        // When the discrete base axes are unchanged, continuous amount updates
-        // are already applied by the strength writer and a color change differs
-        // only in 20 Tint coefficients. Restamping that branch preserves the
-        // streaming color-picker performance. Appearance, variant, and
-        // participation changes never enter this path.
-        let installStart = DispatchTime.now().uptimeNanoseconds
-        if allowsTintRestamp,
-           glassView.materialStrength.restampTintOverlay(
-            plan.installableAtlas ?? atlasProvider.atlas,
+        let outcome = installationReconciler.reconcile(
+            plan: plan,
+            configuration: configuration,
+            atlas: plan.installableAtlas ?? atlasProvider.atlas,
             baseGeneration: baseAtlasGeneration,
-            mainParticipation: hasMainParticipation,
-            tintColor: plan.displayedTint
-        ) {
-            tintDiagnostics.tintRestampCount += 1
-            let restampMs = Self.milliseconds(since: installStart)
-            tintDiagnostics.lastInstallMilliseconds = restampMs
-            appliedMaterialState = AppliedMaterialState(
-                configuration: configuration,
-                baseGeneration: baseAtlasGeneration,
-                displayedTintKey: plan.displayedTintKey
-            )
-            if restampMs > 4 {
-                GlassMaterialTintLog.signposts.notice(
-                    "slow tint restamp \(restampMs, format: .fixed(precision: 1), privacy: .public)ms"
-                )
-            }
-            installRetryTask?.cancel()
-            // AppKit can restamp the base Recipe immediately after a Tint
-            // matrix write. The pre-commit sentinel repairs that expected
-            // transient before presentation, but a synchronous full-style
-            // audit here observes the middle of the handoff and falsely
-            // reports frozenInstallFailed. The narrow write already proved
-            // its own Tint readback; reserve the complete audit for full
-            // installs and base-context changes.
+            mainParticipation: configuration.emphasis == .normal,
+            appearanceSelection: Self.frozenAppearanceSelection(
+                for: configuration.appearance
+            ),
+            allowsTintRestamp: allowsTintRestamp,
+            checksCurrentIdentity: checksCurrentIdentity
+        )
+        mergePipelineDiagnostics()
+        switch outcome {
+        case .alreadyCurrent:
+            refreshStatus(plan: plan)
+        case .restampedTint:
+            // A successful Tint readback is a receipt only for this turn. The
+            // installation reconciler's post-precommit health event performs
+            // the authoritative full audit after the final-writer repair.
             refreshStatus(
                 plan: plan,
                 acceptingSuccessfulTintRestamp: true
             )
-            glassView.materialStrength.requestFrozenStyleAuditAfterPreCommit {
-                [weak self] in
-                self?.refreshStatus()
-            }
-            return
-        }
-        tintDiagnostics.fullFreezeCount += 1
-        GlassMaterialTintLog.signposts.notice(
-            "full freeze (base generation \(self.baseAtlasGeneration, privacy: .public))"
-        )
-        let installed = glassView.materialStrength.freeze(
-            atlas: plan.installableAtlas ?? atlasProvider.atlas,
-            mainParticipation: hasMainParticipation,
-            baseGeneration: baseAtlasGeneration,
-            appearanceSelection: Self.frozenAppearanceSelection(
-                for: configuration.appearance
-            )
-        )
-        let freezeMs = Self.milliseconds(since: installStart)
-        tintDiagnostics.lastInstallMilliseconds = freezeMs
-        GlassMaterialTintLog.signposts.notice(
-            "freeze install \(freezeMs, format: .fixed(precision: 1), privacy: .public)ms installed=\(installed, privacy: .public)"
-        )
-        if installed {
-            appliedMaterialState = AppliedMaterialState(
-                configuration: configuration,
-                baseGeneration: baseAtlasGeneration,
-                displayedTintKey: plan.displayedTintKey
-            )
-        }
-        if installed,
-           glassView.materialStrength.frozenStyleIsCurrentlyApplied {
-            installRetryTask?.cancel()
-            if configuration.tint != nil, !plan.tintIsReady {
-                tintPipeline.scheduleLegacyCaptureIfNeeded()
-            }
+        case .installedFull:
             refreshStatus(plan: plan)
-        } else {
+        case .failed:
             status = .fallback(.frozenInstallFailed)
-            if installRetryTask == nil {
-                scheduleInstallRetry()
-            }
         }
+        return outcome
+    }
+
+    /// Resolution recovery remains controller-owned and runs only after the
+    /// installation boundary has returned a typed outcome.
+    private func continueResolutionAfterInstall(
+        _ outcome: MaterialInstallationReconciler.Outcome,
+        plan: ResolvedMaterialPlan
+    ) {
+        guard case .installedFull = outcome,
+              configuration.tint != nil,
+              !plan.tintIsReady
+        else { return }
+        tintPipeline.scheduleLegacyCaptureIfNeeded()
     }
 
     /// Fresh, side-effect-free presentation plan for the current
@@ -766,44 +768,6 @@ final class GlassEffectController {
         }
     }
 
-    /// A newly inserted NSGlassEffectView can expose only part of its private
-    /// tree for a few layout turns. Treat that as deferred installation, not a
-    /// corrupt atlas or a reason for the product to retry manually.
-    private func scheduleInstallRetry() {
-        installRetryTask?.cancel()
-        installRetryTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer { self.installRetryTask = nil }
-            for delay in [0, 80, 160, 320, 640, 1_000] {
-                if delay == 0 {
-                    await Task.yield()
-                } else {
-                    try? await Task.sleep(for: .milliseconds(delay))
-                }
-                guard !Task.isCancelled,
-                      self.glassView?.window != nil
-                else { return }
-                // The install decision record would otherwise suppress this
-                // very retry: the requested state matches the attempt that
-                // produced the failed readback. Re-open the install each beat.
-                self.appliedMaterialState = nil
-                self.applyConfiguration()
-                if case .ready = self.status { return }
-                if case .lockingTint = self.status { return }
-            }
-            guard !Task.isCancelled,
-                  !self.requestedCalibrationAfterInstallFailure,
-                  self.atlasProvider.atlasSource != .runtimeCalibration
-            else { return }
-            // A major catalog may survive OS selection while its private
-            // destination topology no longer does. After materialization
-            // retries are exhausted, discard that candidate and fall back to
-            // the provider's full paired runtime calibration exactly once.
-            self.requestedCalibrationAfterInstallFailure = true
-            self.atlasProvider.recalibrate()
-        }
-    }
-
     // MARK: - Tint
 
     /// Enqueues commit resolution for the requested color when neither the
@@ -826,9 +790,7 @@ final class GlassEffectController {
         return outcome
     }
 
-    /// Forwards the pipeline's resolution-side counters into the public
-    /// diagnostics. Install counters (freeze/restamp counts, install cost)
-    /// stay controller-owned and are untouched by the merge.
+    /// Forwards collaborator-owned counters into the public diagnostics.
     private func mergePipelineDiagnostics() {
         tintDiagnostics.lastLatencyMilliseconds = tintPipeline
             .resolutionDiagnostics.lastLatencyMilliseconds
@@ -843,6 +805,12 @@ final class GlassEffectController {
         tintDiagnostics.supersededRequestCount = tintPipeline
             .resolutionDiagnostics.supersededRequestCount
             + presentationSupersededCount
+        tintDiagnostics.fullFreezeCount = installationReconciler
+            .diagnostics.fullFreezeCount
+        tintDiagnostics.tintRestampCount = installationReconciler
+            .diagnostics.tintRestampCount
+        tintDiagnostics.lastInstallMilliseconds = installationReconciler
+            .diagnostics.lastInstallMilliseconds
     }
 
     /// Applies the requested alpha without changing the captured RGB-bound
@@ -912,15 +880,19 @@ final class GlassEffectController {
                 heldState: nil,
                 lastVerifiedTintColor: lastVerifiedTintColor
             )
-            shouldApply = Self.tintPreflightRequiresApply(
-                tintIsReady: plan.tintIsReady,
-                hasPendingCommitRequest: plan.hasPendingCommitRequest
-            )
             if plan.tintIsReady {
                 tintPipeline.confirmRequestSatisfied()
             } else {
                 requestCommitResolutionIfNeeded()
             }
+            // Evaluate after the explicit request channel ran. An unresolved
+            // color accepted by the resolver should wait for that producer;
+            // using the pre-request snapshot here would install the held/base
+            // material one failure beat earlier than the legacy contract.
+            shouldApply = Self.tintPreflightRequiresApply(
+                tintIsReady: plan.tintIsReady,
+                hasPendingCommitRequest: tintPipeline.hasPendingRequest
+            )
             mergePipelineDiagnostics()
         }
         // Service pipeline progression in the fixed order: resolve, store in
@@ -954,10 +926,6 @@ final class GlassEffectController {
         }
     }
 
-    private static func milliseconds(since start: UInt64) -> Double {
-        Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
-    }
-
     static func resolvedTintAtlas(
         _ atlas: GlassMaterialStyleAtlas,
         color: NSColor?,
@@ -970,28 +938,6 @@ final class GlassEffectController {
             emphasis: emphasis,
             osMajorVersion: osMajorVersion
         )
-    }
-
-    /// True when the last successful install already covers this exact
-    /// request: identical configuration, identical verified base, complete
-    /// paired coverage, the same Tint that would be displayed now — held or
-    /// resolved — already written, and the frozen style still physically
-    /// installed on the AppKit tree. The live-tree read is what keeps the
-    /// skip safe: the applied record is historical, and AppKit can rebuild
-    /// or drop the private tree while every requested axis stays identical.
-    /// Without the readback, an early return would strand the HUD on the
-    /// system material with `frozenInstallFailed` and no retry. This check
-    /// never enqueues resolution work. The displayed key comes from the plan
-    /// builder, so the redundancy decision can never diverge from what the
-    /// next install would actually display.
-    private func isRedundantApply(plan: ResolvedMaterialPlan) -> Bool {
-        guard let applied = appliedMaterialState,
-              applied.configuration == configuration,
-              applied.baseGeneration == baseAtlasGeneration,
-              atlasProvider.isPairedCoverageComplete,
-              glassView?.materialStrength.frozenStyleIsCurrentlyApplied == true
-        else { return false }
-        return applied.displayedTintKey == plan.displayedTintKey
     }
 
     private static func colorsMatch(_ lhs: NSColor?, _ rhs: NSColor?) -> Bool {
@@ -1082,8 +1028,8 @@ final class GlassEffectController {
             providerState: atlasProvider.state,
             source: source,
             acceptingSuccessfulTintRestamp: acceptingSuccessfulTintRestamp,
-            frozenStyleIsCurrentlyApplied: glassView?
-                .materialStrength.frozenStyleIsCurrentlyApplied == true
+            frozenStyleIsCurrentlyApplied: installationReconciler
+                .frozenStyleIsCurrentlyApplied
         ))
         status = resolution.status
         if resolution.requestsLegacyCaptureScheduling {

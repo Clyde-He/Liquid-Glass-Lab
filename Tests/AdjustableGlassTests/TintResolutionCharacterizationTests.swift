@@ -427,7 +427,7 @@ final class TintResolutionCharacterizationTests: XCTestCase {
     @MainActor
     func testVerifiedOverlayAdmissionRequiresCompleteSetAndCoefficient18Match()
         throws {
-        var atlas = try makeBaseAtlas()
+        let atlas = try makeBaseAtlas()
         let sourceColor = GlassMaterialColorValue(
             red: 1.4,
             green: -0.4,
