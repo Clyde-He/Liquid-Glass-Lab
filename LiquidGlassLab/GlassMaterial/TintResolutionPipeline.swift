@@ -118,6 +118,10 @@ final class TintResolutionPipeline {
 
     private var tintCommitResolver: GlassMaterialTintCommitResolver?
     private var tintCommitWarmUpTask: Task<Void, Never>?
+    /// Ownership token for the shared warm-up slot and its completion. A
+    /// cancelled wrapper may resume after a replacement host has installed a
+    /// new task, so task cancellation alone is not an ownership proof.
+    private var tintCommitWarmUpGeneration = 0
     /// Exact verified cache, bounded to the atlas's color limit and keyed by
     /// RGB only — the requested alpha is patched into coefficient 18.
     private var tintCommitCache: [
@@ -382,13 +386,15 @@ final class TintResolutionPipeline {
         guard let resolver, !resolver.isWarm, tintCommitWarmUpTask == nil
         else { return }
         let start = DispatchTime.now().uptimeNanoseconds
+        tintCommitWarmUpGeneration += 1
+        let generation = tintCommitWarmUpGeneration
         tintCommitWarmUpTask = Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self,
+                  self.warmUpIsCurrent(generation, resolver: resolver)
+            else { return }
             let warm = await resolver.warmUp()
-            guard !Task.isCancelled else {
-                self.tintCommitWarmUpTask = nil
-                return
-            }
+            guard self.warmUpIsCurrent(generation, resolver: resolver)
+            else { return }
             self.resolutionDiagnostics.warmUpMilliseconds = Self.milliseconds(
                 since: start
             )
@@ -414,8 +420,7 @@ final class TintResolutionPipeline {
     ) {
         self.hostWindow = hostWindow
         self.probeHostView = probeHostView
-        tintCommitWarmUpTask?.cancel()
-        tintCommitWarmUpTask = nil
+        cancelWarmUp()
         tintCommitResolver?.invalidate()
         tintCommitResolver = nil
         tintCommitResolutionUnavailable = false
@@ -442,8 +447,7 @@ final class TintResolutionPipeline {
     /// outcome, and held presentation survive a rebind, but not a teardown.
     func invalidate() {
         resetLegacyCaptureBudget(cancelInFlightCapture: true)
-        tintCommitWarmUpTask?.cancel()
-        tintCommitWarmUpTask = nil
+        cancelWarmUp()
         tintCommitResolver?.invalidate()
         tintCommitResolver = nil
         pendingTintCommitRequest = nil
@@ -461,7 +465,31 @@ final class TintResolutionPipeline {
     /// Whether a bounded legacy capture transaction is currently in flight for
     /// the current retry generation.
     var isLegacyCaptureActive: Bool {
-        activeTintCaptureGeneration == tintRetryGeneration
+        Self.legacyCaptureBelongsToCurrentGeneration(
+            activeGeneration: activeTintCaptureGeneration,
+            currentGeneration: tintRetryGeneration
+        )
+    }
+
+    static func legacyCaptureBelongsToCurrentGeneration(
+        activeGeneration: Int?,
+        currentGeneration: Int
+    ) -> Bool {
+        activeGeneration == currentGeneration
+    }
+
+    /// Physical producer ownership is broader than status ownership. Recovery
+    /// may advance the retry generation without cancelling the provider's
+    /// multi-second transaction; fast probes must remain suppressed until that
+    /// older transaction actually completes.
+    var hasLegacyCaptureInFlight: Bool {
+        Self.legacyCaptureIsInFlight(
+            activeGeneration: activeTintCaptureGeneration
+        )
+    }
+
+    static func legacyCaptureIsInFlight(activeGeneration: Int?) -> Bool {
+        activeGeneration != nil
     }
 
     /// Whether the bounded legacy path still has retries — a scheduled task
@@ -547,8 +575,38 @@ final class TintResolutionPipeline {
         pendingTintCommitRequest = nil
         pendingTintCommitRequestedAt = nil
         tintCommitFailureCount = 0
+        cancelWarmUp()
         tintCommitResolver?.invalidate()
         tintCommitResolver = nil
+    }
+
+    private func cancelWarmUp() {
+        tintCommitWarmUpGeneration += 1
+        tintCommitWarmUpTask?.cancel()
+        tintCommitWarmUpTask = nil
+    }
+
+    private func warmUpIsCurrent(
+        _ generation: Int,
+        resolver: GlassMaterialTintCommitResolver
+    ) -> Bool {
+        Self.warmUpOwnsSharedState(
+            generation: generation,
+            currentGeneration: tintCommitWarmUpGeneration,
+            resolverMatches: tintCommitResolver === resolver,
+            isCancelled: Task.isCancelled
+        )
+    }
+
+    static func warmUpOwnsSharedState(
+        generation: Int,
+        currentGeneration: Int,
+        resolverMatches: Bool,
+        isCancelled: Bool
+    ) -> Bool {
+        !isCancelled
+            && generation == currentGeneration
+            && resolverMatches
     }
 
     // MARK: - Source resolution
@@ -662,7 +720,9 @@ final class TintResolutionPipeline {
             resolutionDiagnostics.attemptsForLastColor = 0
         }
         pendingTintCommitRequest = (color, sourceColor)
-        pendingTintCommitRequestedAt = DispatchTime.now().uptimeNanoseconds
+        if previousKey != key || pendingTintCommitRequestedAt == nil {
+            pendingTintCommitRequestedAt = DispatchTime.now().uptimeNanoseconds
+        }
         guard hostParticipates else { return .waitingForHost }
         if tintCommitResolver == nil,
            let hostWindow,

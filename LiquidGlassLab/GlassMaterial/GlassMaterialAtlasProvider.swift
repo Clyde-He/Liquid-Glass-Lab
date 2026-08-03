@@ -118,6 +118,15 @@ final class GlassMaterialAtlasProvider {
     private var mainProbeContainer: NSView?
     private var witnessWindow: GlassMaterialCalibrationWindow?
     private var witnessProbeContainer: NSView?
+    #if DEBUG
+    /// Test-only suspension seam used to make replacement-generation cleanup
+    /// deterministic. Release builds carry no lifecycle-test machinery.
+    var calibrationWitnessPreparedForTesting: ((Int) async -> Void)?
+    var hostParticipationForTesting: Bool?
+    var witnessIdentityForTesting: ObjectIdentifier? {
+        witnessWindow.map(ObjectIdentifier.init)
+    }
+    #endif
     private var captureTask: Task<Void, Never>?
     /// Generation owned by `captureTask` itself. This is separate from the
     /// monotonically advanced invalidation generation so repeated
@@ -138,6 +147,11 @@ final class GlassMaterialAtlasProvider {
     /// Host flags are a scheduling precondition, never proof of the captured
     /// material. Payload proof comes from paired On/Off samples.
     private var hostParticipates: Bool {
+        #if DEBUG
+        if let hostParticipationForTesting {
+            return hostParticipationForTesting
+        }
+        #endif
         guard let window = hostWindow else { return false }
         return (window.isMainWindow || window.isKeyWindow) && NSApp.isActive
     }
@@ -689,7 +703,24 @@ final class GlassMaterialAtlasProvider {
             state = .failed("Could not create the Main-Off witness window.")
             return
         }
-        defer { tearDownWitnessWindow() }
+        guard let ownedWitnessWindow = witnessWindow,
+              let ownedWitnessProbeContainer = witnessProbeContainer
+        else {
+            state = .failed("Could not retain the Main-Off witness window.")
+            return
+        }
+        defer {
+            tearDownWitnessWindow(
+                ifOwnedBy: ownedWitnessWindow,
+                probeContainer: ownedWitnessProbeContainer
+            )
+        }
+
+        #if DEBUG
+        if let calibrationWitnessPreparedForTesting {
+            await calibrationWitnessPreparedForTesting(generation)
+        }
+        #endif
 
         try? await Task.sleep(for: .milliseconds(500))
         guard captureIsCurrent(generation) else { return }
@@ -706,12 +737,15 @@ final class GlassMaterialAtlasProvider {
         let total = Self.mainOnCells.count * shortSides.count
         var completed = 0
         state = .capturing(completed: 0, total: total)
+        guard captureIsCurrent(generation) else { return }
 
         for cell in Self.mainOnCells {
+            guard captureIsCurrent(generation) else { return }
             guard let pairs = await captureVerifiedBatch(
                 cell: cell,
                 sizes: shortSides
             ) else { return }
+            guard captureIsCurrent(generation) else { return }
             let mainOffCell = Self.mainOffCell(for: cell)
             for pair in pairs {
                 candidate.add(pair.mainOn, for: cell)
@@ -719,8 +753,10 @@ final class GlassMaterialAtlasProvider {
             }
             completed += pairs.count
             state = .capturing(completed: completed, total: total)
+            guard captureIsCurrent(generation) else { return }
         }
 
+        guard captureIsCurrent(generation) else { return }
         candidate.environment = .current(for: hostWindow?.screen)
         guard candidate.hasVerifiedMainOnCoverage(shortSides: shortSides) else {
             state = .failed(
@@ -1093,6 +1129,20 @@ final class GlassMaterialAtlasProvider {
         witnessWindow?.orderOut(nil)
         witnessWindow = nil
         witnessProbeContainer = nil
+    }
+
+    /// A cancelled host generation may finish after its replacement has
+    /// already created a new witness. Cleanup is resource-owned: stale work
+    /// may release only the exact pair it prepared, never the provider's
+    /// current replacement pair.
+    private func tearDownWitnessWindow(
+        ifOwnedBy ownedWindow: GlassMaterialCalibrationWindow,
+        probeContainer ownedProbeContainer: NSView
+    ) {
+        guard witnessWindow === ownedWindow,
+              witnessProbeContainer === ownedProbeContainer
+        else { return }
+        tearDownWitnessWindow()
     }
 
     private func makeClippedContainer() -> NSView {

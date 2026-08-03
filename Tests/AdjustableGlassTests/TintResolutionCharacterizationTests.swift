@@ -18,6 +18,54 @@ import XCTest
 /// readiness/persistence callbacks.
 @available(macOS 26.0, *)
 final class TintResolutionCharacterizationTests: XCTestCase {
+    @MainActor
+    func testWarmUpMayPublishOnlyForItsResolverGeneration() {
+        XCTAssertTrue(TintResolutionPipeline.warmUpOwnsSharedState(
+            generation: 7,
+            currentGeneration: 7,
+            resolverMatches: true,
+            isCancelled: false
+        ))
+        XCTAssertFalse(TintResolutionPipeline.warmUpOwnsSharedState(
+            generation: 6,
+            currentGeneration: 7,
+            resolverMatches: true,
+            isCancelled: false
+        ))
+        XCTAssertFalse(TintResolutionPipeline.warmUpOwnsSharedState(
+            generation: 7,
+            currentGeneration: 7,
+            resolverMatches: false,
+            isCancelled: false
+        ))
+        XCTAssertFalse(TintResolutionPipeline.warmUpOwnsSharedState(
+            generation: 7,
+            currentGeneration: 7,
+            resolverMatches: true,
+            isCancelled: true
+        ))
+    }
+
+    @MainActor
+    func testLegacyCaptureRemainsInFlightAcrossRetryGenerationReset() {
+        let oldGeneration = 4
+        let currentGeneration = 5
+
+        XCTAssertNotEqual(oldGeneration, currentGeneration)
+        XCTAssertFalse(
+            TintResolutionPipeline.legacyCaptureBelongsToCurrentGeneration(
+                activeGeneration: oldGeneration,
+                currentGeneration: currentGeneration
+            )
+        )
+        XCTAssertTrue(TintResolutionPipeline.legacyCaptureIsInFlight(
+            activeGeneration: oldGeneration
+        ))
+        XCTAssertFalse(TintResolutionPipeline.legacyCaptureIsInFlight(
+            activeGeneration: nil
+        ))
+    }
+
     // MARK: - Source precedence
 
     /// A certified major must prefer the accepted closed form even when the

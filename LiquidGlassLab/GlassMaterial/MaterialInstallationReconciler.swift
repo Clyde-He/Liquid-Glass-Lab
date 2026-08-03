@@ -44,6 +44,7 @@ final class MaterialInstallationReconciler {
 
     private weak var glassView: AdjustableGlassEffectView?
     private var installRetryTask: Task<Void, Never>?
+    private var installRetryGeneration = 0
     private var requestedCalibrationAfterInstallFailure = false
     private var pendingIdentity: CommittedIdentity?
 
@@ -261,24 +262,31 @@ final class MaterialInstallationReconciler {
 
     private func scheduleRetryIfNeeded() {
         guard installRetryTask == nil else { return }
+        installRetryGeneration += 1
+        let generation = installRetryGeneration
         installRetryTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.installRetryTask = nil }
+            defer {
+                if generation == self.installRetryGeneration {
+                    self.installRetryTask = nil
+                }
+            }
             for delay in [0, 80, 160, 320, 640, 1_000] {
                 if delay == 0 {
                     await Task.yield()
                 } else {
                     try? await Task.sleep(for: .milliseconds(delay))
                 }
-                guard !Task.isCancelled,
+                guard self.retryIsCurrent(generation),
                       self.glassView?.window != nil
                 else { return }
                 self.committedIdentity = nil
                 self.pendingIdentity = nil
                 self.onRetryRequested?()
+                guard self.retryIsCurrent(generation) else { return }
                 if self.retryShouldStop?() == true { return }
             }
-            guard !Task.isCancelled,
+            guard self.retryIsCurrent(generation),
                   !self.requestedCalibrationAfterInstallFailure,
                   self.shouldRequestRecalibration?() == true
             else { return }
@@ -288,8 +296,25 @@ final class MaterialInstallationReconciler {
     }
 
     private func cancelRetry() {
+        installRetryGeneration += 1
         installRetryTask?.cancel()
         installRetryTask = nil
+    }
+
+    private func retryIsCurrent(_ generation: Int) -> Bool {
+        Self.retryOwnsSharedState(
+            generation: generation,
+            currentGeneration: installRetryGeneration,
+            isCancelled: Task.isCancelled
+        )
+    }
+
+    static func retryOwnsSharedState(
+        generation: Int,
+        currentGeneration: Int,
+        isCancelled: Bool
+    ) -> Bool {
+        !isCancelled && generation == currentGeneration
     }
 
     private static func milliseconds(since start: UInt64) -> Double {

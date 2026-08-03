@@ -4,6 +4,22 @@ import XCTest
 @available(macOS 26.0, *)
 final class ControllerConfigurationTests: XCTestCase {
     @MainActor
+    func testUnresolvedTintAdvancesUnlessLegacyCaptureOwnsTheColor() {
+        XCTAssertTrue(GlassEffectController.shouldAdvanceTintResolution(
+            tintIsReady: false,
+            hasLegacyCaptureInFlight: false
+        ))
+        XCTAssertFalse(GlassEffectController.shouldAdvanceTintResolution(
+            tintIsReady: true,
+            hasLegacyCaptureInFlight: false
+        ))
+        XCTAssertFalse(GlassEffectController.shouldAdvanceTintResolution(
+            tintIsReady: false,
+            hasLegacyCaptureInFlight: true
+        ))
+    }
+
+    @MainActor
     func testAppearanceChangeRequiresFullMaterialInstall() {
         let system = GlassEffectController.Configuration(
             appearance: .system

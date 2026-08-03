@@ -3,6 +3,29 @@ import Foundation
 import XCTest
 @_spi(Experimental) @testable import AdjustableGlass
 
+@MainActor
+private final class CalibrationWitnessGate {
+    private(set) var firstGeneration: Int?
+    private(set) var replacementGeneration: Int?
+    private var firstContinuation: CheckedContinuation<Void, Never>?
+
+    func suspendFirstGeneration(_ generation: Int) async {
+        if firstGeneration == nil {
+            firstGeneration = generation
+            await withCheckedContinuation { continuation in
+                firstContinuation = continuation
+            }
+        } else {
+            replacementGeneration = generation
+        }
+    }
+
+    func resumeFirstGeneration() {
+        firstContinuation?.resume()
+        firstContinuation = nil
+    }
+}
+
 /// Lifecycle regressions for the reference-host contract: the reference
 /// window and probe view are a calibration/resolver capability, never
 /// ownership of the rendered material. Detaching, replacing, or re-setting
@@ -297,6 +320,112 @@ final class ReferenceLifecycleTests: XCTestCase {
     // MARK: - Provider rebind semantics
 
     @MainActor
+    func testStaleCalibrationCannotTearDownReplacementWitness() async throws {
+        let (firstWindow, firstAnchor) = makeReferenceHost()
+        let (replacementWindow, replacementAnchor) = makeReferenceHost()
+        firstWindow.orderFront(nil)
+        replacementWindow.orderFront(nil)
+        defer {
+            firstWindow.orderOut(nil)
+            replacementWindow.orderOut(nil)
+        }
+
+        let provider = GlassMaterialAtlasProvider(
+            hostWindow: firstWindow,
+            probeHostView: firstAnchor,
+            shortSides: [48],
+            certifiedAtlasURLs: []
+        )
+        defer { provider.invalidate() }
+        provider.hostParticipationForTesting = true
+        let gate = CalibrationWitnessGate()
+        provider.calibrationWitnessPreparedForTesting = { generation in
+            await gate.suspendFirstGeneration(generation)
+        }
+
+        provider.ensureCaptured()
+        guard await waitUntil({ gate.firstGeneration != nil }) else {
+            XCTFail("initial calibration never prepared its witness")
+            return
+        }
+
+        provider.rebindReferenceHost(
+            hostWindow: replacementWindow,
+            probeHostView: replacementAnchor
+        )
+        provider.ensureCaptured()
+        guard await waitUntil({ gate.replacementGeneration != nil }),
+              let replacementIdentity = provider.witnessIdentityForTesting
+        else {
+            XCTFail("replacement calibration never prepared its witness")
+            return
+        }
+
+        gate.resumeFirstGeneration()
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertEqual(
+            provider.witnessIdentityForTesting,
+            replacementIdentity,
+            "stale cleanup must not remove the replacement witness"
+        )
+    }
+
+    @MainActor
+    func testStatusCallbackRebindStopsTheStaleCalibrationGeneration()
+        async throws {
+        let (firstWindow, firstAnchor) = makeReferenceHost()
+        let (replacementWindow, replacementAnchor) = makeReferenceHost()
+        firstWindow.orderFront(nil)
+        replacementWindow.orderFront(nil)
+        defer {
+            firstWindow.orderOut(nil)
+            replacementWindow.orderOut(nil)
+        }
+
+        let provider = GlassMaterialAtlasProvider(
+            hostWindow: firstWindow,
+            probeHostView: firstAnchor,
+            shortSides: [48],
+            certifiedAtlasURLs: []
+        )
+        defer { provider.invalidate() }
+        provider.hostParticipationForTesting = true
+        var rebound = false
+        var staleFailure: String?
+        provider.onStateChanged = { state in
+            if rebound, case let .failed(message) = state {
+                staleFailure = message
+            }
+            guard !rebound,
+                  case let .capturing(completed, _) = state,
+                  completed == 0
+            else { return }
+            rebound = true
+            provider.rebindReferenceHost(
+                hostWindow: replacementWindow,
+                probeHostView: replacementAnchor
+            )
+            provider.ensureCaptured()
+        }
+
+        provider.ensureCaptured()
+        guard await waitUntil({ rebound }, timeoutNanoseconds: 2_000_000_000)
+        else {
+            XCTFail("calibration never published its initial progress")
+            return
+        }
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertNil(
+            staleFailure,
+            "the rebound generation must not inherit stale failure status"
+        )
+        XCTAssertTrue(provider.hostWindow === replacementWindow)
+        XCTAssertTrue(provider.probeHostView === replacementAnchor)
+    }
+
+    @MainActor
     func testProviderRebindKeepsVerifiedAtlasAndCachedTint() throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -402,6 +531,19 @@ final class ReferenceLifecycleTests: XCTestCase {
             try? await Task.sleep(for: .milliseconds(50))
         }
         return false
+    }
+
+    @MainActor
+    private func waitUntil(
+        _ condition: () -> Bool,
+        timeoutNanoseconds: UInt64 = 1_000_000_000
+    ) async -> Bool {
+        let start = DispatchTime.now().uptimeNanoseconds
+        while DispatchTime.now().uptimeNanoseconds - start < timeoutNanoseconds {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
     }
 
     @MainActor

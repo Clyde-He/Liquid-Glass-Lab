@@ -610,6 +610,19 @@ final class GlassEffectController {
         // its pure decision requests recovery: an unresolved Tint that only
         // ever reaches this early return would otherwise stall forever.
         let plan = buildPlan()
+        // Resolution progression is independent of installation redundancy.
+        // In particular, a warm request whose display clock stopped during a
+        // participation gap must be re-armed even when the held/base material
+        // is already current. Do not start the fast probe path while a legacy
+        // capture transaction owns the same requested color.
+        if plan.tintIsReady, plan.hasPendingCommitRequest {
+            tintPipeline.confirmRequestSatisfied()
+        } else if Self.shouldAdvanceTintResolution(
+            tintIsReady: plan.tintIsReady,
+            hasLegacyCaptureInFlight: tintPipeline.hasLegacyCaptureInFlight
+        ) {
+            requestCommitResolutionIfNeeded()
+        }
         if installationReconciler.isAlreadyCurrent(
             plan: plan,
             configuration: configuration,
@@ -619,15 +632,6 @@ final class GlassEffectController {
             refreshStatus(plan: plan)
             return
         }
-        // Fail closed for Tint: an unverified or hue-suppressed matrix is never
-        // presented as the requested color. The plan is side-effect-free; only
-        // the explicit request channel may enqueue.
-        if plan.tintIsReady, plan.hasPendingCommitRequest {
-            tintPipeline.confirmRequestSatisfied()
-        } else if !plan.tintIsReady {
-            requestCommitResolutionIfNeeded()
-        }
-
         if plan.tintIsReady {
             lastVerifiedTintColor = configuration.tint
         }
@@ -789,6 +793,16 @@ final class GlassEffectController {
         }
         mergePipelineDiagnostics()
         return outcome
+    }
+
+    /// Resolution and installation are independent axes: an already-current
+    /// held/base plan may still need its service clock re-armed. A bounded
+    /// legacy capture remains the sole producer while it is active.
+    static func shouldAdvanceTintResolution(
+        tintIsReady: Bool,
+        hasLegacyCaptureInFlight: Bool
+    ) -> Bool {
+        !tintIsReady && !hasLegacyCaptureInFlight
     }
 
     /// Forwards collaborator-owned counters into the public diagnostics.

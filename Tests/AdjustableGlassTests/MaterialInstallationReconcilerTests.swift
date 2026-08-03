@@ -5,6 +5,25 @@ import XCTest
 @available(macOS 26.0, *)
 final class MaterialInstallationReconcilerTests: XCTestCase {
     @MainActor
+    func testRetryTaskMayMutateOnlyItsOwnGeneration() {
+        XCTAssertTrue(MaterialInstallationReconciler.retryOwnsSharedState(
+            generation: 4,
+            currentGeneration: 4,
+            isCancelled: false
+        ))
+        XCTAssertFalse(MaterialInstallationReconciler.retryOwnsSharedState(
+            generation: 3,
+            currentGeneration: 4,
+            isCancelled: false
+        ))
+        XCTAssertFalse(MaterialInstallationReconciler.retryOwnsSharedState(
+            generation: 4,
+            currentGeneration: 4,
+            isCancelled: true
+        ))
+    }
+
+    @MainActor
     func testCommittedIdentityRequiresEveryAuthorityAndLiveHealth() {
         let firstDestination = NSObject()
         let secondDestination = NSObject()
