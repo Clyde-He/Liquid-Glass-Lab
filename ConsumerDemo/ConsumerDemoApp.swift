@@ -82,6 +82,15 @@ enum ConsumerDemoApp {
         )
         appItem.submenu = appMenu
         mainMenu.addItem(appItem)
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(
+            withTitle: "Reopen Reference",
+            action: #selector(ConsumerDemoAppDelegate.reopenReference(_:)),
+            keyEquivalent: "r"
+        )
+        windowItem.submenu = windowMenu
+        mainMenu.addItem(windowItem)
         app.mainMenu = mainMenu
     }
 }
@@ -181,6 +190,12 @@ private final class ConsumerDemoAppDelegate:
     private var hudContentSize = CGSize(width: 320, height: 120)
     private var hudCornerRadius: CGFloat = 24
     private var isLayingOutHUDPanel = false
+    private var lastHUDLayoutSignature: HUDLayoutSignature?
+
+    private struct HUDLayoutSignature: Equatable {
+        let contentSize: CGSize
+        let requiredWindowInset: CGFloat
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let controlWindow = buildControlWindow()
@@ -213,7 +228,11 @@ private final class ConsumerDemoAppDelegate:
     func applicationShouldTerminateAfterLastWindowClosed(
         _ sender: NSApplication
     ) -> Bool {
-        true
+        // The control window is also the replaceable reference host. Keep the
+        // app and nonactivating HUD alive after it closes so the lifecycle
+        // scenario can detach the host and later restore it through
+        // Window > Reopen Reference.
+        false
     }
 
     private func buildControlWindow() -> NSWindow {
@@ -316,7 +335,12 @@ private final class ConsumerDemoAppDelegate:
             target: self,
             action: #selector(retryReadiness(_:))
         )
-        let actions = NSStackView(views: [toggleHUD, retry])
+        let reopenReference = NSButton(
+            title: "Reopen Reference",
+            target: self,
+            action: #selector(reopenReference(_:))
+        )
+        let actions = NSStackView(views: [toggleHUD, retry, reopenReference])
         actions.orientation = .horizontal
         actions.spacing = 10
 
@@ -457,17 +481,31 @@ private final class ConsumerDemoAppDelegate:
               let panel = hudPanel,
               let glass = glassView
         else { return }
+
+        let contentSize = hudContentSize
+        let proposedSignature = HUDLayoutSignature(
+            contentSize: contentSize,
+            requiredWindowInset: glass.requiredWindowInset
+        )
+        // Material-only controls such as Visibility and Tint stream through
+        // this same convergence point. If neither consumer-owned geometry nor
+        // the Package's public inset contract changed, touching the panel or
+        // forcing an NSView layout would only provoke an unrelated AppKit
+        // Recipe rebuild on every control event.
+        guard proposedSignature != lastHUDLayoutSignature else { return }
+
         isLayingOutHUDPanel = true
         defer { isLayingOutHUDPanel = false }
 
-        let contentSize = hudContentSize
         let previousVisualOrigin = NSPoint(
             x: panel.frame.minX + glass.frame.minX,
             y: panel.frame.minY + glass.frame.minY
         )
-        glass.setFrameSize(contentSize)
-        glass.needsLayout = true
-        glass.layoutSubtreeIfNeeded()
+        if lastHUDLayoutSignature == nil || glass.frame.size != contentSize {
+            glass.setFrameSize(contentSize)
+            glass.needsLayout = true
+            glass.layoutSubtreeIfNeeded()
+        }
         let inset = glass.requiredWindowInset
         let total = CGSize(
             width: contentSize.width + inset * 2,
@@ -482,6 +520,10 @@ private final class ConsumerDemoAppDelegate:
             x: previousVisualOrigin.x - inset,
             y: previousVisualOrigin.y - inset
         ))
+        lastHUDLayoutSignature = HUDLayoutSignature(
+            contentSize: contentSize,
+            requiredWindowInset: inset
+        )
     }
 
     private func glassFrame(
@@ -606,6 +648,21 @@ private final class ConsumerDemoAppDelegate:
 
     @objc private func retryReadiness(_ sender: Any?) {
         glassView?.prepareIfNeeded()
+    }
+
+    /// Covers closing and reopening the reference window while the HUD stays
+    /// visible: the control window can be closed at any time (its willClose
+    /// detaches the reference host), and this re-attaches it without touching
+    /// the controller or the rendered material. Reachable from the Window menu
+    /// so it still works after the control window itself has been closed.
+    @objc func reopenReference(_ sender: Any?) {
+        guard let controlWindow else { return }
+        glassView?.setReferenceHost(
+            window: controlWindow,
+            view: controlWindow.contentView
+        )
+        controlWindow.makeKeyAndOrderFront(nil)
+        applyConfiguration()
     }
 
     private func applyConfiguration() {

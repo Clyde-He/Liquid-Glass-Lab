@@ -106,10 +106,10 @@ final class GlassMaterialAtlasProvider {
         var mainOff: GlassMaterialStyleAtlas.TintMatrix
     }
 
-    private weak var hostWindow: NSWindow?
+    private(set) weak var hostWindow: NSWindow?
     /// Consumer-owned insertion point for invisible calibration probes.
     /// SwiftUI hosting-controller roots are not safe to mutate directly.
-    private weak var probeHostView: NSView?
+    private(set) weak var probeHostView: NSView?
     private let shortSides: [Double]
     private let storageURL: URL?
     private let certifiedAtlasURLs: [URL]
@@ -118,18 +118,40 @@ final class GlassMaterialAtlasProvider {
     private var mainProbeContainer: NSView?
     private var witnessWindow: GlassMaterialCalibrationWindow?
     private var witnessProbeContainer: NSView?
+    #if DEBUG
+    /// Test-only suspension seam used to make replacement-generation cleanup
+    /// deterministic. Release builds carry no lifecycle-test machinery.
+    var calibrationWitnessPreparedForTesting: ((Int) async -> Void)?
+    var hostParticipationForTesting: Bool?
+    var witnessIdentityForTesting: ObjectIdentifier? {
+        witnessWindow.map(ObjectIdentifier.init)
+    }
+    #endif
     private var captureTask: Task<Void, Never>?
+    /// Generation owned by `captureTask` itself. This is separate from the
+    /// monotonically advanced invalidation generation so repeated
+    /// `recalibrate()` calls still target the same cancelled handle.
+    private var captureTaskGeneration: Int?
     private var captureGeneration = 0
     private var tintCaptureTask: Task<Void, Never>?
     private var tintCaptureGeneration = 0
     private var observers: [NSObjectProtocol] = []
     private var didLoadCandidates = false
-    private var pendingRecalibration = false
+    /// Generation of the cancelled base-capture task whose cleanup should
+    /// launch an explicitly requested recalibration. Host rebind cancellation
+    /// never sets this handshake, so stale host work cannot disturb a newer
+    /// task.
+    private var pendingRecalibrationGeneration: Int?
     private var isInvalidated = false
 
     /// Host flags are a scheduling precondition, never proof of the captured
     /// material. Payload proof comes from paired On/Off samples.
     private var hostParticipates: Bool {
+        #if DEBUG
+        if let hostParticipationForTesting {
+            return hostParticipationForTesting
+        }
+        #endif
         guard let window = hostWindow else { return false }
         return (window.isMainWindow || window.isKeyWindow) && NSApp.isActive
     }
@@ -201,24 +223,62 @@ final class GlassMaterialAtlasProvider {
     /// the replacement has fully verified and can atomically overwrite it.
     public func recalibrate() {
         guard !isInvalidated else { return }
-        pendingRecalibration = captureTask != nil
+        pendingRecalibrationGeneration = captureTaskGeneration
         captureGeneration += 1
         captureTask?.cancel()
         tintCaptureGeneration += 1
         tintCaptureTask?.cancel()
-        // The cancelled task's own cleanup is generation-guarded and will not
-        // run; clear the handle here so a later `cancelTintCapture` cannot
-        // mistake it for a live transaction and tear down the witness window
-        // out from under the fresh base calibration.
+        // Clear the independent Tint handle here so a later
+        // `cancelTintCapture` cannot mistake it for a live transaction and
+        // tear down the witness window while the base-calibration handshake
+        // above is waiting to launch its fresh generation.
         tintCaptureTask = nil
         atlas = GlassMaterialStyleAtlas()
         atlasSource = .none
         didLoadCandidates = true
         state = .idle
         if captureTask == nil {
-            pendingRecalibration = false
+            pendingRecalibrationGeneration = nil
             captureWhenPossible()
         }
+    }
+
+    /// Re-targets calibration at a different reference host without discarding
+    /// the verified atlas or its persisted Tint overlay.
+    ///
+    /// A reference host is a calibration capability, not ownership of the
+    /// captured material: the current atlas, source, and ready state survive
+    /// the transition. Only host-bound machinery is rebuilt — notification
+    /// registrations, the probe container (which lives in the previous host's
+    /// view tree), the witness window, and any in-flight capture against the
+    /// previous host. Returns false when the effective pair is unchanged.
+    @discardableResult
+    func rebindReferenceHost(
+        hostWindow: NSWindow?,
+        probeHostView: NSView?
+    ) -> Bool {
+        guard hostWindow !== self.hostWindow
+                || probeHostView !== self.probeHostView
+        else { return false }
+        self.hostWindow = hostWindow
+        self.probeHostView = probeHostView
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        observers = []
+        mainProbeContainer?.removeFromSuperview()
+        mainProbeContainer = nil
+        tintCaptureGeneration += 1
+        tintCaptureTask?.cancel()
+        tintCaptureTask = nil
+        tearDownWitnessWindow()
+        captureGeneration += 1
+        captureTask?.cancel()
+        captureTask = nil
+        captureTaskGeneration = nil
+        pendingRecalibrationGeneration = nil
+        observeHostWindow()
+        return true
     }
 
     /// Stops a color-specific transaction when its product consumer goes
@@ -241,7 +301,8 @@ final class GlassMaterialAtlasProvider {
         captureGeneration += 1
         captureTask?.cancel()
         captureTask = nil
-        pendingRecalibration = false
+        captureTaskGeneration = nil
+        pendingRecalibrationGeneration = nil
         tintCaptureGeneration += 1
         tintCaptureTask?.cancel()
         tintCaptureTask = nil
@@ -604,16 +665,30 @@ final class GlassMaterialAtlasProvider {
         }
         captureGeneration += 1
         let generation = captureGeneration
+        captureTaskGeneration = generation
         captureTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.runCalibration(generation: generation)
             guard !self.isInvalidated else { return }
-            self.captureTask = nil
-            if self.pendingRecalibration {
-                self.pendingRecalibration = false
+            // A host rebind clears the cancelled handle and may already have
+            // installed a successor task. The stale task must not erase that
+            // successor or start a second calibration against shared probes.
+            // `recalibrate()` is different: it leaves the cancelled handle in
+            // place and sets this handshake so that task may start the fresh
+            // generation after its own cleanup.
+            guard generation == self.captureGeneration else {
+                guard self.pendingRecalibrationGeneration == generation
+                else { return }
+                self.pendingRecalibrationGeneration = nil
+                self.captureTask = nil
+                self.captureTaskGeneration = nil
                 self.captureWhenPossible()
-            } else if self.state == .waitingForMainWindow,
-                      self.hostParticipates {
+                return
+            }
+            self.captureTask = nil
+            self.captureTaskGeneration = nil
+            if self.state == .waitingForMainWindow,
+               self.hostParticipates {
                 self.captureWhenPossible()
             }
         }
@@ -628,7 +703,24 @@ final class GlassMaterialAtlasProvider {
             state = .failed("Could not create the Main-Off witness window.")
             return
         }
-        defer { tearDownWitnessWindow() }
+        guard let ownedWitnessWindow = witnessWindow,
+              let ownedWitnessProbeContainer = witnessProbeContainer
+        else {
+            state = .failed("Could not retain the Main-Off witness window.")
+            return
+        }
+        defer {
+            tearDownWitnessWindow(
+                ifOwnedBy: ownedWitnessWindow,
+                probeContainer: ownedWitnessProbeContainer
+            )
+        }
+
+        #if DEBUG
+        if let calibrationWitnessPreparedForTesting {
+            await calibrationWitnessPreparedForTesting(generation)
+        }
+        #endif
 
         try? await Task.sleep(for: .milliseconds(500))
         guard captureIsCurrent(generation) else { return }
@@ -645,12 +737,15 @@ final class GlassMaterialAtlasProvider {
         let total = Self.mainOnCells.count * shortSides.count
         var completed = 0
         state = .capturing(completed: 0, total: total)
+        guard captureIsCurrent(generation) else { return }
 
         for cell in Self.mainOnCells {
+            guard captureIsCurrent(generation) else { return }
             guard let pairs = await captureVerifiedBatch(
                 cell: cell,
                 sizes: shortSides
             ) else { return }
+            guard captureIsCurrent(generation) else { return }
             let mainOffCell = Self.mainOffCell(for: cell)
             for pair in pairs {
                 candidate.add(pair.mainOn, for: cell)
@@ -658,8 +753,10 @@ final class GlassMaterialAtlasProvider {
             }
             completed += pairs.count
             state = .capturing(completed: completed, total: total)
+            guard captureIsCurrent(generation) else { return }
         }
 
+        guard captureIsCurrent(generation) else { return }
         candidate.environment = .current(for: hostWindow?.screen)
         guard candidate.hasVerifiedMainOnCoverage(shortSides: shortSides) else {
             state = .failed(
@@ -1032,6 +1129,20 @@ final class GlassMaterialAtlasProvider {
         witnessWindow?.orderOut(nil)
         witnessWindow = nil
         witnessProbeContainer = nil
+    }
+
+    /// A cancelled host generation may finish after its replacement has
+    /// already created a new witness. Cleanup is resource-owned: stale work
+    /// may release only the exact pair it prepared, never the provider's
+    /// current replacement pair.
+    private func tearDownWitnessWindow(
+        ifOwnedBy ownedWindow: GlassMaterialCalibrationWindow,
+        probeContainer ownedProbeContainer: NSView
+    ) {
+        guard witnessWindow === ownedWindow,
+              witnessProbeContainer === ownedProbeContainer
+        else { return }
+        tearDownWitnessWindow()
     }
 
     private func makeClippedContainer() -> NSView {

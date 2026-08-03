@@ -4,6 +4,22 @@ import XCTest
 @available(macOS 26.0, *)
 final class ControllerConfigurationTests: XCTestCase {
     @MainActor
+    func testUnresolvedTintAdvancesUnlessLegacyCaptureOwnsTheColor() {
+        XCTAssertTrue(GlassEffectController.shouldAdvanceTintResolution(
+            tintIsReady: false,
+            hasLegacyCaptureInFlight: false
+        ))
+        XCTAssertFalse(GlassEffectController.shouldAdvanceTintResolution(
+            tintIsReady: true,
+            hasLegacyCaptureInFlight: false
+        ))
+        XCTAssertFalse(GlassEffectController.shouldAdvanceTintResolution(
+            tintIsReady: false,
+            hasLegacyCaptureInFlight: true
+        ))
+    }
+
+    @MainActor
     func testAppearanceChangeRequiresFullMaterialInstall() {
         let system = GlassEffectController.Configuration(
             appearance: .system
@@ -442,13 +458,43 @@ final class ControllerConfigurationTests: XCTestCase {
         XCTAssertTrue(contained.outerPasses.contains(.ringShadow))
         XCTAssertTrue(contained.outerPasses.contains(.bleed))
         XCTAssertTrue(contained.outerPasses.contains(.outerRefraction))
-        XCTAssertEqual(contained.marginWidthOverride, 0)
+        XCTAssertEqual(
+            contained.marginWidthOverride,
+            ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 27
+                ? 0.5
+                : 0
+        )
+        XCTAssertEqual(contained.windowInsetMarginWidthOverride, 0)
 
         let native = GlassMaterialRenderExperiment.outerShadowPolicy(
             hasOuterShadow: true
         )
         XCTAssertEqual(native.outerPasses, .all)
         XCTAssertNil(native.marginWidthOverride)
+        XCTAssertNil(native.windowInsetMarginWidthOverride)
+    }
+
+    func testContainedRenderMarginIsDecoupledFromWindowInsetByMajor() {
+        let macOS26 = GlassMaterialRenderExperiment.outerShadowPolicy(
+            hasOuterShadow: false,
+            osMajorVersion: 26
+        )
+        XCTAssertEqual(macOS26.marginWidthOverride, 0)
+        XCTAssertEqual(macOS26.windowInsetMarginWidthOverride, 0)
+
+        let macOS27 = GlassMaterialRenderExperiment.outerShadowPolicy(
+            hasOuterShadow: false,
+            osMajorVersion: 27
+        )
+        XCTAssertEqual(macOS27.marginWidthOverride, 0.5)
+        XCTAssertEqual(macOS27.windowInsetMarginWidthOverride, 0)
+        XCTAssertEqual(
+            GlassEffectController.windowInset(
+                for: macOS27.windowInsetMarginWidthOverride!,
+                osMajorVersion: 27
+            ),
+            1
+        )
     }
 
     func testZeroMarginSafetyInsetDiffersByMajorVersion() {

@@ -42,16 +42,26 @@ public struct AdjustableGlassOuterPasses: OptionSet, Equatable, Sendable {
 struct GlassMaterialRenderExperiment: Equatable {
     var outerPasses: AdjustableGlassOuterPasses = .all
     var marginWidthOverride: Double?
+    /// The render-server margin and the consumer-facing window room are
+    /// related but not identical. macOS 27 stabilizes the contained backdrop
+    /// at a half-point internal sampling margin, while one point of external
+    /// window room remains the product contract.
+    var windowInsetMarginWidthOverride: Double?
 
     static var currentProductDefault: Self {
         outerShadowPolicy(hasOuterShadow: false)
     }
 
-    static func outerShadowPolicy(hasOuterShadow: Bool) -> Self {
+    static func outerShadowPolicy(
+        hasOuterShadow: Bool,
+        osMajorVersion: Int = ProcessInfo.processInfo
+            .operatingSystemVersion.majorVersion
+    ) -> Self {
         guard !hasOuterShadow else { return Self() }
         return Self(
             outerPasses: .all.subtracting(.shadow),
-            marginWidthOverride: 0
+            marginWidthOverride: osMajorVersion == 27 ? 0.5 : 0,
+            windowInsetMarginWidthOverride: 0
         )
     }
 
@@ -640,11 +650,14 @@ final class GlassMaterialStrength {
 
     func setRenderExperiment(
         outerPasses: AdjustableGlassOuterPasses,
-        marginWidthOverride: Double?
+        marginWidthOverride: Double?,
+        windowInsetMarginWidthOverride: Double?
     ) {
         let next = GlassMaterialRenderExperiment(
             outerPasses: outerPasses,
-            marginWidthOverride: marginWidthOverride.map { max(0, $0) }
+            marginWidthOverride: marginWidthOverride.map { max(0, $0) },
+            windowInsetMarginWidthOverride: windowInsetMarginWidthOverride
+                .map { max(0, $0) }
         )
         guard next != renderExperiment else { return }
         renderExperiment = next
@@ -1206,11 +1219,19 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     ///
     /// A nonactivating HUD cannot become main or key itself, so readiness is
     /// derived from this reference window.
+    ///
+    /// The reference window is a calibration/resolver capability, not
+    /// ownership of the rendered material: changing or clearing it re-targets
+    /// the effect controller without rebuilding it, so a verified frozen
+    /// material and a resolved Tint stay on screen. To change the window and
+    /// the probe view together as one host transition, use
+    /// `setReferenceHost(window:view:)`.
     public weak var referenceWindow: NSWindow? {
         didSet {
             guard referenceWindow !== oldValue else { return }
             observeReferenceWindowClose()
-            rebuildEffectController()
+            guard referenceHostUpdateDepth == 0 else { return }
+            updateReferenceHost()
         }
     }
 
@@ -1224,8 +1245,23 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     @objc public weak var referenceView: NSView? {
         didSet {
             guard referenceView !== oldValue else { return }
-            rebuildEffectController()
+            guard referenceHostUpdateDepth == 0 else { return }
+            updateReferenceHost()
         }
+    }
+
+    /// Atomically re-targets the reference host, so a consumer integration
+    /// that supplies a window and its probe view together performs one host
+    /// transition instead of two. Rebinding the exact same effective host
+    /// pair is a no-op. Individual `referenceWindow`/`referenceView` writes
+    /// remain supported and each still re-targets the host.
+    public func setReferenceHost(window: NSWindow?, view: NSView?) {
+        referenceHostUpdateDepth += 1
+        referenceWindow = window
+        referenceView = view
+        referenceHostUpdateDepth -= 1
+        guard referenceHostUpdateDepth == 0 else { return }
+        updateReferenceHost()
     }
 
     /// Whether the system's bounds-extending glass shadow is retained.
@@ -1244,6 +1280,8 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
             requestedExperimentalMarginWidth = policy.marginWidthOverride.map {
                 CGFloat($0)
             }
+            requestedWindowInsetMarginWidth = policy
+                .windowInsetMarginWidthOverride.map { CGFloat($0) }
             applyRenderExperiment()
         }
     }
@@ -1278,6 +1316,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
             let normalized = newValue.map { max(0, $0) }
             guard normalized != requestedExperimentalMarginWidth else { return }
             requestedExperimentalMarginWidth = normalized
+            requestedWindowInsetMarginWidth = normalized
             applyRenderExperiment()
         }
     }
@@ -1357,7 +1396,8 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     }
 
     /// Rechecks cached or runtime readiness after the reference window or
-    /// display environment changes.
+    /// display environment changes. Idempotent for an already-ready,
+    /// unchanged controller.
     public func prepareIfNeeded() {
         if effectController == nil {
             rebuildEffectController()
@@ -1401,12 +1441,24 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     private var requestedExperimentalMarginWidth: CGFloat? =
         GlassMaterialRenderExperiment.currentProductDefault
             .marginWidthOverride.map { CGFloat($0) }
+    private var requestedWindowInsetMarginWidth: CGFloat? =
+        GlassMaterialRenderExperiment.currentProductDefault
+            .windowInsetMarginWidthOverride.map { CGFloat($0) }
     private var effectController: GlassEffectController?
     private var configurationUpdateDepth = 0
     private var hasDeferredConfigurationUpdate = false
     private var hasDeferredStrengthRefresh = false
     private var hasDeferredSystemRestampRefresh = false
     private var referenceWindowCloseObserver: NSObjectProtocol?
+    private var referenceHostUpdateDepth = 0
+
+    /// Internal performance diagnostic used by lifecycle regression tests.
+    /// Counts full `GlassEffectController` lifetimes created by this view.
+    private(set) var effectControllerGeneration = 0
+
+    /// Internal performance diagnostic used by lifecycle regression tests.
+    /// Counts effective reference-host re-targets (pair identity changes).
+    private(set) var referenceHostUpdateCount = 0
 
     /// Internal performance diagnostic used by batching regression tests.
     private(set) var materialRefreshGeneration = 0
@@ -1505,6 +1557,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     }
 
     private func rebuildEffectController() {
+        effectControllerGeneration += 1
         effectController?.invalidate()
         effectController = nil
 
@@ -1528,6 +1581,24 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         controller.attach(to: self)
         status = Self.publicStatus(for: controller.status)
         updateRequiredWindowInset()
+    }
+
+    /// Re-targets the existing controller at the current effective host pair.
+    /// Identity-equal pairs are no-ops, so duplicate window notifications and
+    /// repeated `setReferenceHost` calls with the same host cost nothing. A
+    /// healthy controller is never rebuilt or invalidated by a host change:
+    /// the rendered material belongs to this view, not to the host.
+    private func updateReferenceHost() {
+        guard let controller = effectController else {
+            rebuildEffectController()
+            return
+        }
+        if controller.rebindReferenceHost(
+            hostWindow: referenceWindow,
+            probeHostView: resolvedReferenceView
+        ) {
+            referenceHostUpdateCount += 1
+        }
     }
 
     private var resolvedReferenceView: NSView? {
@@ -1769,7 +1840,9 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     private func applyRenderExperiment() {
         materialStrength.setRenderExperiment(
             outerPasses: requestedExperimentalOuterPasses,
-            marginWidthOverride: requestedExperimentalMarginWidth.map(Double.init)
+            marginWidthOverride: requestedExperimentalMarginWidth.map(Double.init),
+            windowInsetMarginWidthOverride: requestedWindowInsetMarginWidth
+                .map(Double.init)
         )
         updateRequiredWindowInset()
     }
