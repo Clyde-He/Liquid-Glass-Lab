@@ -72,6 +72,7 @@ struct ResolvedMaterialPlan {
     /// The controller supplies the side-effect-free pipeline snapshots; a
     /// held-state snapshot is only required — and only consulted — when a
     /// last-verified color could serve an unresolved request.
+    @MainActor
     static func build(
         configuration: GlassEffectController.Configuration,
         baseIsPairedCoverageComplete: Bool,
