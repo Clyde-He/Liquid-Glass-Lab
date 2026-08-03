@@ -222,7 +222,11 @@ private final class ConsumerDemoAppDelegate:
     func applicationShouldTerminateAfterLastWindowClosed(
         _ sender: NSApplication
     ) -> Bool {
-        true
+        // The control window is also the replaceable reference host. Keep the
+        // app and nonactivating HUD alive after it closes so the lifecycle
+        // scenario can detach the host and later restore it through
+        // Window > Reopen Reference.
+        false
     }
 
     private func buildControlWindow() -> NSWindow {
