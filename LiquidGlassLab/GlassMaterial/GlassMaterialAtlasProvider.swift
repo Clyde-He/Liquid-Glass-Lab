@@ -119,6 +119,10 @@ final class GlassMaterialAtlasProvider {
     private var witnessWindow: GlassMaterialCalibrationWindow?
     private var witnessProbeContainer: NSView?
     private var captureTask: Task<Void, Never>?
+    /// Generation owned by `captureTask` itself. This is separate from the
+    /// monotonically advanced invalidation generation so repeated
+    /// `recalibrate()` calls still target the same cancelled handle.
+    private var captureTaskGeneration: Int?
     private var captureGeneration = 0
     private var tintCaptureTask: Task<Void, Never>?
     private var tintCaptureGeneration = 0
@@ -205,9 +209,7 @@ final class GlassMaterialAtlasProvider {
     /// the replacement has fully verified and can atomically overwrite it.
     public func recalibrate() {
         guard !isInvalidated else { return }
-        pendingRecalibrationGeneration = captureTask == nil
-            ? nil
-            : captureGeneration
+        pendingRecalibrationGeneration = captureTaskGeneration
         captureGeneration += 1
         captureTask?.cancel()
         tintCaptureGeneration += 1
@@ -259,6 +261,7 @@ final class GlassMaterialAtlasProvider {
         captureGeneration += 1
         captureTask?.cancel()
         captureTask = nil
+        captureTaskGeneration = nil
         pendingRecalibrationGeneration = nil
         observeHostWindow()
         return true
@@ -284,6 +287,7 @@ final class GlassMaterialAtlasProvider {
         captureGeneration += 1
         captureTask?.cancel()
         captureTask = nil
+        captureTaskGeneration = nil
         pendingRecalibrationGeneration = nil
         tintCaptureGeneration += 1
         tintCaptureTask?.cancel()
@@ -647,6 +651,7 @@ final class GlassMaterialAtlasProvider {
         }
         captureGeneration += 1
         let generation = captureGeneration
+        captureTaskGeneration = generation
         captureTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.runCalibration(generation: generation)
@@ -662,10 +667,12 @@ final class GlassMaterialAtlasProvider {
                 else { return }
                 self.pendingRecalibrationGeneration = nil
                 self.captureTask = nil
+                self.captureTaskGeneration = nil
                 self.captureWhenPossible()
                 return
             }
             self.captureTask = nil
+            self.captureTaskGeneration = nil
             if self.state == .waitingForMainWindow,
                self.hostParticipates {
                 self.captureWhenPossible()
