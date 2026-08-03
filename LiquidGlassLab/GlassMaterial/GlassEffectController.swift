@@ -487,8 +487,9 @@ final class GlassEffectController {
         respectsRenderExperiment: Bool = true
     ) -> CGFloat {
         if respectsRenderExperiment,
-           let margin = glassView?.materialStrength.renderExperiment
-            .marginWidthOverride {
+           let experiment = glassView?.materialStrength.renderExperiment,
+           let margin = experiment.windowInsetMarginWidthOverride
+            ?? experiment.marginWidthOverride {
             return windowInset(for: margin)
         }
         // Main-Off intentionally suppresses the outer shadow. Some certified

@@ -42,16 +42,26 @@ public struct AdjustableGlassOuterPasses: OptionSet, Equatable, Sendable {
 struct GlassMaterialRenderExperiment: Equatable {
     var outerPasses: AdjustableGlassOuterPasses = .all
     var marginWidthOverride: Double?
+    /// The render-server margin and the consumer-facing window room are
+    /// related but not identical. macOS 27 stabilizes the contained backdrop
+    /// at a half-point internal sampling margin, while one point of external
+    /// window room remains the product contract.
+    var windowInsetMarginWidthOverride: Double?
 
     static var currentProductDefault: Self {
         outerShadowPolicy(hasOuterShadow: false)
     }
 
-    static func outerShadowPolicy(hasOuterShadow: Bool) -> Self {
+    static func outerShadowPolicy(
+        hasOuterShadow: Bool,
+        osMajorVersion: Int = ProcessInfo.processInfo
+            .operatingSystemVersion.majorVersion
+    ) -> Self {
         guard !hasOuterShadow else { return Self() }
         return Self(
             outerPasses: .all.subtracting(.shadow),
-            marginWidthOverride: 0
+            marginWidthOverride: osMajorVersion == 27 ? 0.5 : 0,
+            windowInsetMarginWidthOverride: 0
         )
     }
 
@@ -640,11 +650,14 @@ final class GlassMaterialStrength {
 
     func setRenderExperiment(
         outerPasses: AdjustableGlassOuterPasses,
-        marginWidthOverride: Double?
+        marginWidthOverride: Double?,
+        windowInsetMarginWidthOverride: Double?
     ) {
         let next = GlassMaterialRenderExperiment(
             outerPasses: outerPasses,
-            marginWidthOverride: marginWidthOverride.map { max(0, $0) }
+            marginWidthOverride: marginWidthOverride.map { max(0, $0) },
+            windowInsetMarginWidthOverride: windowInsetMarginWidthOverride
+                .map { max(0, $0) }
         )
         guard next != renderExperiment else { return }
         renderExperiment = next
@@ -1267,6 +1280,8 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
             requestedExperimentalMarginWidth = policy.marginWidthOverride.map {
                 CGFloat($0)
             }
+            requestedWindowInsetMarginWidth = policy
+                .windowInsetMarginWidthOverride.map { CGFloat($0) }
             applyRenderExperiment()
         }
     }
@@ -1301,6 +1316,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
             let normalized = newValue.map { max(0, $0) }
             guard normalized != requestedExperimentalMarginWidth else { return }
             requestedExperimentalMarginWidth = normalized
+            requestedWindowInsetMarginWidth = normalized
             applyRenderExperiment()
         }
     }
@@ -1425,6 +1441,9 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     private var requestedExperimentalMarginWidth: CGFloat? =
         GlassMaterialRenderExperiment.currentProductDefault
             .marginWidthOverride.map { CGFloat($0) }
+    private var requestedWindowInsetMarginWidth: CGFloat? =
+        GlassMaterialRenderExperiment.currentProductDefault
+            .windowInsetMarginWidthOverride.map { CGFloat($0) }
     private var effectController: GlassEffectController?
     private var configurationUpdateDepth = 0
     private var hasDeferredConfigurationUpdate = false
@@ -1821,7 +1840,9 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     private func applyRenderExperiment() {
         materialStrength.setRenderExperiment(
             outerPasses: requestedExperimentalOuterPasses,
-            marginWidthOverride: requestedExperimentalMarginWidth.map(Double.init)
+            marginWidthOverride: requestedExperimentalMarginWidth.map(Double.init),
+            windowInsetMarginWidthOverride: requestedWindowInsetMarginWidth
+                .map(Double.init)
         )
         updateRequiredWindowInset()
     }
