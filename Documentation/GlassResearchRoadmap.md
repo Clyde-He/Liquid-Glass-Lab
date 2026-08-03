@@ -860,6 +860,29 @@ same surface area, display, backdrop, Recipe, and update rate, record:
 - event-driven restamp cost after setting, Recipe/context, renderer, and
   geometry changes.
 
+#### TODO — Tint brightness streaming cost
+
+A controlled Dyno consumer A/B on macOS 27 isolated a color-dependent cost
+after the public `tintColor` setter. With the same SwiftUI input and Observation
+path, bypassing the final Package write kept brightness dragging at roughly
+55–60 display-link callbacks per second. Restoring the Package write reduced
+brightness dragging to roughly 33–38 callbacks per second with repeated
+50–73 ms main-run-loop gaps, while Hue remained at 60–61 callbacks per second.
+Input, Observation, and setter-reached counts stayed effectively 1:1, so this
+is not evidence of consumer-side sample loss.
+
+This trace localizes the remaining cost only to work after the public setter;
+it does not yet identify a specific Package stage. Before changing behavior:
+
+- [ ] reproduce Brightness and Hue sweeps in the Consumer Demo with matched
+  Display P3 input, glass style, geometry, and update cadence;
+- [ ] time the synchronous `layoutSubtreeIfNeeded()` fence, closed-form
+  snapshot/synthesis, narrow Tint restamp/readback, and full-freeze fallback
+  independently;
+- [ ] optimize only the measured stage, preserving the Clear final-writer
+  guarantee, verified readback, one-write-per-display-frame coalescing, and
+  fail-closed Tint resolution.
+
 Production code must not rewrite material values on every unrelated HUD metric
 sample.
 
