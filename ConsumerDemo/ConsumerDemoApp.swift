@@ -82,6 +82,15 @@ enum ConsumerDemoApp {
         )
         appItem.submenu = appMenu
         mainMenu.addItem(appItem)
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(
+            withTitle: "Reopen Reference",
+            action: #selector(ConsumerDemoAppDelegate.reopenReference(_:)),
+            keyEquivalent: "r"
+        )
+        windowItem.submenu = windowMenu
+        mainMenu.addItem(windowItem)
         app.mainMenu = mainMenu
     }
 }
@@ -316,7 +325,12 @@ private final class ConsumerDemoAppDelegate:
             target: self,
             action: #selector(retryReadiness(_:))
         )
-        let actions = NSStackView(views: [toggleHUD, retry])
+        let reopenReference = NSButton(
+            title: "Reopen Reference",
+            target: self,
+            action: #selector(reopenReference(_:))
+        )
+        let actions = NSStackView(views: [toggleHUD, retry, reopenReference])
         actions.orientation = .horizontal
         actions.spacing = 10
 
@@ -606,6 +620,21 @@ private final class ConsumerDemoAppDelegate:
 
     @objc private func retryReadiness(_ sender: Any?) {
         glassView?.prepareIfNeeded()
+    }
+
+    /// Covers closing and reopening the reference window while the HUD stays
+    /// visible: the control window can be closed at any time (its willClose
+    /// detaches the reference host), and this re-attaches it without touching
+    /// the controller or the rendered material. Reachable from the Window menu
+    /// so it still works after the control window itself has been closed.
+    @objc func reopenReference(_ sender: Any?) {
+        guard let controlWindow else { return }
+        glassView?.setReferenceHost(
+            window: controlWindow,
+            view: controlWindow.contentView
+        )
+        controlWindow.makeKeyAndOrderFront(nil)
+        applyConfiguration()
     }
 
     private func applyConfiguration() {

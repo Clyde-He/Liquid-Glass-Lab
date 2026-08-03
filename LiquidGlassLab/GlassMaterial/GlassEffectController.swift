@@ -231,8 +231,8 @@ final class GlassEffectController {
     private(set) weak var glassView: AdjustableGlassEffectView?
     private let atlasProvider: GlassMaterialAtlasProvider
 
-    private weak var hostWindow: NSWindow?
-    private weak var probeHostView: NSView?
+    private(set) weak var hostWindow: NSWindow?
+    private(set) weak var probeHostView: NSView?
     private var observers: [NSObjectProtocol] = []
     private var installRetryTask: Task<Void, Never>?
     private var calibrationRetryTask: Task<Void, Never>?
@@ -279,6 +279,20 @@ final class GlassEffectController {
     private var baseAtlasGeneration = 0
     private var calibrationRetryIndex = 0
     private var requestedCalibrationAfterInstallFailure = false
+
+    /// The requested state the last install decided for. Written whenever a
+    /// full freeze or narrow Tint restamp accepts the request, so a duplicate
+    /// `applyConfiguration` for bit-identical requested and displayed state
+    /// can skip the entire install path. The displayed Tint is tracked by
+    /// RGB key, not the requested color, so a held last-verified color or a
+    /// still-unresolved Tint is not mistaken for a state that needs work.
+    private struct AppliedMaterialState {
+        var configuration: Configuration
+        var baseGeneration: Int
+        var displayedTintKey: SIMD3<Double>?
+    }
+
+    private var appliedMaterialState: AppliedMaterialState?
 
     private static let calibrationRetryMilliseconds = [
         1_000, 2_000, 5_000, 10_000, 30_000,
@@ -338,6 +352,10 @@ final class GlassEffectController {
             self.glassView?.materialWindowDidChange = nil
             self.glassView?.materialStrength.invalidate()
             resetTintRetryBudget()
+            // The previous install belongs to the old view's tree; the new
+            // view must receive the full transaction even for identical
+            // requested state.
+            appliedMaterialState = nil
         }
         self.glassView = glassView
         glassView.materialWindowDidChange = { [weak self, weak glassView] in
@@ -374,6 +392,7 @@ final class GlassEffectController {
         lastVerifiedTintColor = nil
         tintCommitCache = [:]
         tintCommitCacheOrder = []
+        appliedMaterialState = nil
         glassView?.materialWindowDidChange = nil
         glassView?.materialStrength.invalidate()
         glassView = nil
@@ -383,6 +402,51 @@ final class GlassEffectController {
     func ensureReady() {
         atlasProvider.ensureCaptured()
         applyConfiguration()
+    }
+
+    /// Re-targets calibration and commit resolution at a different reference
+    /// host without touching the rendered material.
+    ///
+    /// A reference host is a calibration/resolver capability, not ownership
+    /// of the frozen material: the verified atlas, the installed frozen
+    /// style, and every resolved or persisted Tint matrix survive the
+    /// transition. Only host-bound machinery is rebuilt — the notification
+    /// registrations, the in-flight captures, and the commit resolver, whose
+    /// probes live in the previous host's view tree. Returns false when the
+    /// effective pair is unchanged, making the call a strict no-op.
+    @discardableResult
+    func rebindReferenceHost(
+        hostWindow: NSWindow?,
+        probeHostView: NSView?
+    ) -> Bool {
+        guard hostWindow !== self.hostWindow
+                || probeHostView !== self.probeHostView
+        else { return false }
+        self.hostWindow = hostWindow
+        self.probeHostView = probeHostView
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        observers = []
+        observeRecoveryOpportunities()
+        resetTintRetryBudget(cancelInFlightCapture: true)
+        tintCommitWarmUpTask?.cancel()
+        tintCommitWarmUpTask = nil
+        tintCommitResolver?.invalidate()
+        tintCommitResolver = nil
+        tintCommitResolutionUnavailable = false
+        tintCommitFailureCount = 0
+        atlasProvider.rebindReferenceHost(
+            hostWindow: hostWindow,
+            probeHostView: probeHostView
+        )
+        atlasProvider.ensureCaptured()
+        // A replacement host can now resolve what the previous one could not.
+        if configuration.tint != nil {
+            prepareTintCommitResolver()
+        }
+        applyConfiguration()
+        return true
     }
 
     /// Window room required around the glass's visual bounds so its outer
@@ -501,6 +565,15 @@ final class GlassEffectController {
             refreshStatus()
             return
         }
+        // A duplicate request — the same configuration over the same verified
+        // base, with the same Tint already on screen — needs no install work
+        // at all. Consumers can receive duplicate window notifications after
+        // their first stable render; re-freezing here is what made HUDs
+        // churn their whole material pipeline on reference-host churn.
+        if isRedundantApply() {
+            refreshStatus()
+            return
+        }
         defer { glassView.updateRequiredWindowInset() }
 
         glassView.applyControlledConfiguration(
@@ -579,6 +652,13 @@ final class GlassEffectController {
             tintDiagnostics.tintRestampCount += 1
             let restampMs = Self.milliseconds(since: installStart)
             tintDiagnostics.lastInstallMilliseconds = restampMs
+            appliedMaterialState = AppliedMaterialState(
+                configuration: configuration,
+                baseGeneration: baseAtlasGeneration,
+                displayedTintKey: displayedTint
+                    .flatMap(GlassMaterialColorValue.init)
+                    .map(Self.rgbKey)
+            )
             if restampMs > 4 {
                 GlassMaterialTintLog.signposts.notice(
                     "slow tint restamp \(restampMs, format: .fixed(precision: 1), privacy: .public)ms"
@@ -616,6 +696,15 @@ final class GlassEffectController {
         GlassMaterialTintLog.signposts.notice(
             "freeze install \(freezeMs, format: .fixed(precision: 1), privacy: .public)ms installed=\(installed, privacy: .public)"
         )
+        if installed {
+            appliedMaterialState = AppliedMaterialState(
+                configuration: configuration,
+                baseGeneration: baseAtlasGeneration,
+                displayedTintKey: displayedTint
+                    .flatMap(GlassMaterialColorValue.init)
+                    .map(Self.rgbKey)
+            )
+        }
         if installed,
            glassView.materialStrength.frozenStyleIsCurrentlyApplied {
             installRetryTask?.cancel()
@@ -661,6 +750,10 @@ final class GlassEffectController {
                 guard !Task.isCancelled,
                       self.glassView?.window != nil
                 else { return }
+                // The install decision record would otherwise suppress this
+                // very retry: the requested state matches the attempt that
+                // produced the failed readback. Re-open the install each beat.
+                self.appliedMaterialState = nil
                 self.applyConfiguration()
                 if case .ready = self.status { return }
                 if case .lockingTint = self.status { return }
@@ -1188,6 +1281,38 @@ final class GlassEffectController {
         return cells.allSatisfy {
             atlasProvider.atlas.tintMatrix(for: $0, matching: color) != nil
         }
+    }
+
+    /// True when the last successful install already covers this exact
+    /// request: identical configuration, identical verified base, complete
+    /// paired coverage, and the same Tint that would be displayed now — held
+    /// or resolved — already written. Pure state comparison, no tree access
+    /// and no enqueued work.
+    private func isRedundantApply() -> Bool {
+        guard let applied = appliedMaterialState,
+              applied.configuration == configuration,
+              applied.baseGeneration == baseAtlasGeneration,
+              atlasProvider.isPairedCoverageComplete
+        else { return false }
+        return applied.displayedTintKey == displayedTintKeyForCurrentState
+    }
+
+    /// The Tint the next install would put on screen, by RGB key, or nil for
+    /// no Tint. Mirrors the `displayedTint` decision without enqueuing
+    /// resolution: the requested color when it is already verifiable, else
+    /// the held last-verified color, else nothing.
+    private var displayedTintKeyForCurrentState: SIMD3<Double>? {
+        guard let tint = configuration.tint else { return nil }
+        if tintCoverageIsComplete(
+            for: tint,
+            emphasis: configuration.emphasis
+        ) {
+            return GlassMaterialColorValue(tint).map(Self.rgbKey)
+        }
+        guard let held = lastVerifiedTintColor,
+              let source = GlassMaterialColorValue(held)
+        else { return nil }
+        return Self.rgbKey(for: source)
     }
 
     private func scheduleTintLock() {

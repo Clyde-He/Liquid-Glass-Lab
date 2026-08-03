@@ -106,10 +106,10 @@ final class GlassMaterialAtlasProvider {
         var mainOff: GlassMaterialStyleAtlas.TintMatrix
     }
 
-    private weak var hostWindow: NSWindow?
+    private(set) weak var hostWindow: NSWindow?
     /// Consumer-owned insertion point for invisible calibration probes.
     /// SwiftUI hosting-controller roots are not safe to mutate directly.
-    private weak var probeHostView: NSView?
+    private(set) weak var probeHostView: NSView?
     private let shortSides: [Double]
     private let storageURL: URL?
     private let certifiedAtlasURLs: [URL]
@@ -219,6 +219,43 @@ final class GlassMaterialAtlasProvider {
             pendingRecalibration = false
             captureWhenPossible()
         }
+    }
+
+    /// Re-targets calibration at a different reference host without discarding
+    /// the verified atlas or its persisted Tint overlay.
+    ///
+    /// A reference host is a calibration capability, not ownership of the
+    /// captured material: the current atlas, source, and ready state survive
+    /// the transition. Only host-bound machinery is rebuilt — notification
+    /// registrations, the probe container (which lives in the previous host's
+    /// view tree), the witness window, and any in-flight capture against the
+    /// previous host. Returns false when the effective pair is unchanged.
+    @discardableResult
+    func rebindReferenceHost(
+        hostWindow: NSWindow?,
+        probeHostView: NSView?
+    ) -> Bool {
+        guard hostWindow !== self.hostWindow
+                || probeHostView !== self.probeHostView
+        else { return false }
+        self.hostWindow = hostWindow
+        self.probeHostView = probeHostView
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        observers = []
+        mainProbeContainer?.removeFromSuperview()
+        mainProbeContainer = nil
+        tintCaptureGeneration += 1
+        tintCaptureTask?.cancel()
+        tintCaptureTask = nil
+        tearDownWitnessWindow()
+        captureGeneration += 1
+        captureTask?.cancel()
+        captureTask = nil
+        pendingRecalibration = false
+        observeHostWindow()
+        return true
     }
 
     /// Stops a color-specific transaction when its product consumer goes
