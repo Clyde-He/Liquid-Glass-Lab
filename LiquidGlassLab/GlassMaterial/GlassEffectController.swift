@@ -346,7 +346,7 @@ final class GlassEffectController {
         tintPipeline.onLegacyCaptureCompleted = { [weak self] in
             self?.applyConfiguration(allowsTintRestamp: true)
         }
-        installationReconciler.onHealthChanged = { [weak self] in
+        installationReconciler.onEnforcementFailure = { [weak self] in
             guard let self else { return }
             let plan = self.buildPlan()
             let outcome = self.reconcileDesiredState(

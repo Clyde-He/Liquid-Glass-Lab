@@ -50,9 +50,11 @@ final class MaterialInstallationReconciler {
     private(set) var health: Health = .uninstalled
     private(set) var diagnostics = Diagnostics()
 
-    /// Enforcement events are observations only. The controller decides how
-    /// they map to product status; this callback never advances resolution.
-    var onHealthChanged: (() -> Void)?
+    /// A post-precommit audit could not recover the committed material. The
+    /// controller decides how to reconcile that failure; successful receipt
+    /// confirmation deliberately emits no event and cannot trigger replanning
+    /// from inside the final-writer observer.
+    var onEnforcementFailure: (() -> Void)?
     var onRetryRequested: (() -> Void)?
     var retryShouldStop: (() -> Bool)?
     var shouldRequestRecalibration: (() -> Bool)?
@@ -191,10 +193,11 @@ final class MaterialInstallationReconciler {
                         self.committedIdentity = pendingIdentity
                     }
                     self.pendingIdentity = nil
-                    self.setHealth(.healthy, notifying: true)
+                    self.setHealth(.healthy)
                 } else {
                     self.pendingIdentity = nil
-                    self.setHealth(.failed, notifying: true)
+                    self.setHealth(.failed)
+                    self.onEnforcementFailure?()
                 }
             }
             return .restampedTint
@@ -250,13 +253,9 @@ final class MaterialInstallationReconciler {
         )
     }
 
-    private func setHealth(
-        _ newValue: Health,
-        notifying: Bool = false
-    ) {
+    private func setHealth(_ newValue: Health) {
         guard health != newValue else { return }
         health = newValue
-        if notifying { onHealthChanged?() }
     }
 
     private func scheduleRetryIfNeeded() {

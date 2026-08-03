@@ -124,7 +124,11 @@ final class GlassMaterialAtlasProvider {
     private var tintCaptureGeneration = 0
     private var observers: [NSObjectProtocol] = []
     private var didLoadCandidates = false
-    private var pendingRecalibration = false
+    /// Generation of the cancelled base-capture task whose cleanup should
+    /// launch an explicitly requested recalibration. Host rebind cancellation
+    /// never sets this handshake, so stale host work cannot disturb a newer
+    /// task.
+    private var pendingRecalibrationGeneration: Int?
     private var isInvalidated = false
 
     /// Host flags are a scheduling precondition, never proof of the captured
@@ -201,22 +205,24 @@ final class GlassMaterialAtlasProvider {
     /// the replacement has fully verified and can atomically overwrite it.
     public func recalibrate() {
         guard !isInvalidated else { return }
-        pendingRecalibration = captureTask != nil
+        pendingRecalibrationGeneration = captureTask == nil
+            ? nil
+            : captureGeneration
         captureGeneration += 1
         captureTask?.cancel()
         tintCaptureGeneration += 1
         tintCaptureTask?.cancel()
-        // The cancelled task's own cleanup is generation-guarded and will not
-        // run; clear the handle here so a later `cancelTintCapture` cannot
-        // mistake it for a live transaction and tear down the witness window
-        // out from under the fresh base calibration.
+        // Clear the independent Tint handle here so a later
+        // `cancelTintCapture` cannot mistake it for a live transaction and
+        // tear down the witness window while the base-calibration handshake
+        // above is waiting to launch its fresh generation.
         tintCaptureTask = nil
         atlas = GlassMaterialStyleAtlas()
         atlasSource = .none
         didLoadCandidates = true
         state = .idle
         if captureTask == nil {
-            pendingRecalibration = false
+            pendingRecalibrationGeneration = nil
             captureWhenPossible()
         }
     }
@@ -253,7 +259,7 @@ final class GlassMaterialAtlasProvider {
         captureGeneration += 1
         captureTask?.cancel()
         captureTask = nil
-        pendingRecalibration = false
+        pendingRecalibrationGeneration = nil
         observeHostWindow()
         return true
     }
@@ -278,7 +284,7 @@ final class GlassMaterialAtlasProvider {
         captureGeneration += 1
         captureTask?.cancel()
         captureTask = nil
-        pendingRecalibration = false
+        pendingRecalibrationGeneration = nil
         tintCaptureGeneration += 1
         tintCaptureTask?.cancel()
         tintCaptureTask = nil
@@ -645,12 +651,23 @@ final class GlassMaterialAtlasProvider {
             guard let self else { return }
             await self.runCalibration(generation: generation)
             guard !self.isInvalidated else { return }
-            self.captureTask = nil
-            if self.pendingRecalibration {
-                self.pendingRecalibration = false
+            // A host rebind clears the cancelled handle and may already have
+            // installed a successor task. The stale task must not erase that
+            // successor or start a second calibration against shared probes.
+            // `recalibrate()` is different: it leaves the cancelled handle in
+            // place and sets this handshake so that task may start the fresh
+            // generation after its own cleanup.
+            guard generation == self.captureGeneration else {
+                guard self.pendingRecalibrationGeneration == generation
+                else { return }
+                self.pendingRecalibrationGeneration = nil
+                self.captureTask = nil
                 self.captureWhenPossible()
-            } else if self.state == .waitingForMainWindow,
-                      self.hostParticipates {
+                return
+            }
+            self.captureTask = nil
+            if self.state == .waitingForMainWindow,
+               self.hostParticipates {
                 self.captureWhenPossible()
             }
         }
