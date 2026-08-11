@@ -48,22 +48,15 @@ export async function readManifest(osDirectory) {
  */
 export async function loadUnified(osDirectory) {
   const directory = path.join(goldenDirectory, osDirectory, "unified");
-  let archiveRole = null;
-  try {
-    archiveRole = JSON.parse(
-      await readFile(path.join(directory, "meta.json"), "utf8")
-    ).role ?? null;
-  } catch {
-    // Section loading below remains authoritative for older archives whose
-    // meta predates the role field.
-  }
+  const manifest = await readManifest(osDirectory);
   const sections = {};
   for (const name of SECTIONS) {
+    const module = manifest.modules.find((entry) => entry.id === `core.${name}`);
     try {
       const document = normalizeUnifiedDocument(JSON.parse(
         await readFile(path.join(directory, `${name}.json`), "utf8")
       ));
-      sections[name] = { ...document, archiveRole };
+      sections[name] = { ...document, archiveRole: module?.role ?? null };
     } catch {
       sections[name] = null;
     }

@@ -24,7 +24,7 @@ Every entry in `modules` records:
 `profiles.full` enumerates exact module IDs in four mutually exclusive lists:
 
 - `required`: must be present and valid for a Full capture to be promotable;
-- `optional`: captured when available without invalidating an otherwise complete profile;
+- `optional`: captured when available without invalidating an otherwise complete profile; the ID may be listed before that OS has a payload;
 - `unsupported`: a known module that this OS cannot produce;
 - `carriedForward`: externally produced evidence whose provenance and checksum are retained but which the current Lab cannot recapture.
 

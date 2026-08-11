@@ -32,6 +32,8 @@ export function validateManifestV2(manifest) {
     problems.push(`protocolVersion must be ${MANIFEST_PROTOCOL_VERSION}`);
   }
   const modules = manifest.modules ?? [];
+  if (!Array.isArray(manifest.modules)) problems.push("modules must be an array");
+  if (!manifest.profiles?.full) problems.push("profiles.full is required");
   const ids = new Set();
   const files = new Set();
   for (const module of modules) {
@@ -45,9 +47,22 @@ export function validateManifestV2(manifest) {
       problems.push(`${module.id}: invalid profileStatus ${module.profileStatus}`);
     }
     if (!module.integrity?.sha256) problems.push(`${module.id}: no integrity.sha256`);
-    if (!module.platform?.build) problems.push(`${module.id}: no platform.build`);
+    if (!Number.isInteger(module.integrity?.bytes) || module.integrity.bytes < 0) {
+      problems.push(`${module.id}: integrity.bytes must be a non-negative integer`);
+    }
+    if (!Number.isInteger(module.payloadSchemaVersion) || !Number.isInteger(module.planVersion)) {
+      problems.push(`${module.id}: schema and plan versions must be integers`);
+    }
+    for (const field of ["product", "version", "build", "architecture"]) {
+      if (!module.platform?.[field]) problems.push(`${module.id}: no platform.${field}`);
+    }
+    if (!("capturedAt" in module)) problems.push(`${module.id}: capturedAt is not explicit`);
     if (!module.capture || !("environment" in module.capture) || !("sessionID" in module.capture)) {
       problems.push(`${module.id}: capture environment/session provenance is incomplete`);
+    }
+    if (!module.provenance?.kind) problems.push(`${module.id}: no provenance.kind`);
+    if (!['canonical', 'control', 'derived'].includes(module.role)) {
+      problems.push(`${module.id}: invalid role ${module.role}`);
     }
     if (!Array.isArray(module.coverageClaims) || module.coverageClaims.length === 0) {
       problems.push(`${module.id}: coverageClaims must be a non-empty array`);
@@ -57,7 +72,7 @@ export function validateManifestV2(manifest) {
     for (const field of ["required", "optional", "unsupported", "carriedForward"]) {
       if (!Array.isArray(profile[field])) problems.push(`${profileName}.${field} must be an array`);
       for (const id of profile[field] ?? []) {
-        if (field !== "unsupported" && !ids.has(id)) {
+        if (!["optional", "unsupported"].includes(field) && !ids.has(id)) {
           problems.push(`${profileName}.${field}: unknown module ${id}`);
         }
       }
@@ -69,10 +84,11 @@ export function validateManifestV2(manifest) {
     if (new Set(listed).size !== listed.length) {
       problems.push(`${profileName}: module listed in more than one state`);
     }
-    for (const module of modules) {
+    if (profileName === "full") for (const module of modules) {
       const expectedField = {
         required: "required", optional: "optional",
         "carried-forward": "carriedForward",
+        unsupported: "unsupported",
       }[module.profileStatus];
       if (expectedField && !(profile[expectedField] ?? []).includes(module.id)) {
         problems.push(`${profileName}: ${module.id} is ${module.profileStatus} but not listed`);
@@ -129,6 +145,7 @@ export async function normalizeManifest(raw, { osDirectory, goldenDirectory }) {
         provenance: { kind: "legacy-unified-meta" },
         coverageClaims: [],
         integrity: { sha256: entry.sha256, bytes: entry.bytes },
+        statistics: { rows: entry.rows },
         role: meta.role ?? "canonical",
         profileStatus: "required",
       });

@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { goldenDirectory, osDirectories } from "./lib/golden.mjs";
 import { legacyModuleID } from "./lib/manifest.mjs";
 
 const CLAIMS = {
-  "legacy.recipe-matrix": ["legacy-recipe-product", "representative-height-response"],
-  "legacy.recursive-pass-audit": ["legacy-recursive-topology", "legacy-pass-values"],
-  "legacy.materialize-environment": ["legacy-materialize-environment-response"],
-  "legacy.materialize-geometry": ["legacy-materialize-geometry-response"],
+  "legacy.recipe-matrix": ["recipe-core-values", "representative-height-response"],
+  "legacy.recursive-pass-audit": ["recursive-topology", "pass-inventory", "resolved-pass-values"],
+  "legacy.materialize-environment": ["materialize-environment-response", "appearance-endpoints", "backdrop-invariance"],
+  "legacy.materialize-geometry": ["materialize-short-side-scaling", "sdf-inflation", "endpoint-size-response"],
   "core.static-scalar": ["recipe-values", "static-axis-response"],
   "core.static-tree": ["recursive-topology", "pass-inventory", "resolved-pass-values"],
   "core.dynamic": ["transition-curve", "dynamic-axis-response", "settled-endpoints"],
@@ -31,6 +32,16 @@ const REQUIRED = [
   "tint.parameterization.hue-2c", "tint.sync-resolution", "tint.wide-gamut",
 ];
 
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+function provenanceKind(id) {
+  if (id === "external.window-context") return "external-probe";
+  if (id === "research.formula-analysis") return "derived-report";
+  if (id.startsWith("control.")) return "control-capture";
+  if (id.startsWith("legacy.")) return "legacy-capture";
+  return "direct-capture";
+}
+
 for (const osDirectory of await osDirectories()) {
   const directory = path.join(goldenDirectory, osDirectory);
   const manifestPath = path.join(directory, "manifest.json");
@@ -39,18 +50,23 @@ for (const osDirectory of await osDirectories()) {
   const modules = [];
   for (const fixture of manifest.fixtures ?? []) {
     const id = legacyModuleID(fixture.id);
-    const bytes = (await stat(path.join(directory, fixture.file))).size;
+    const payloadBytes = await readFile(path.join(directory, fixture.file));
+    const payload = JSON.parse(payloadBytes.toString("utf8"));
+    const payloadHeader = Array.isArray(payload) ? {} : payload;
     const carried = id === "external.window-context";
     modules.push({
       id, file: fixture.file,
       payloadSchemaVersion: fixture.schemaVersion ?? fixture.formatVersion ?? 1,
       planVersion: 1,
       platform: fixture.platform ?? manifest.platform,
-      capturedAt: fixture.capturedAt ?? manifest.capturedAt,
-      capture: { environment: fixture.environment ?? null, sessionID: null },
-      provenance: { kind: "direct-capture", fixtureID: fixture.id },
+      capturedAt: fixture.capturedAt ?? payloadHeader.capturedAt ?? payloadHeader.generatedAt ?? null,
+      capture: {
+        environment: fixture.environment ?? payloadHeader.environment ?? null,
+        sessionID: payloadHeader.sessionID ?? null,
+      },
+      provenance: { kind: provenanceKind(id), fixtureID: fixture.id },
       coverageClaims: CLAIMS[id] ?? [],
-      integrity: { sha256: fixture.sha256, bytes },
+      integrity: { sha256: sha256(payloadBytes), bytes: payloadBytes.length },
       role: fixture.role ?? "canonical",
       profileStatus: REQUIRED.includes(id) || (id === "semantic.usage-trees" && osDirectory !== "macOS-26")
         ? "required" : carried ? "carried-forward" : "excluded",
@@ -80,13 +96,18 @@ for (const osDirectory of await osDirectories()) {
   const required = REQUIRED.filter((id) => modules.some((module) => module.id === id));
   if (modules.some((module) => module.id === "semantic.usage-trees")) required.push("semantic.usage-trees");
   const carriedForward = modules.filter((module) => module.profileStatus === "carried-forward").map((module) => module.id);
-  const optional = modules.filter((module) => module.profileStatus === "optional").map((module) => module.id);
-  const unsupported = osDirectory === "macOS-26" ? ["semantic.usage-trees"] : [];
+  const optional = osDirectory === "macOS-26" ? ["semantic.usage-trees"] : [];
+  const unsupported = [];
+  const builds = [...new Set(modules.filter((module) => required.includes(module.id)).map((module) => module.platform.build))].sort();
   const output = {
     ...manifest,
     protocolVersion: 2,
     modules,
-    profiles: { full: { required, optional, unsupported, carriedForward } },
+    profiles: { full: {
+      required, optional, unsupported, carriedForward,
+      captureBuildPolicy: builds.length > 1 ? "historical-mixed" : "single-build",
+      builds,
+    } },
   };
   await writeFile(manifestPath, `${JSON.stringify(output, null, 2)}\n`);
 }

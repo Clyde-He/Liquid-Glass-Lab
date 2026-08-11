@@ -457,7 +457,7 @@
         "build": "26A5378n",
         "architecture": "arm64"
       },
-      "capturedAt": "2026-07-20",
+      "capturedAt": "2026-07-20T22:38:53Z",
       "capture": {
         "environment": {
           "hostType": "Panel",
@@ -471,11 +471,11 @@
         "sessionID": null
       },
       "provenance": {
-        "kind": "direct-capture",
+        "kind": "legacy-capture",
         "fixtureID": "recipe-matrix"
       },
       "coverageClaims": [
-        "legacy-recipe-product",
+        "recipe-core-values",
         "representative-height-response"
       ],
       "integrity": {
@@ -513,12 +513,13 @@
         "sessionID": null
       },
       "provenance": {
-        "kind": "direct-capture",
+        "kind": "legacy-capture",
         "fixtureID": "recursive-pass-audit"
       },
       "coverageClaims": [
-        "legacy-recursive-topology",
-        "legacy-pass-values"
+        "recursive-topology",
+        "pass-inventory",
+        "resolved-pass-values"
       ],
       "integrity": {
         "sha256": "9d08d935c7e8faa8357be96716641ddb443a30cdf1732f43ed0790773e95f40b",
@@ -538,7 +539,7 @@
         "build": "26A5378n",
         "architecture": "arm64"
       },
-      "capturedAt": "2026-07-20",
+      "capturedAt": "2026-07-21T00:19:42Z",
       "capture": {
         "environment": {
           "hostType": "Panel",
@@ -740,13 +741,13 @@
         "build": "26A5378n",
         "architecture": "arm64"
       },
-      "capturedAt": "2026-07-20",
+      "capturedAt": null,
       "capture": {
         "environment": null,
         "sessionID": null
       },
       "provenance": {
-        "kind": "direct-capture",
+        "kind": "derived-report",
         "fixtureID": "formula-analysis"
       },
       "coverageClaims": [
@@ -770,13 +771,13 @@
         "build": "26A5378n",
         "architecture": "arm64"
       },
-      "capturedAt": "2026-07-20",
+      "capturedAt": null,
       "capture": {
         "environment": null,
         "sessionID": null
       },
       "provenance": {
-        "kind": "direct-capture",
+        "kind": "external-probe",
         "fixtureID": "window-context-matrix"
       },
       "coverageClaims": [
@@ -800,13 +801,13 @@
         "build": "26A5388g",
         "architecture": "arm64"
       },
-      "capturedAt": "2026-07-20",
+      "capturedAt": "2026-07-21T17:13:02Z",
       "capture": {
         "environment": null,
         "sessionID": null
       },
       "provenance": {
-        "kind": "direct-capture",
+        "kind": "control-capture",
         "fixtureID": "recursive-pass-audit-stability-repeat"
       },
       "coverageClaims": [
@@ -830,13 +831,13 @@
         "build": "26A5388g",
         "architecture": "arm64"
       },
-      "capturedAt": "2026-07-20",
+      "capturedAt": "2026-07-21T16:41:24Z",
       "capture": {
         "environment": null,
         "sessionID": null
       },
       "provenance": {
-        "kind": "direct-capture",
+        "kind": "control-capture",
         "fixtureID": "recursive-pass-audit-display-context-a"
       },
       "coverageClaims": [
@@ -991,6 +992,11 @@
       "unsupported": [],
       "carriedForward": [
         "external.window-context"
+      ],
+      "captureBuildPolicy": "historical-mixed",
+      "builds": [
+        "26A5378n",
+        "26A5388g"
       ]
     }
   }

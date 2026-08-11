@@ -438,7 +438,7 @@
         "build": "25G5065a",
         "architecture": "arm64"
       },
-      "capturedAt": "2026-07-21",
+      "capturedAt": "2026-07-21T07:59:51Z",
       "capture": {
         "environment": {
           "hostType": "Panel",
@@ -452,11 +452,11 @@
         "sessionID": null
       },
       "provenance": {
-        "kind": "direct-capture",
+        "kind": "legacy-capture",
         "fixtureID": "recipe-matrix"
       },
       "coverageClaims": [
-        "legacy-recipe-product",
+        "recipe-core-values",
         "representative-height-response"
       ],
       "integrity": {
@@ -477,7 +477,7 @@
         "build": "25G5065a",
         "architecture": "arm64"
       },
-      "capturedAt": "2026-07-21",
+      "capturedAt": "2026-07-21T08:35:38Z",
       "capture": {
         "environment": {
           "hostType": "Panel",
@@ -494,12 +494,13 @@
         "sessionID": null
       },
       "provenance": {
-        "kind": "direct-capture",
+        "kind": "legacy-capture",
         "fixtureID": "recursive-pass-audit"
       },
       "coverageClaims": [
-        "legacy-recursive-topology",
-        "legacy-pass-values"
+        "recursive-topology",
+        "pass-inventory",
+        "resolved-pass-values"
       ],
       "integrity": {
         "sha256": "3cea573b87cb58a306a1ac540e612801f58bdce9d136d13888888b5553110569",
@@ -533,11 +534,13 @@
         "sessionID": null
       },
       "provenance": {
-        "kind": "direct-capture",
+        "kind": "legacy-capture",
         "fixtureID": "materialize-environment-matrix"
       },
       "coverageClaims": [
-        "legacy-materialize-environment-response"
+        "materialize-environment-response",
+        "appearance-endpoints",
+        "backdrop-invariance"
       ],
       "integrity": {
         "sha256": "938f2633df5393913c80d0c4917ec3ada3249d14455998fb99faba593bca064a",
@@ -574,11 +577,13 @@
         "sessionID": null
       },
       "provenance": {
-        "kind": "direct-capture",
+        "kind": "legacy-capture",
         "fixtureID": "materialize-geometry-sweep"
       },
       "coverageClaims": [
-        "legacy-materialize-geometry-response"
+        "materialize-short-side-scaling",
+        "sdf-inflation",
+        "endpoint-size-response"
       ],
       "integrity": {
         "sha256": "5a2f78ba9a50d281ac59dc5a7986296797acd048389e719caa18270867bc53e3",
@@ -733,7 +738,11 @@
       },
       "capturedAt": "2026-08-02T09:25:53Z",
       "capture": {
-        "environment": null,
+        "environment": {
+          "atlasSchemaVersion": 2,
+          "displaySignature": "Built-in Retina Display @2.0x",
+          "osMajorVersion": 26
+        },
         "sessionID": null
       },
       "provenance": {
@@ -887,11 +896,16 @@
         "tint.sync-resolution",
         "tint.wide-gamut"
       ],
-      "optional": [],
-      "unsupported": [
+      "optional": [
         "semantic.usage-trees"
       ],
-      "carriedForward": []
+      "unsupported": [],
+      "carriedForward": [],
+      "captureBuildPolicy": "historical-mixed",
+      "builds": [
+        "25G5065a",
+        "25G70"
+      ]
     }
   }
 }

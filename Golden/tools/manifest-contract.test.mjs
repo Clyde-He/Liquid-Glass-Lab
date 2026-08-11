@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { readManifest } from "./lib/golden.mjs";
 import {
@@ -41,4 +44,33 @@ test("v2 validation rejects profile references to unknown modules", () => {
     } },
   });
   assert.ok(problems.some((problem) => problem.includes("unknown module missing")));
+});
+
+test("v2 validation requires the documented module contract", () => {
+  const problems = validateManifestV2({ protocolVersion: 2, modules: [] });
+  assert.ok(problems.includes("profiles.full is required"));
+  const incomplete = validateManifestV2({
+    protocolVersion: 2,
+    modules: [{ id: "incomplete", file: "payload.json", profileStatus: "required" }],
+    profiles: { full: {
+      required: ["incomplete"], optional: [], unsupported: [], carriedForward: [],
+    } },
+  });
+  assert.ok(incomplete.some((problem) => problem.includes("integrity.bytes")));
+  assert.ok(incomplete.some((problem) => problem.includes("provenance.kind")));
+});
+
+test("v1 dual-read preserves zero-row unified statistics", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "golden-manifest-v1-"));
+  await mkdir(path.join(root, "macOS-test", "unified"), { recursive: true });
+  await writeFile(path.join(root, "macOS-test", "unified", "meta.json"), JSON.stringify({
+    schemaVersion: 1,
+    sections: { dynamic: { file: "dynamic.json", sha256: "abc", bytes: 1, rows: 0 } },
+  }));
+  const manifest = await normalizeManifest({
+    schemaVersion: 1,
+    platform: { product: "macOS", version: "test", build: "test", architecture: "arm64" },
+    fixtures: [],
+  }, { osDirectory: "macOS-test", goldenDirectory: root });
+  assert.equal(manifest.modules[0].statistics.rows, 0);
 });

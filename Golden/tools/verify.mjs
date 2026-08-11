@@ -99,12 +99,17 @@ async function checkIntegrity(osDirectory) {
     // this check a unified archive dropped in from the wrong build verifies
     // fully green, since the section checksums only prove the files match their
     // own meta entry.
+    const unifiedModules = (manifest.modules ?? []).filter(
+      (module) => module.id.startsWith("core.") && module.file.startsWith("unified/")
+    );
+    const declaredBuilds = [...new Set(
+      unifiedModules.map((module) => module.platform?.build).filter(Boolean)
+    )];
     const unifiedBuild = buildOf(meta);
-    const declaredUnified = manifest.unifiedPlatform?.build ?? null;
-    if (declaredUnified === null) {
+    const declaredUnified = declaredBuilds.length === 1 ? declaredBuilds[0] : null;
+    if (declaredBuilds.length !== 1) {
       problems.push(
-        "manifest.json: no unifiedPlatform.build — declare the build the "
-        + "unified sections must carry"
+        `manifest.json: unified modules must declare one build, got ${declaredBuilds.join(", ")}`
       );
     } else if (unifiedBuild === null) {
       problems.push(
@@ -117,12 +122,19 @@ async function checkIntegrity(osDirectory) {
       );
     }
 
-    const unifiedModules = (manifest.modules ?? []).filter(
-      (module) => module.id.startsWith("core.") && module.file.startsWith("unified/")
-    );
     for (const module of unifiedModules) {
       const name = module.id.slice("core.".length);
       const entry = module.integrity;
+      const metaEntry = meta.sections?.[name];
+      if (metaEntry?.sha256 && metaEntry.sha256 !== entry.sha256) {
+        problems.push(`${module.file}: payload meta checksum disagrees with manifest`);
+      }
+      if (metaEntry?.rows !== undefined && metaEntry.rows !== module.statistics?.rows) {
+        problems.push(`${module.file}: payload meta row count disagrees with manifest`);
+      }
+      if (meta.role !== undefined && meta.role !== module.role) {
+        problems.push(`${module.file}: payload meta role disagrees with manifest`);
+      }
       unifiedCount += 1;
       try {
         const bytes = await readFile(path.join(directory, module.file));
