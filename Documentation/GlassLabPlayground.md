@@ -356,9 +356,9 @@ The optional `Include View Envelope` switch also applies the observed opacity an
 
 The page makes the topology boundary explicit. Stable Regular/Clear NSGlass does not contain the temporary content `gaussianBlur` or `glassForeground` filters used by SwiftUI Materialize, so the probe does not invent them. The untinted Content/Rim matrices and SDF Output remain untouched. The Tint matrix exists only after public `tintColor` creates its branch; its alpha coefficient is accepted for Regular/Clear Main Off/On. Main-Off Rim remains system-gated; Main-On stamps only its measured discrete owner opacity: `0` at `g = 0`, then `1` for every active `g > 0`. The key/fill spread endpoint cleanup remains outside the transplant because it is not a continuous material-strength channel and the AppKit effect owns a different stable baseline. Leaving the page or changing the endpoint clears the probe and reconstructs a fresh Recipe tree.
 
-### Export Recipe Matrix
+### Retired Recipe Matrix export
 
-The exporter walks the selected Host through:
+The former exporter walked the selected Host through:
 
 ```text
 3 representative Heights × 2 Main states × 2 Subdued states
@@ -371,9 +371,9 @@ The three canonical size samples use Width 480, Corner Radius 16, and Heights 24
 
 The exporter asks for the destination before capture, prevents idle display and system sleep while running, and pauses whenever the application becomes inactive. After activation it re-establishes real Main participation and restarts the interrupted 84-cell context rather than retaining a partial batch. Recipe settling is adaptive: two identical payload snapshots after at least 60 ms complete a cell, while unstable cells keep the former 180 ms safety ceiling. Before writing, the exporter proves all 1,008 Cartesian-product identities are present, every row was captured active, and actual Main matches requested Main. Failure or cancellation leaves the destination untouched. The user's original values are restored when capture ends.
 
-### Export Recursive Pass Audit
+### Retired Recursive Pass Audit export
 
-`Export Recursive Pass Audit (JSON)` is the structural complement to the compact Recipe Matrix. It requires the Panel host and fixes Width 480, Height 200, Corner Radius 16, Window Margin 40, Scrim/Reduced Tint Opacity Off, Adaptive Appearance 2, Tint nil, and the global Override disabled. It captures:
+The former Recursive Pass Audit was the structural complement to the compact Recipe Matrix. It required the Panel host and fixed Width 480, Height 200, Corner Radius 16, Window Margin 40, Scrim/Reduced Tint Opacity Off, Adaptive Appearance 2, Tint nil, and the global Override disabled. It captured:
 
 ```text
 2 Main states × 2 Subdued states × 21 Variants × 4 Subvariant states
@@ -382,7 +382,7 @@ The exporter asks for the destination before capture, prevents idle display and 
 
 For every cell, the audit traverses ordinary sublayers plus mask-owned layer trees. Stable paths key layer and pass dictionaries so an inserted pass appears as one added structural record instead of shifting every later array index. It records direct `filters`, `backgroundFilters`, `compositingFilter`, and any object-backed `effect`. CAFilter `inputKeys` and effect `CA_attributes` are captured as capabilities; every property is independently marked `value`, `nil`, or `unreadable`, with metadata and stable color/value descriptions.
 
-Each snapshot carries SHA-256 topology and resolved-value signatures. The topology signature covers layer/pass placement and property-key inventory; the value signature covers the complete normalized payload. Capture uses the same adaptive settling, active-session retry, real Main acceptance, atomic write, and state restoration contracts as the Recipe Matrix. An incomplete product is never written. The resulting `recursive-pass-audit.json` remains a separate diagnostic fixture until a discovered pass or property is promoted into the canonical Inspector/Matrix contract.
+Each snapshot carried SHA-256 topology and resolved-value signatures. The standalone canonical files are retired; their product coverage now belongs to `core.static-tree`. The separate display-context control remains registered because its contrast claim is absent from the direct capture.
 
 Accepted OS baselines, their build manifests, and the semantic comparison tool live in [`Golden`](../Golden/README.md).
 

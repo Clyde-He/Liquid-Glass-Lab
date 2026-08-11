@@ -11,7 +11,7 @@ Each operating system gets an immutable directory named by its public major vers
 ```text
 Golden/
   learnings/    executable assertions, grouped by what they claim
-  tools/        verifier, unifier, comparator, and per-study analyzers
+  tools/        verifier, comparator, capture-profile runner, and per-study analyzers
   macOS-26/
     unified/    the three sections every learning reads
     *.json      the per-study capture fixtures they are derived from
@@ -49,7 +49,7 @@ The root manifest uses module protocol v2. Its `modules` array is the registrati
 
 Two manifest fields carry weight:
 
-- **`platform`** may be set per fixture, overriding the directory default. This is not cosmetic — `macOS-27/` genuinely holds two builds, with the three recursive-pass-audit fixtures captured on `26A5388g` and the rest on `26A5378n`. `verify.mjs` fails when a fixture's embedded OS string disagrees with the entry filing it, so this cannot drift silently again.
+- **`platform`** may be set per fixture, overriding the directory default. This is not cosmetic — retained macOS 27 standalone studies and the direct Core capture span historical builds. `verify.mjs` fails when a fixture's embedded OS string disagrees with the entry filing it, so this cannot drift silently again.
 - **Each `core.*` module's `platform`** declares the build its unified payload must carry. All core modules in one OS archive must agree; `verify.mjs` compares that authoritative build with the payload metadata. The legacy `unifiedPlatform` field remains during v1 compatibility but no longer decides acceptance.
 - **`role`** separates `canonical` evidence from a `control` (a repeat or contrast kept as provenance) and from `derived` output computed off other fixtures. Only canonical fixtures should be cited as a result.
 
@@ -235,7 +235,7 @@ It uses eight risk colors × eight contexts, an unchanged A/A screenshot control
 
 ## Core Recipe exporter
 
-The Playground's `Export Recipe Matrix` produces the canonical OS baseline. Its clean system sweep is:
+The retired `Export Recipe Matrix` produced the former canonical OS baseline. Its clean system sweep was:
 
 ```text
 3 Heights × Main × Subdued × Variant × Subvariant = 1,008 entries
