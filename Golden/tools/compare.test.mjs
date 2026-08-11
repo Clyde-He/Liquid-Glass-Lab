@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { resolveModulePath } from "./lib/golden.mjs";
+import { tintDocumentGateProblems } from "./lib/tint-compare.mjs";
 
 const toolsDirectory = path.dirname(fileURLToPath(import.meta.url));
 const goldenDirectory = path.dirname(toolsDirectory);
@@ -101,6 +102,24 @@ test("registered Tint file aliases retain structural gates", () => {
   const report = JSON.parse(result.stdout);
   assert.equal(report.summary.tintMode, "structural");
   assert.equal(report.summary.invalidMatrices, 0);
+});
+
+test("Tint document gates reject incomplete and failed captures", () => {
+  const base = {
+    complete: true, completedColorCount: 1, plan: { colors: [{}] }, rows: [],
+  };
+  assert.deepEqual(tintDocumentGateProblems(
+    base, "tint.parameterization.sweep"
+  ), []);
+  assert.ok(tintDocumentGateProblems(
+    { ...base, complete: false }, "tint.parameterization.sweep"
+  ).some((problem) => problem.includes("complete")));
+  assert.ok(tintDocumentGateProblems(
+    { ...base, failure: "capture failed" }, "tint.parameterization.sweep"
+  ).some((problem) => problem.includes("failure")));
+  assert.ok(tintDocumentGateProblems(
+    { passed: false }, "tint.sync-resolution"
+  ).some((problem) => problem.includes("passed")));
 });
 
 test("unsupported dynamic comparison fails with a targeted error", () => {

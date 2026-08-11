@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { resolveModulePath } from "./lib/golden.mjs";
+import { tintDocumentGateProblems } from "./lib/tint-compare.mjs";
 
 function usage() {
   console.error(
@@ -239,14 +240,19 @@ const valueSignature = (row) => row.snapshot?.valueSignature ?? row.valueSignatu
 
 function compareTintStructurally(
   baselineRows, candidateRows, missingRows, addedRows,
-  baselineDocument, candidateDocument
+  baselineDocument, candidateDocument, baselineModuleID, candidateModuleID
 ) {
   const invalid = [];
   const classificationChanges = [];
   const matricesOf = (row) => row.flushMatrix || row.settledMatrix
     ? [row.flushMatrix, row.settledMatrix] : [row.matrix];
-  for (const [label, document] of [["baseline", baselineDocument], ["candidate", candidateDocument]]) {
-    if (document.passed === false) invalid.push({ side: label, documentGate: "passed=false" });
+  for (const [label, document, moduleID] of [
+    ["baseline", baselineDocument, baselineModuleID],
+    ["candidate", candidateDocument, candidateModuleID],
+  ]) {
+    for (const problem of tintDocumentGateProblems(document, moduleID)) {
+      invalid.push({ side: label, documentGate: problem });
+    }
   }
   for (const [label, rows] of [["baseline", baselineRows], ["candidate", candidateRows]]) {
     for (const [key, row] of rows) {
@@ -778,7 +784,8 @@ const addedRows = [...candidateRows.keys()].filter((key) => !baselineRows.has(ke
 if (isTintModule && tintMode === "structural") {
   console.log(JSON.stringify(compareTintStructurally(
     baselineRows, candidateRows, missingRows, addedRows,
-    baselineDocument, candidateDocument
+    baselineDocument, candidateDocument,
+    baselineResolved.module?.id, candidateResolved.module?.id
   ), null, 2));
   process.exit(0);
 }
