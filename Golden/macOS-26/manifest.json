@@ -343,6 +343,49 @@
       "role": "canonical"
     },
     {
+      "id": "tint-sync-resolution",
+      "file": "tint-sync-resolution.json",
+      "sha256": "a750ec31243bc118426d357b342fe18e6afdebc131ae1d16c1f52d080aba6afc",
+      "formatVersion": 1,
+      "entryCount": 128,
+      "platform": {
+        "product": "macOS",
+        "version": "26.6",
+        "build": "25G70",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-30T18:55:40Z",
+      "axes": {
+        "sourceColors": {
+          "inUnitDomain": 3,
+          "displayP3Anchors": 3,
+          "displayP3AlphaVariants": 10
+        },
+        "appearance": [
+          "Light",
+          "Dark"
+        ],
+        "material": [
+          "Regular",
+          "Clear"
+        ],
+        "mainParticipation": [
+          false,
+          true
+        ]
+      },
+      "environment": {
+        "displaySignature": "Studio Display @2.0x",
+        "atlasSchemaVersion": 2
+      },
+      "notes": [
+        "All 128 matrices read immediately after CATransaction.flush() are bit-identical to settled readback and retain paired Main-On proof.",
+        "The 104 rows outside the extended-sRGB unit cube include two fixed P3 RGB values at five alpha values each.",
+        "Across the P3 alpha sweep, only coefficient 18 changes and it equals the requested alpha exactly."
+      ],
+      "role": "canonical"
+    },
+    {
       "id": "tint-wide-gamut-model",
       "file": "tint-wide-gamut-model.json",
       "sha256": "c20953f181494b10564b9ca8ae238bbdcea9617db2dd082a40f0398505406852",

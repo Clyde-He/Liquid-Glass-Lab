@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "status": "planning",
+  "policy": {
+    "allowedFinalDispositions": [
+      "coverage-replaced",
+      "claim-retired",
+      "retained"
+    ],
+    "deletionGates": [
+      "zero-consumers",
+      "v1-v2-resolution-equivalent",
+      "hash-and-byte-count-recorded",
+      "learning-results-preserved",
+      "explicit-claim-disposition-approved"
+    ]
+  },
+  "evidence": [
+    {
+      "path": "macOS-26/recipe-matrix.json",
+      "sha256": "3edd28d67cc53c290143cd5dbb6f5af31aad39b41bd50d3a02ff8f76f8c57925",
+      "bytes": 5747485,
+      "build": "25G5065a",
+      "role": "canonical",
+      "claims": ["recipe-core-values", "representative-height-response"],
+      "consumers": ["tools/compare.mjs", "tools/unify.mjs", "GlassLabBenchTools.swift"],
+      "replacementModules": ["core.static-scalar"],
+      "coverageDelta": "pending-v1-v2-equivalence",
+      "proposedDisposition": "coverage-replaced",
+      "decision": "pending"
+    },
+    {
+      "path": "macOS-27/recipe-matrix.json",
+      "sha256": "3ba86700d84786f430fee9928f8d8ddf47d03f4ed27226c344fb965b3b0be35c",
+      "bytes": 7393522,
+      "build": "26A5378n",
+      "role": "canonical",
+      "claims": ["recipe-core-values", "representative-height-response"],
+      "consumers": ["tools/compare.mjs", "tools/unify.mjs", "GlassLabBenchTools.swift"],
+      "replacementModules": ["core.static-scalar"],
+      "coverageDelta": "pending-v1-v2-equivalence",
+      "proposedDisposition": "coverage-replaced",
+      "decision": "pending"
+    },
+    {
+      "path": "macOS-26/recursive-pass-audit.json",
+      "sha256": "3cea573b87cb58a306a1ac540e612801f58bdce9d136d13888888b5553110569",
+      "bytes": 12578756,
+      "build": "25G5065a",
+      "role": "canonical",
+      "claims": ["recursive-topology", "pass-inventory", "resolved-pass-values"],
+      "consumers": ["tools/compare.mjs", "tools/compare.test.mjs", "tools/unify.mjs", "GlassLabBenchTools.swift"],
+      "replacementModules": ["core.static-tree"],
+      "coverageDelta": "pending-semantic-comparator-port",
+      "proposedDisposition": "coverage-replaced",
+      "decision": "pending"
+    },
+    {
+      "path": "macOS-27/recursive-pass-audit.json",
+      "sha256": "9d08d935c7e8faa8357be96716641ddb443a30cdf1732f43ed0790773e95f40b",
+      "bytes": 15194953,
+      "build": "26A5388g",
+      "role": "canonical",
+      "claims": ["recursive-topology", "pass-inventory", "resolved-pass-values"],
+      "consumers": ["tools/compare.mjs", "tools/compare.test.mjs", "tools/unify.mjs", "GlassLabBenchTools.swift"],
+      "replacementModules": ["core.static-tree"],
+      "coverageDelta": "pending-semantic-comparator-port",
+      "proposedDisposition": "coverage-replaced",
+      "decision": "pending"
+    },
+    {
+      "path": "macOS-27/recursive-pass-audit-stability-repeat.json",
+      "sha256": "70d07ea0c3ac565f42457a52fe5ca0b3df5fe74ffa3d6e26e3facd594c00c5a3",
+      "bytes": 15194953,
+      "build": "26A5388g",
+      "role": "control",
+      "claims": ["same-session-recursive-stability"],
+      "consumers": ["tools/compare.test.mjs"],
+      "replacementModules": ["core.static-tree"],
+      "coverageDelta": "pending-repeat-row-equivalence",
+      "proposedDisposition": "coverage-replaced",
+      "decision": "pending"
+    },
+    {
+      "path": "macOS-27/recursive-pass-audit-display-context-a.json",
+      "sha256": "881d1c730d99e962e2995b26d994f596600455c1392151ce1dd52a8a00754362",
+      "bytes": 15193717,
+      "build": "26A5388g",
+      "role": "control",
+      "claims": ["display-context-topology-stability", "display-sensitive-resolved-values"],
+      "consumers": ["tools/compare.test.mjs"],
+      "replacementModules": [],
+      "coverageDelta": "claim-not-present-in-current-unified-capture",
+      "proposedDisposition": "retained",
+      "decision": "retained"
+    },
+    {
+      "path": "macOS-26/materialize-environment-matrix.json",
+      "sha256": "938f2633df5393913c80d0c4917ec3ada3249d14455998fb99faba593bca064a",
+      "bytes": 41343908,
+      "build": "25G5065a",
+      "role": "canonical",
+      "claims": ["materialize-environment-response", "appearance-endpoints", "backdrop-invariance"],
+      "consumers": ["tools/analyze-materialize-environment-study.mjs", "tools/unify.mjs"],
+      "replacementModules": ["core.dynamic"],
+      "coverageDelta": "pending-v1-v2-equivalence",
+      "proposedDisposition": "coverage-replaced",
+      "decision": "pending"
+    },
+    {
+      "path": "macOS-26/materialize-geometry-sweep.json",
+      "sha256": "5a2f78ba9a50d281ac59dc5a7986296797acd048389e719caa18270867bc53e3",
+      "bytes": 6839394,
+      "build": "25G5065a",
+      "role": "canonical",
+      "claims": ["materialize-short-side-scaling", "sdf-inflation", "endpoint-size-response"],
+      "consumers": ["tools/unify.mjs", "GlassLabBenchHeadless.swift"],
+      "replacementModules": ["core.dynamic", "core.static-scalar"],
+      "coverageDelta": "pending-v1-v2-equivalence",
+      "proposedDisposition": "coverage-replaced",
+      "decision": "pending"
+    },
+    {
+      "path": "macOS-27/formula-analysis.json",
+      "sha256": "7695ddc86cc277f50b2df370135bbfc0f4b868cd184f32de1db818bf97d6af26",
+      "bytes": 514776,
+      "build": "26A5378n",
+      "role": "derived",
+      "claims": ["size-formula-envelopes", "variant-family-formulas"],
+      "consumers": ["documentation"],
+      "replacementModules": [],
+      "coverageDelta": "no-equivalent-reproducible-generator",
+      "proposedDisposition": "retained",
+      "decision": "retained"
+    }
+  ]
+}

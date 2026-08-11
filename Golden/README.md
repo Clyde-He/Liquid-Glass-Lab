@@ -56,9 +56,9 @@ Two manifest fields carry weight:
 - **`unifiedPlatform`** declares the build the `unified/` sections must carry, separately from `platform`, because a direct capture legitimately comes from a newer build than the source fixtures filed beside it — `macOS-27/` holds `26A5378n` fixtures under a `26A5388g` unified capture. `verify.mjs` fails when `unified/meta.json` disagrees, and the learnings are labelled with *this* build, since they read the unified sections and nothing else. Without it a unified archive dropped in from the wrong build verified fully green: the section checksums only prove each file matches its own meta entry.
 - **`role`** separates `canonical` evidence from a `control` (a repeat or contrast kept as provenance) and from `derived` output computed off other fixtures. Only canonical fixtures should be cited as a result.
 
-These are the source captures. Each one feeds a unified section, and which section is recorded in `unified/meta.json` under `generatedFrom`.
+These are the registered standalone captures. Some feed a unified section, while research and control fixtures remain independently registered; `unified/meta.json` records the provenance of each unified section under `generatedFrom`.
 
-The current macOS 27 directory contains:
+The current macOS 27 directory contains 12 registered standalone fixtures. The core and control fixtures are:
 
 - `recipe-matrix.json`: the canonical active-session Main × Subdued × Variant × Subvariant × representative-Height sweep;
 - `recursive-pass-audit.json`: the accepted 336-row fixed-geometry recursive Layer/Pass/property inventory captured on build `26A5388g`;
@@ -68,12 +68,14 @@ The current macOS 27 directory contains:
 - `formula-analysis.json`: derived envelopes and size formulas from the 426 sample formula probe;
 - `window-context-matrix.json`: the controlled 19-configuration host audit.
 
-The current macOS 26 baseline is the direct canonical four-file archive:
+The current macOS 26 directory contains nine registered standalone fixtures plus the direct canonical four-file unified archive:
 
-- `unified/static-scalar.json`: 408 rows, including the 336-cell core plus size, transposed-size, corner-radius, and real-key slices;
-- `unified/static-tree.json`: 357 rows, including 21 same-session repeats;
+- `unified/static-scalar.json`: 744 rows, including the 672-cell Light/Dark core plus size, transposed-size, corner-radius, and real-key slices;
+- `unified/static-tree.json`: 378 rows, including the 336-cell core, 21 same-session repeats, and 21 appearance-slice rows;
 - `unified/dynamic.json`: 104 runs / 936 samples across Material, participation, appearance, backdrop, Tint, direction, and `shortSide` 48/200/400;
 - `unified/meta.json`: canonical provenance, hashes, slice counts, and the exact macOS build.
+
+Across both OS directories, the current archive contains 21 registered standalone fixtures (about 129 MB) and eight unified payload/meta files (about 31 MB). The standalone total intentionally includes research, control, and derived evidence; registration does not imply that every fixture belongs in a future Full capture profile. The proposed retirement or retention of each legacy fixture is tracked in [`evidence-retirement-ledger.json`](evidence-retirement-ledger.json).
 
 The dynamic section is the evidence behind P1's baseline-driven curve. It is not a superset of the static sections: it covers only Variants 1 and 2 with a nil subvariant, in exchange for appearance, backdrop, Tint, direction, size, and progress axes the static products do not have.
 
