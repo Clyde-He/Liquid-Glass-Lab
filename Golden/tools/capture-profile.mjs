@@ -233,11 +233,18 @@ async function promote(staging, accepted) {
   const newDynamic = JSON.parse(await readFile(path.join(staging, newDynamicFile)));
   const oldNormalized = normalizedDynamicRuns(oldDynamic.runs);
   const newNormalized = normalizedDynamicRuns(newDynamic.runs);
-  const durationDeltas = (oldDynamic.runs ?? []).map((run, index) => Math.abs(
-    (run.maximumAttachedAnimationDuration ?? 0)
-      - (newDynamic.runs?.[index]?.maximumAttachedAnimationDuration ?? 0)
-  ));
   const dynamicProblems = [...oldNormalized.problems, ...newNormalized.problems];
+  const durationDeltas = (oldDynamic.runs ?? []).map((run, index) => {
+    const baseline = run.maximumAttachedAnimationDuration;
+    const candidate = newDynamic.runs?.[index]?.maximumAttachedAnimationDuration;
+    if (!Number.isFinite(baseline) || !Number.isFinite(candidate)) {
+      dynamicProblems.push(
+        `run ${index}: maximumAttachedAnimationDuration must be finite on both sides`
+      );
+      return Number.POSITIVE_INFINITY;
+    }
+    return Math.abs(baseline - candidate);
+  });
   if (durationDeltas.some((delta) => delta > 0.05)) {
     dynamicProblems.push(`maximum animation duration delta ${Math.max(...durationDeltas)}`);
   }
