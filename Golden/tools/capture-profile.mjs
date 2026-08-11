@@ -23,6 +23,7 @@ const REQUIRED = [
   ...FULL.slice(1).map(([id]) => id),
 ];
 const TINT_CHECKPOINT_FILES = FULL.slice(1, 4).map(([, , file]) => file);
+const TINT_CHECKPOINT_FLAGS = new Set(FULL.slice(1, 4).map(([, flag]) => flag));
 const CLAIMS = {
   "core.static-scalar": ["recipe-values", "static-axis-response"],
   "core.static-tree": ["recursive-topology", "pass-inventory", "resolved-pass-values"],
@@ -55,8 +56,17 @@ function run(app, flag, destination) {
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${flag} exited ${result.status}`);
   const artifact = /^GLASS_LAB_ARTIFACT_PATH=(.+)$/m.exec(result.stderr ?? "")?.[1];
+  if (result.status !== 0) {
+    if (TINT_CHECKPOINT_FLAGS.has(flag) && artifact && existsSync(artifact)) {
+      rmSync(destination, { recursive: true, force: true });
+      mkdirSync(path.dirname(destination), { recursive: true });
+      cpSync(artifact, destination, { force: true });
+      rmSync(artifact, { force: true });
+      process.stderr.write(`Recovered Tint checkpoint after ${flag} failure\n`);
+    }
+    throw new Error(`${flag} exited ${result.status ?? "by signal"}`);
+  }
   if (!artifact) throw new Error(`${flag} did not report an artifact path`);
   rmSync(destination, { recursive: true, force: true });
   mkdirSync(path.dirname(destination), { recursive: true });

@@ -35,6 +35,7 @@ test("Full validates complete staging integrity before promotion", () => {
   assert.match(runnerSource, /on disk but unregistered/);
   assert.match(runnerSource, /GLASS_LAB_ARTIFACT_PATH/);
   assert.match(runnerSource, /--checkpoint-stdin/);
+  assert.match(runnerSource, /Recovered Tint checkpoint after/);
   assert.match(source, /driver: "--capture-golden"/);
 });
 

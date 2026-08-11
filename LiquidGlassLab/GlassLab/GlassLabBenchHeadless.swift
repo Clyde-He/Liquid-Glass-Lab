@@ -216,6 +216,13 @@ extension GlassLabView {
         } else {
             destination = URL(fileURLWithPath: requestedDestination)
         }
+        if tintParameterizationFlag != nil
+            || tintParameterizationFocusedFlag != nil
+            || tintParameterizationHueFlag != nil {
+            FileHandle.standardError.write(Data(
+                "GLASS_LAB_ARTIFACT_PATH=\(destination.path)\n".utf8
+            ))
+        }
         NSApplication.shared.activate(ignoringOtherApps: true)
         // Let the scene, the test window, and the first Recipe resolution
         // settle before the first participation request.
