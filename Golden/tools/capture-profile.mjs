@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { validateManifestV2 } from "./lib/manifest.mjs";
@@ -150,7 +150,13 @@ async function buildManifest(root, accepted) {
     });
   }
   for (const [id, , file] of FULL.slice(1)) {
-    const module = await payloadModule(root, id, file);
+    let module;
+    try {
+      module = await payloadModule(root, id, file);
+    } catch (error) {
+      if (optional.includes(id) && error?.code === "ENOENT") continue;
+      throw error;
+    }
     if (optional.includes(id)) module.profileStatus = "optional";
     modules.push(module);
   }
@@ -186,8 +192,52 @@ async function buildManifest(root, accepted) {
   if (problems.length) throw new Error(`invalid staged manifest: ${problems.join("; ")}`);
   await writeFile(path.join(root, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
+async function validateStagingIntegrity(root) {
+  const manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
+  const problems = validateManifestV2(manifest);
+  const registered = new Set(["unified/meta.json"]);
+  for (const module of manifest.modules ?? []) {
+    registered.add(module.file);
+    try {
+      const bytes = await readFile(path.join(root, module.file));
+      if (bytes.length !== module.integrity.bytes) {
+        problems.push(`${module.file}: byte count disagrees with manifest`);
+      }
+      if (sha256(bytes) !== module.integrity.sha256) {
+        problems.push(`${module.file}: sha256 mismatch`);
+      }
+      JSON.parse(bytes.toString("utf8"));
+    } catch (error) {
+      problems.push(`${module.file}: ${error instanceof SyntaxError ? "not valid JSON" : "listed but missing"}`);
+    }
+  }
+  try {
+    const meta = JSON.parse(await readFile(path.join(root, "unified/meta.json"), "utf8"));
+    for (const module of (manifest.modules ?? []).filter(({ id }) => id.startsWith("core."))) {
+      const entry = meta.sections?.[module.id.slice("core.".length)];
+      if (!entry || entry.file !== path.basename(module.file)
+          || entry.sha256 !== module.integrity.sha256
+          || entry.bytes !== module.integrity.bytes) {
+        problems.push(`${module.file}: unified metadata disagrees with manifest`);
+      }
+    }
+  } catch {
+    problems.push("unified/meta.json: missing or not valid JSON");
+  }
+  async function scan(relative = "") {
+    for (const entry of await readdir(path.join(root, relative), { withFileTypes: true })) {
+      const file = path.join(relative, entry.name);
+      if (entry.isDirectory()) await scan(file);
+      else if (entry.name.endsWith(".json") && file !== "manifest.json"
+          && !registered.has(file)) problems.push(`${file}: on disk but unregistered`);
+    }
+  }
+  await scan();
+  if (problems.length) throw new Error(`invalid Full staging: ${problems.join("; ")}`);
+}
 async function promote(staging, accepted) {
   if (!accepted) throw new Error("--promote requires --accepted");
+  await validateStagingIntegrity(staging);
   const previous = JSON.parse(await readFile(path.join(accepted, "manifest.json")));
   const previousRequired = previous.profiles?.full?.required ?? [];
   const stagedPath = path.join(staging, "manifest.json");
@@ -299,15 +349,29 @@ if (profile === "drift-scan") {
   console.error(`Drift Scan complete (noncanonical): ${output}`);
 } else {
   const staging = `${output}.full-staging`;
+  await rm(staging, { recursive: true, force: true });
   await mkdir(staging, { recursive: true });
-  for (const [, flag, relative] of FULL) {
+  const [, coreFlag, coreRelative] = FULL[0];
+  run(app, coreFlag, path.join(staging, coreRelative));
+  const coreMeta = JSON.parse(await readFile(path.join(staging, "unified/meta.json"), "utf8"));
+  const semanticOptional = Number.parseInt(
+    platformFrom(coreMeta.operatingSystem ?? "").version, 10
+  ) < 27;
+  for (const [id, flag, relative] of FULL.slice(1)) {
     const destination = path.join(staging, relative);
     // Tint sweep drivers resume from their own per-color checkpoints. The
     // other drivers deliberately rerun: a merely present file is not proof
     // that a module passed its current completeness gates.
-    run(app, flag, destination);
+    try {
+      run(app, flag, destination);
+    } catch (error) {
+      if (id !== "semantic.usage-trees" || !semanticOptional) throw error;
+      await rm(destination, { force: true });
+      console.error(`Optional ${id} unavailable on this OS; continuing Full capture`);
+    }
   }
   await buildManifest(staging, accepted);
+  await validateStagingIntegrity(staging);
   if (process.argv.includes("--promote")) await promote(staging, accepted);
   else console.error(`Full capture staged, validated, and not promoted: ${staging}`);
 }

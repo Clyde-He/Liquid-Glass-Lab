@@ -7,6 +7,7 @@ const source = await readFile(
   `${goldenDirectory}/../LiquidGlassLab/GlassLab/GlassLabGoldenCaptureRegistry.swift`,
   "utf8"
 );
+const runnerSource = await readFile(`${goldenDirectory}/tools/capture-profile.mjs`, "utf8");
 
 const fullBlock = source.match(/static let full = Profile\(([\s\S]*?)\n    \)\n\n    static func full/)?.[1] ?? "";
 const driftBlock = source.match(/static let driftScan = Profile\(([\s\S]*?)\n    \)\n}/)?.[1] ?? "";
@@ -23,6 +24,15 @@ test("macOS 26 explicitly downgrades Semantic to optional", async () => {
   assert.deepEqual(manifest.profiles.full.optional, ["semantic.usage-trees"]);
   assert.match(source, /osMajor < 27/);
   assert.match(source, /optional\.availability = \.optional/);
+  assert.match(runnerSource, /id !== "semantic\.usage-trees" \|\| !semanticOptional/);
+  assert.match(runnerSource, /Optional \$\{id\} unavailable on this OS; continuing Full capture/);
+});
+
+test("Full validates complete staging integrity before promotion", () => {
+  assert.match(runnerSource, /await rm\(staging, \{ recursive: true, force: true \}\)/);
+  assert.match(runnerSource, /await validateStagingIntegrity\(staging\);\n  const previous/);
+  assert.match(runnerSource, /sha256 mismatch/);
+  assert.match(runnerSource, /on disk but unregistered/);
 });
 
 test("Drift Scan is explicitly noncanonical and nonpromotable", () => {
