@@ -69,7 +69,7 @@ The current macOS 26 directory contains seven registered standalone fixtures plu
 - `unified/dynamic.json`: 104 runs / 936 samples across Material, participation, appearance, backdrop, Tint, direction, and `shortSide` 48/200/400;
 - `unified/meta.json`: canonical provenance, hashes, slice counts, and the exact macOS build.
 
-Across both OS directories, the current archive contains 16 registered standalone fixtures (about 69 MB) and eight unified payload/meta files (about 31 MB). Recipe Matrix, legacy Recursive audits, and the separate stability repeat were removed only after their consumers moved to direct Core modules and the retirement ledger recorded coverage replacement. Materialize studies remain pending; the display-context control and formula analysis remain retained.
+Across both OS directories, the current archive contains 16 registered standalone fixtures (about 69 MB) and eight unified payload/meta files (about 31 MB). Recipe Matrix, legacy Recursive audits, and the separate stability repeat were removed after their consumers moved to direct Core modules and the retirement ledger recorded the outcome claim by claim: full Recursive product coverage was replaced, while the old all-variant height sweep and full-product stability-repeat claims were explicitly retired. Materialize studies remain pending; the display-context control and formula analysis remain retained.
 
 The dynamic section is the evidence behind P1's baseline-driven curve. It is not a superset of the static sections: it covers only Variants 1 and 2 with a nil subvariant, in exchange for appearance, backdrop, Tint, direction, size, and progress axes the static products do not have.
 
@@ -156,7 +156,7 @@ node Golden/tools/compare.mjs \
   --fixture=semantic-usage-trees.json
 ```
 
-Compare independently captured Recursive Pass Audits with:
+Compare the independently captured direct Core static-tree modules that now own recursive product coverage with:
 
 ```sh
 node Golden/tools/compare.mjs \
