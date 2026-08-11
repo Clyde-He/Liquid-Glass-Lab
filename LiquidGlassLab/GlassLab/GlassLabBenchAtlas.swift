@@ -1356,11 +1356,29 @@ extension GlassLabView {
 
         let hud = GlassLabHUDPanelController()
         defer { hud.tearDown() }
+        // This smoke test verifies the raw Style Atlas captured above. The
+        // interactive HUD deliberately starts with the product's contained
+        // no-outer-shadow experiment, whose margin and shadow inputs are
+        // transformed after atlas lookup. Make the headless contract explicit
+        // so those intentional product overrides are never compared with the
+        // untransformed Golden sample.
+        hud.setRenderExperiment(
+            outerPasses: .all,
+            marginWidth: nil
+        )
         // Show unfrozen first: the system-resolved margin on this
         // never-key-never-main panel is the reference for who wins later.
         hud.show()
         try await Task.sleep(for: .milliseconds(1200))
         if let glass = hud.glassView {
+            let experiment = glass.materialStrength.renderExperiment
+            step(
+                "verification-policy-native",
+                experiment == GlassMaterialRenderExperiment(),
+                experiment == GlassMaterialRenderExperiment()
+                    ? "all passes · native margin · native window inset"
+                    : "headless verification inherited a product override"
+            )
             let systemMargin = GlassMaterialAccess.marginWidth(under: glass)
             step(
                 "info-system-margin-on-hud",
@@ -1374,6 +1392,26 @@ extension GlassLabView {
         try await Task.sleep(for: .milliseconds(1000))
 
         step("freeze-installed", hud.lastFreezeSucceeded, "freeze(atlas:)")
+        let installedAtlasMatchesReference: Bool
+        if let installed = hud.glassView?.materialStrength.frozenAtlas {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            if let installedData = try? encoder.encode(installed),
+               let referenceData = try? encoder.encode(decoded) {
+                installedAtlasMatchesReference = installedData == referenceData
+            } else {
+                installedAtlasMatchesReference = false
+            }
+        } else {
+            installedAtlasMatchesReference = false
+        }
+        step(
+            "verification-atlas-owner",
+            installedAtlasMatchesReference,
+            installedAtlasMatchesReference
+                ? "reference atlas remains the sole installed source"
+                : "another controller replaced the reference atlas"
+        )
         step(
             "never-key-or-main",
             !hud.windowIsMainOrKey,
@@ -1603,6 +1641,7 @@ extension GlassLabView {
                     // payload, and colors.
                     hud.setStrength(1)
                     var numericsOK = false
+                    var numericMismatches: [String] = []
                     var colorsOK = false
                     var gradesOK = false
                     var rimsOK = false
@@ -1615,12 +1654,22 @@ extension GlassLabView {
                             let inputs = GlassMaterialAccess.readTypedInputs(
                                 from: target
                             )
-                            numericsOK = expected.numeric.allSatisfy {
-                                key, value in
-                                inputs.numeric[key].map {
-                                    abs($0 - value) < 1e-3
-                                } ?? false
+                            numericMismatches = expected.numeric.compactMap {
+                                key, expectedValue in
+                                guard let liveValue = inputs.numeric[key] else {
+                                    return "\(key): missing"
+                                }
+                                guard abs(liveValue - expectedValue) >= 1e-3
+                                else { return nil }
+                                return String(
+                                    format: "%@ live %.6f vs atlas %.6f",
+                                    key,
+                                    liveValue,
+                                    expectedValue
+                                )
                             }
+                            .sorted()
+                            numericsOK = numericMismatches.isEmpty
                             colorsOK = expected.colors.allSatisfy { key, value in
                                 inputs.colors[key].map {
                                     GlassMaterialAccess.colorsMatch(
@@ -1678,7 +1727,9 @@ extension GlassLabView {
                     step(
                         "shader-tracks-atlas \(context)",
                         numericsOK,
-                        "\(expected.numeric.count) numeric inputs vs atlas at G=1"
+                        numericsOK
+                            ? "\(expected.numeric.count) numeric inputs vs atlas at G=1"
+                            : numericMismatches.joined(separator: " · ")
                     )
                     step(
                         "colors-track-atlas \(context)",
