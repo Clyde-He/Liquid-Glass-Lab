@@ -21,6 +21,7 @@ const REQUIRED = [
   "core.static-scalar", "core.static-tree", "core.dynamic",
   ...FULL.slice(1).map(([id]) => id),
 ];
+const TINT_CHECKPOINT_FILES = FULL.slice(1, 4).map(([, , file]) => file);
 const CLAIMS = {
   "core.static-scalar": ["recipe-values", "static-axis-response"],
   "core.static-tree": ["recursive-topology", "pass-inventory", "resolved-pass-values"],
@@ -235,6 +236,30 @@ async function validateStagingIntegrity(root) {
   await scan();
   if (problems.length) throw new Error(`invalid Full staging: ${problems.join("; ")}`);
 }
+async function recreateStagingPreservingTintCheckpoints(staging) {
+  const resume = `${staging}.resume-${process.pid}`;
+  await rm(resume, { recursive: true, force: true });
+  await mkdir(resume, { recursive: true });
+  for (const file of TINT_CHECKPOINT_FILES) {
+    try {
+      const bytes = await readFile(path.join(staging, file));
+      JSON.parse(bytes.toString("utf8"));
+      await copyFile(path.join(staging, file), path.join(resume, file));
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw new Error(`invalid Tint checkpoint ${file}: ${error.message}`);
+    }
+  }
+  await rm(staging, { recursive: true, force: true });
+  await mkdir(staging, { recursive: true });
+  for (const file of TINT_CHECKPOINT_FILES) {
+    try {
+      await copyFile(path.join(resume, file), path.join(staging, file));
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  await rm(resume, { recursive: true, force: true });
+}
 async function promote(staging, accepted) {
   if (!accepted) throw new Error("--promote requires --accepted");
   await validateStagingIntegrity(staging);
@@ -349,26 +374,15 @@ if (profile === "drift-scan") {
   console.error(`Drift Scan complete (noncanonical): ${output}`);
 } else {
   const staging = `${output}.full-staging`;
-  await rm(staging, { recursive: true, force: true });
-  await mkdir(staging, { recursive: true });
+  await recreateStagingPreservingTintCheckpoints(staging);
   const [, coreFlag, coreRelative] = FULL[0];
   run(app, coreFlag, path.join(staging, coreRelative));
-  const coreMeta = JSON.parse(await readFile(path.join(staging, "unified/meta.json"), "utf8"));
-  const semanticOptional = Number.parseInt(
-    platformFrom(coreMeta.operatingSystem ?? "").version, 10
-  ) < 27;
-  for (const [id, flag, relative] of FULL.slice(1)) {
+  for (const [, flag, relative] of FULL.slice(1)) {
     const destination = path.join(staging, relative);
     // Tint sweep drivers resume from their own per-color checkpoints. The
     // other drivers deliberately rerun: a merely present file is not proof
     // that a module passed its current completeness gates.
-    try {
-      run(app, flag, destination);
-    } catch (error) {
-      if (id !== "semantic.usage-trees" || !semanticOptional) throw error;
-      await rm(destination, { force: true });
-      console.error(`Optional ${id} unavailable on this OS; continuing Full capture`);
-    }
+    run(app, flag, destination);
   }
   await buildManifest(staging, accepted);
   await validateStagingIntegrity(staging);
