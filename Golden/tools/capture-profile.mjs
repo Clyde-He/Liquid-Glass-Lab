@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { validateManifestV2 } from "./lib/manifest.mjs";
 import { tintDocumentGateProblems } from "./lib/tint-compare.mjs";
@@ -32,6 +33,7 @@ const CLAIMS = {
   "semantic.usage-trees": ["semantic-role-topology"],
   "external.window-context": ["window-context-invariance"],
 };
+const toolDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 function usage() {
   console.error("usage: capture-profile.mjs <full|drift-scan> --app APP --output DIR [--accepted DIR] [--promote]");
@@ -59,6 +61,19 @@ async function payloadModule(root, id, file) {
   if (id.startsWith("tint.")) {
     const problems = tintDocumentGateProblems(payload, id);
     if (problems.length) throw new Error(`${id} failed admission: ${problems.join("; ")}`);
+  }
+  if (id === "semantic.usage-trees") {
+    const context = payload.context ?? {};
+    const canonicalContext = context.hostType === "Panel"
+      && context.glassWidth === 480 && context.glassHeight === 200
+      && context.cornerRadius === 16 && context.windowMargin === 40;
+    const invalidEntry = !Array.isArray(payload.entries) || payload.entries.length !== 48
+      || payload.entries.some((entry) => entry.actualKey
+        || entry.actualMain !== entry.requestedMain
+        || (entry.isAvailable && entry.snapshot == null));
+    if (!canonicalContext || invalidEntry) {
+      throw new Error("semantic.usage-trees failed canonical context or completeness gates");
+    }
   }
   const capturedAt = payload.capturedAt ?? payload.generatedAt ?? null;
   return {
@@ -139,19 +154,37 @@ async function promote(staging, accepted) {
       "initial post-refactor promotion gate failed: accepted Full coverage differs from the registered profile"
     );
   }
-  const backup = `${accepted}.previous`;
-  await rm(backup, { recursive: true, force: true });
+  const comparisons = [];
+  let equivalent = true;
+  for (const id of staged.profiles.full.required.filter((id) => id !== "core.dynamic")) {
+    const args = [
+      path.join(toolDirectory, "compare.mjs"), accepted, staging,
+      `--module=${id}`, "--limit=20",
+    ];
+    if (id.startsWith("tint.")) args.push("--tint-mode=values");
+    const result = spawnSync(process.execPath, args, { encoding: "utf8" });
+    if (result.status !== 0) throw new Error(`equivalence comparison failed for ${id}: ${result.stderr}`);
+    const report = JSON.parse(result.stdout);
+    comparisons.push({ id, summary: report.summary });
+    const summary = report.summary;
+    if (["missingRows", "addedRows", "missingFields", "addedFields", "changedValues"]
+      .some((field) => (summary[field] ?? 0) !== 0)) equivalent = false;
+  }
+  const oldDynamic = previous.modules.find(({ id }) => id === "core.dynamic")?.statistics?.rows;
+  const newDynamic = staged.modules.find(({ id }) => id === "core.dynamic")?.statistics?.rows;
+  if (oldDynamic !== newDynamic) equivalent = false;
+  comparisons.push({ id: "core.dynamic", baselineRows: oldDynamic, candidateRows: newDynamic });
+  await writeFile(`${staging}.equivalence.json`, `${JSON.stringify({ equivalent, comparisons }, null, 2)}\n`);
+  if (!equivalent && !process.argv.includes("--accept-drift")) {
+    throw new Error(`Full value equivalence failed; inspect ${staging}.equivalence.json and rerun with --accept-drift after approval`);
+  }
   staged.status = "accepted";
   await writeFile(stagedPath, `${JSON.stringify(staged, null, 2)}\n`);
-  try {
-    await rename(accepted, backup);
-    await rename(staging, accepted);
-  } catch (error) {
-    try { await rename(backup, accepted); } catch {}
-    throw error;
-  }
-  try { await rm(backup, { recursive: true, force: true }); }
-  catch (error) { console.error(`warning: promoted successfully; backup cleanup failed: ${error.message}`); }
+  const result = spawnSync("xcrun", [
+    "swift", path.join(toolDirectory, "atomic-promote.swift"), staging, accepted,
+  ], { stdio: "inherit" });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`atomic promotion exited ${result.status}`);
 }
 
 const profile = process.argv[2];
@@ -161,13 +194,20 @@ const accepted = option("--accepted");
 if (!app || !output || !["full", "drift-scan"].includes(profile)) usage();
 
 if (profile === "drift-scan") {
-  await mkdir(output, { recursive: true });
-  run(app, "--verify-style-atlas", path.join(output, "style-atlas.json"));
-  run(app, "--verify-tint-sync-resolution", path.join(output, "tint-sync-resolution.json"));
-  await writeFile(path.join(output, "profile.json"), `${JSON.stringify({
+  const staging = `${output}.drift-staging-${process.pid}`;
+  await rm(staging, { recursive: true, force: true });
+  await mkdir(staging, { recursive: true });
+  run(app, "--verify-style-atlas", path.join(staging, "style-atlas.json"));
+  run(app, "--verify-tint-sync-resolution", path.join(staging, "tint-sync-resolution.json"));
+  for (const file of ["style-atlas.json", "tint-sync-resolution.json"]) {
+    JSON.parse(await readFile(path.join(staging, file), "utf8"));
+  }
+  await writeFile(path.join(staging, "profile.json"), `${JSON.stringify({
     profile: "drift-scan", canonical: false, promotable: false,
     modules: ["drift.style-atlas", "drift.tint-sync"],
   }, null, 2)}\n`);
+  await rm(output, { recursive: true, force: true });
+  await rename(staging, output);
   console.error(`Drift Scan complete (noncanonical): ${output}`);
 } else {
   const staging = `${output}.full-staging`;
