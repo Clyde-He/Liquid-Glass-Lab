@@ -2,7 +2,8 @@
 
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { validateManifestV2 } from "./lib/manifest.mjs";
@@ -21,6 +22,8 @@ const REQUIRED = [
   "core.static-scalar", "core.static-tree", "core.dynamic",
   ...FULL.slice(1).map(([id]) => id),
 ];
+const TINT_CHECKPOINT_FILES = FULL.slice(1, 4).map(([, , file]) => file);
+const TINT_CHECKPOINT_FLAGS = new Set(FULL.slice(1, 4).map(([, flag]) => flag));
 const CLAIMS = {
   "core.static-scalar": ["recipe-values", "static-axis-response"],
   "core.static-tree": ["recursive-topology", "pass-inventory", "resolved-pass-values"],
@@ -44,9 +47,31 @@ function option(name) {
   return index < 0 ? null : process.argv[index + 1];
 }
 function run(app, flag, destination) {
-  const result = spawnSync(app, [flag, destination], { stdio: "inherit" });
+  const handoff = `@temporary/${process.pid}-${path.basename(destination)}`;
+  const checkpoint = existsSync(destination) && statSync(destination).isFile()
+    ? readFileSync(destination) : undefined;
+  const args = [flag, handoff];
+  if (checkpoint) args.push("--checkpoint-stdin");
+  const result = spawnSync(app, args, { encoding: "utf8", input: checkpoint });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`${flag} exited ${result.status}`);
+  const artifact = /^GLASS_LAB_ARTIFACT_PATH=(.+)$/m.exec(result.stderr ?? "")?.[1];
+  if (result.status !== 0) {
+    if (TINT_CHECKPOINT_FLAGS.has(flag) && artifact && existsSync(artifact)) {
+      rmSync(destination, { recursive: true, force: true });
+      mkdirSync(path.dirname(destination), { recursive: true });
+      cpSync(artifact, destination, { force: true });
+      rmSync(artifact, { force: true });
+      process.stderr.write(`Recovered Tint checkpoint after ${flag} failure\n`);
+    }
+    throw new Error(`${flag} exited ${result.status ?? "by signal"}`);
+  }
+  if (!artifact) throw new Error(`${flag} did not report an artifact path`);
+  rmSync(destination, { recursive: true, force: true });
+  mkdirSync(path.dirname(destination), { recursive: true });
+  cpSync(artifact, destination, { recursive: true, force: true });
+  rmSync(artifact, { recursive: true, force: true });
 }
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 function platformFrom(operatingSystem) {
@@ -150,7 +175,13 @@ async function buildManifest(root, accepted) {
     });
   }
   for (const [id, , file] of FULL.slice(1)) {
-    const module = await payloadModule(root, id, file);
+    let module;
+    try {
+      module = await payloadModule(root, id, file);
+    } catch (error) {
+      if (optional.includes(id) && error?.code === "ENOENT") continue;
+      throw error;
+    }
     if (optional.includes(id)) module.profileStatus = "optional";
     modules.push(module);
   }
@@ -186,8 +217,76 @@ async function buildManifest(root, accepted) {
   if (problems.length) throw new Error(`invalid staged manifest: ${problems.join("; ")}`);
   await writeFile(path.join(root, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
+async function validateStagingIntegrity(root) {
+  const manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
+  const problems = validateManifestV2(manifest);
+  const registered = new Set(["unified/meta.json"]);
+  for (const module of manifest.modules ?? []) {
+    registered.add(module.file);
+    try {
+      const bytes = await readFile(path.join(root, module.file));
+      if (bytes.length !== module.integrity.bytes) {
+        problems.push(`${module.file}: byte count disagrees with manifest`);
+      }
+      if (sha256(bytes) !== module.integrity.sha256) {
+        problems.push(`${module.file}: sha256 mismatch`);
+      }
+      JSON.parse(bytes.toString("utf8"));
+    } catch (error) {
+      problems.push(`${module.file}: ${error instanceof SyntaxError ? "not valid JSON" : "listed but missing"}`);
+    }
+  }
+  try {
+    const meta = JSON.parse(await readFile(path.join(root, "unified/meta.json"), "utf8"));
+    for (const module of (manifest.modules ?? []).filter(({ id }) => id.startsWith("core."))) {
+      const entry = meta.sections?.[module.id.slice("core.".length)];
+      if (!entry || entry.file !== path.basename(module.file)
+          || entry.sha256 !== module.integrity.sha256
+          || entry.bytes !== module.integrity.bytes) {
+        problems.push(`${module.file}: unified metadata disagrees with manifest`);
+      }
+    }
+  } catch {
+    problems.push("unified/meta.json: missing or not valid JSON");
+  }
+  async function scan(relative = "") {
+    for (const entry of await readdir(path.join(root, relative), { withFileTypes: true })) {
+      const file = path.join(relative, entry.name);
+      if (entry.isDirectory()) await scan(file);
+      else if (entry.name.endsWith(".json") && file !== "manifest.json"
+          && !registered.has(file)) problems.push(`${file}: on disk but unregistered`);
+    }
+  }
+  await scan();
+  if (problems.length) throw new Error(`invalid Full staging: ${problems.join("; ")}`);
+}
+async function recreateStagingPreservingTintCheckpoints(staging) {
+  const resume = `${staging}.resume-${process.pid}`;
+  await rm(resume, { recursive: true, force: true });
+  await mkdir(resume, { recursive: true });
+  for (const file of TINT_CHECKPOINT_FILES) {
+    try {
+      const bytes = await readFile(path.join(staging, file));
+      JSON.parse(bytes.toString("utf8"));
+      await copyFile(path.join(staging, file), path.join(resume, file));
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw new Error(`invalid Tint checkpoint ${file}: ${error.message}`);
+    }
+  }
+  await rm(staging, { recursive: true, force: true });
+  await mkdir(staging, { recursive: true });
+  for (const file of TINT_CHECKPOINT_FILES) {
+    try {
+      await copyFile(path.join(resume, file), path.join(staging, file));
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  await rm(resume, { recursive: true, force: true });
+}
 async function promote(staging, accepted) {
   if (!accepted) throw new Error("--promote requires --accepted");
+  await validateStagingIntegrity(staging);
   const previous = JSON.parse(await readFile(path.join(accepted, "manifest.json")));
   const previousRequired = previous.profiles?.full?.required ?? [];
   const stagedPath = path.join(staging, "manifest.json");
@@ -299,8 +398,10 @@ if (profile === "drift-scan") {
   console.error(`Drift Scan complete (noncanonical): ${output}`);
 } else {
   const staging = `${output}.full-staging`;
-  await mkdir(staging, { recursive: true });
-  for (const [, flag, relative] of FULL) {
+  await recreateStagingPreservingTintCheckpoints(staging);
+  const [, coreFlag, coreRelative] = FULL[0];
+  run(app, coreFlag, path.join(staging, coreRelative));
+  for (const [, flag, relative] of FULL.slice(1)) {
     const destination = path.join(staging, relative);
     // Tint sweep drivers resume from their own per-color checkpoints. The
     // other drivers deliberately rerun: a merely present file is not proof
@@ -308,6 +409,7 @@ if (profile === "drift-scan") {
     run(app, flag, destination);
   }
   await buildManifest(staging, accepted);
+  await validateStagingIntegrity(staging);
   if (process.argv.includes("--promote")) await promote(staging, accepted);
   else console.error(`Full capture staged, validated, and not promoted: ${staging}`);
 }

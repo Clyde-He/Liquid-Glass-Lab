@@ -53,7 +53,7 @@ See the [product integration guide](./LiquidGlassLab/GlassMaterial/README.md), [
 
 ## Build
 
-The Glass runtime is available on macOS 26.0+. The Swift Package itself can be linked by applications that retain an older deployment target; consumers gate `AdjustableGlassEffectView` at runtime and keep their pre-macOS-26 fallback. Accepted per-OS captures currently include the macOS 26.6 and macOS 27 beta Recipe/Recursive baselines, plus the macOS 27 SwiftUI Semantic Usage fixture.
+The Glass runtime is available on macOS 26.0+. The Swift Package itself can be linked by applications that retain an older deployment target; consumers gate `AdjustableGlassEffectView` at runtime and keep their pre-macOS-26 fallback. The current per-OS Golden archive registers direct Core static-scalar, static-tree, and dynamic modules together with Tint coverage; macOS 27 additionally requires the SwiftUI Semantic Usage module, while retained controls and derived studies remain available for targeted research.
 
 ```sh
 xcodebuild \

@@ -187,13 +187,13 @@ The implementation must:
 
 ### P0.6 — Targeted geometry replay
 
-Do not immediately multiply the 12 MB recursive fixture into a full 1,008-tree matrix. Replay Height 24 and 600 for:
+The former plan to replay Height 24 and 600 across the full recursive Cartesian product was superseded when the standalone Recipe Matrix and Recursive Pass Audit fixtures were retired. Use the surviving evidence before proposing a new capture axis:
 
-- cells whose fixed Height 200 topology or values changed;
-- cells the compact Matrix already proves are size-sensitive;
-- macOS 26 Height 24 Variants 9, 15, 17, 19, and 20, whose Subvariant consumption is compact-only in the current evidence.
+- use the direct Core static-tree module for full fixed-geometry recursive-product coverage and its 21-cell repeat sentinel;
+- use the direct Core static-scalar size slice for Variants 1 and 2;
+- use retained `formula-analysis.json` for dense size behavior and the retained display-context control for runtime-sensitive resolved values.
 
-Expand the full recursive Cartesian product only if targeted samples establish additional topology or property families.
+The old all-variant Height 24/600 claim is intentionally retired. Add a new registered module or expand the recursive product only if the surviving evidence identifies a concrete uncovered topology or property family; record the new claim and admission gate before capture.
 
 ### P0 exit criteria
 

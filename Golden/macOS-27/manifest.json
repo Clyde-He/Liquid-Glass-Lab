@@ -16,122 +16,6 @@
   "capturedAt": "2026-07-20",
   "fixtures": [
     {
-      "id": "recipe-matrix",
-      "file": "recipe-matrix.json",
-      "sha256": "3ba86700d84786f430fee9928f8d8ddf47d03f4ed27226c344fb965b3b0be35c",
-      "entryCount": 1008,
-      "axes": {
-        "main": [
-          false,
-          true
-        ],
-        "subdued": [
-          false,
-          true
-        ],
-        "variant": "0...20",
-        "subvariant": [
-          null,
-          "menu",
-          "sheet",
-          "camera"
-        ],
-        "width": [
-          480
-        ],
-        "height": [
-          24,
-          200,
-          600
-        ],
-        "cornerRadius": [
-          16
-        ]
-      },
-      "environment": {
-        "hostType": "Panel",
-        "windowMargin": 40,
-        "scrim": false,
-        "reducedTintOpacity": false,
-        "adaptiveAppearance": 2,
-        "tint": null,
-        "overridesEnabled": false
-      },
-      "notes": [
-        "Canonical active-session Main × Subdued × Variant × Subvariant × representative-Height sweep.",
-        "Validated as 1,008 unique rows: every row appActive=true and actual key=false; requested and actual Main match in all rows.",
-        "inputMaxHeadroom is retained raw but classified as display/runtime-volatile by compare.mjs after same-build captures changed from the 9999 sentinel to 1.2 while every other comparable Shader, Rim, and geometry value remained stable."
-      ],
-      "role": "canonical"
-    },
-    {
-      "id": "recursive-pass-audit",
-      "file": "recursive-pass-audit.json",
-      "sha256": "9d08d935c7e8faa8357be96716641ddb443a30cdf1732f43ed0790773e95f40b",
-      "formatVersion": 1,
-      "entryCount": 336,
-      "platform": {
-        "product": "macOS",
-        "version": "27.0",
-        "build": "26A5388g",
-        "architecture": "arm64"
-      },
-      "capturedAt": "2026-07-21T17:08:08Z",
-      "axes": {
-        "main": [
-          false,
-          true
-        ],
-        "subdued": [
-          false,
-          true
-        ],
-        "variant": "0...20",
-        "subvariant": [
-          null,
-          "menu",
-          "sheet",
-          "camera"
-        ]
-      },
-      "environment": {
-        "hostType": "Panel",
-        "windowMargin": 40,
-        "width": 480,
-        "height": 200,
-        "cornerRadius": 16,
-        "scrim": false,
-        "reducedTintOpacity": false,
-        "adaptiveAppearance": 2,
-        "tint": null,
-        "overridesEnabled": false
-      },
-      "validationCaptures": [
-        {
-          "role": "same-context-repeat",
-          "file": "recursive-pass-audit-stability-repeat.json",
-          "sha256": "70d07ea0c3ac565f42457a52fe5ca0b3df5fe74ffa3d6e26e3facd594c00c5a3",
-          "capturedAt": "2026-07-21T17:13:02Z"
-        },
-        {
-          "role": "display-context-contrast",
-          "file": "recursive-pass-audit-display-context-a.json",
-          "sha256": "881d1c730d99e962e2995b26d994f596600455c1392151ce1dd52a8a00754362",
-          "capturedAt": "2026-07-21T16:41:24Z"
-        }
-      ],
-      "notes": [
-        "Accepted fixed-geometry recursive Layer, mask, filter, compositing-filter, effect, and property inventory captured on the fixture-level build override above.",
-        "Validated as 336 unique rows.",
-        "Every row is appActive=true and actual key=false; requested and actual Main match; every row has a non-empty layer tree.",
-        "Contains eight topology signatures and 60 resolved-value signatures.",
-        "The same-context repeat has identical rows, topology/value signatures, layer payloads, pass inventories, and nonvolatile pass values; only the document capturedAt field differs.",
-        "The earlier display-context contrast retains the same rows, topology, layer payloads, and pass inventory but changes three resolved property fields across 268 rows: CASDFOutputEffect.maximum and DLCAFilter glassBackground inputKeyFillHighlightEffectOffset/inputKeyFillHighlightHeight.",
-        "The accepted pair was captured in one active display session; the contrast capture is retained as provenance and is not canonical."
-      ],
-      "role": "canonical"
-    },
-    {
       "id": "semantic-usage-trees",
       "file": "semantic-usage-trees.json",
       "sha256": "b97180c2c9efd32c5105e0dc56d578cf99a5ecd5df9ca379f45a79f1b52eeedf",
@@ -406,25 +290,6 @@
       "role": "canonical"
     },
     {
-      "id": "recursive-pass-audit-stability-repeat",
-      "file": "recursive-pass-audit-stability-repeat.json",
-      "sha256": "70d07ea0c3ac565f42457a52fe5ca0b3df5fe74ffa3d6e26e3facd594c00c5a3",
-      "formatVersion": 1,
-      "entryCount": 336,
-      "role": "control",
-      "platform": {
-        "product": "macOS",
-        "version": "27.0",
-        "build": "26A5388g",
-        "architecture": "arm64"
-      },
-      "notes": [
-        "Same-display-session immediate repeat of recursive-pass-audit.json, used to validate it.",
-        "Reproduced every row, signature, layer payload, pass inventory, and nonvolatile property value; only the capture timestamp changed.",
-        "Kept as provenance for the canonical fixture, not as an independent result."
-      ]
-    },
-    {
       "id": "recursive-pass-audit-display-context-a",
       "file": "recursive-pass-audit-display-context-a.json",
       "sha256": "881d1c730d99e962e2995b26d994f596600455c1392151ce1dd52a8a00754362",
@@ -446,88 +311,6 @@
   ],
   "protocolVersion": 2,
   "modules": [
-    {
-      "id": "legacy.recipe-matrix",
-      "file": "recipe-matrix.json",
-      "payloadSchemaVersion": 1,
-      "planVersion": 1,
-      "platform": {
-        "product": "macOS",
-        "version": "27.0",
-        "build": "26A5378n",
-        "architecture": "arm64"
-      },
-      "capturedAt": "2026-07-20T22:38:53Z",
-      "capture": {
-        "environment": {
-          "hostType": "Panel",
-          "windowMargin": 40,
-          "scrim": false,
-          "reducedTintOpacity": false,
-          "adaptiveAppearance": 2,
-          "tint": null,
-          "overridesEnabled": false
-        },
-        "sessionID": null
-      },
-      "provenance": {
-        "kind": "legacy-capture",
-        "fixtureID": "recipe-matrix"
-      },
-      "coverageClaims": [
-        "recipe-core-values",
-        "representative-height-response"
-      ],
-      "integrity": {
-        "sha256": "3ba86700d84786f430fee9928f8d8ddf47d03f4ed27226c344fb965b3b0be35c",
-        "bytes": 7393522
-      },
-      "role": "canonical",
-      "profileStatus": "excluded"
-    },
-    {
-      "id": "legacy.recursive-pass-audit",
-      "file": "recursive-pass-audit.json",
-      "payloadSchemaVersion": 1,
-      "planVersion": 1,
-      "platform": {
-        "product": "macOS",
-        "version": "27.0",
-        "build": "26A5388g",
-        "architecture": "arm64"
-      },
-      "capturedAt": "2026-07-21T17:08:08Z",
-      "capture": {
-        "environment": {
-          "hostType": "Panel",
-          "windowMargin": 40,
-          "width": 480,
-          "height": 200,
-          "cornerRadius": 16,
-          "scrim": false,
-          "reducedTintOpacity": false,
-          "adaptiveAppearance": 2,
-          "tint": null,
-          "overridesEnabled": false
-        },
-        "sessionID": null
-      },
-      "provenance": {
-        "kind": "legacy-capture",
-        "fixtureID": "recursive-pass-audit"
-      },
-      "coverageClaims": [
-        "recursive-topology",
-        "pass-inventory",
-        "resolved-pass-values"
-      ],
-      "integrity": {
-        "sha256": "9d08d935c7e8faa8357be96716641ddb443a30cdf1732f43ed0790773e95f40b",
-        "bytes": 15194953
-      },
-      "role": "canonical",
-      "profileStatus": "excluded"
-    },
     {
       "id": "semantic.usage-trees",
       "file": "semantic-usage-trees.json",
@@ -789,36 +572,6 @@
       },
       "role": "canonical",
       "profileStatus": "carried-forward"
-    },
-    {
-      "id": "control.recursive-stability",
-      "file": "recursive-pass-audit-stability-repeat.json",
-      "payloadSchemaVersion": 1,
-      "planVersion": 1,
-      "platform": {
-        "product": "macOS",
-        "version": "27.0",
-        "build": "26A5388g",
-        "architecture": "arm64"
-      },
-      "capturedAt": "2026-07-21T17:13:02Z",
-      "capture": {
-        "environment": null,
-        "sessionID": null
-      },
-      "provenance": {
-        "kind": "control-capture",
-        "fixtureID": "recursive-pass-audit-stability-repeat"
-      },
-      "coverageClaims": [
-        "same-session-recursive-stability"
-      ],
-      "integrity": {
-        "sha256": "70d07ea0c3ac565f42457a52fe5ca0b3df5fe74ffa3d6e26e3facd594c00c5a3",
-        "bytes": 15194953
-      },
-      "role": "control",
-      "profileStatus": "excluded"
     },
     {
       "id": "control.recursive-display-context",

@@ -47,12 +47,12 @@ struct GlassLabView: View {
     /// `rendererMode` and the hidden context pages, and it hosts all capture,
     /// probe, study, and export UI.
     enum BenchPage: String, CaseIterable, Identifiable {
-        case atlas = "Atlas"
-        case exports = "Exports"
-        case materialize = "Materialize"
-        case tint = "Tint Study"
-        case transition = "Transition"
-        case probes = "Probes"
+        case exports = "Baseline"
+        case atlas = "Product"
+        case probes = "Verification"
+        case materialize = "Advanced · Materialize"
+        case tint = "Advanced · Tint"
+        case transition = "Advanced · Transition"
 
         var id: Self { self }
     }
@@ -61,9 +61,8 @@ struct GlassLabView: View {
     @State var selectedRecipePage = RecipePage.general
     @State var selectedPassSlotID: String?
     @State var selectedSemanticPage = SemanticPage.general
-    @State var selectedBenchPage = BenchPage.atlas
+    @State var selectedBenchPage = BenchPage.exports
     @State var isCapturingMatrix = false
-    @State var isCapturingPassAudit = false
     @State var isCapturingSemanticTrees = false
     @State var liveSnapshot: LiveReadoutSnapshot?
     @State var passInventorySnapshot: GlassLabTuning.PassAuditSnapshot?
@@ -125,7 +124,6 @@ struct GlassLabView: View {
     @State var inspectorHighlightMetadata: [String: GlassLabTuning.AttributeMetadata] = [:]
     @State var liveRefreshTask: Task<Void, Never>?
     @State var matrixCaptureTask: Task<Void, Never>?
-    @State var passAuditCaptureTask: Task<Void, Never>?
     @State var semanticCaptureTask: Task<Void, Never>?
     @State var foregroundProbeTask: Task<Void, Never>?
     @State var foregroundProbeReport: ForegroundProbeReport?
@@ -257,7 +255,6 @@ struct GlassLabView: View {
         .onDisappear {
             liveRefreshTask?.cancel()
             matrixCaptureTask?.cancel()
-            passAuditCaptureTask?.cancel()
             semanticCaptureTask?.cancel()
             foregroundProbeTask?.cancel()
             vibrantMatrixProbeTask?.cancel()
@@ -398,7 +395,6 @@ struct GlassLabView: View {
                 }
                 .disabled(
                     isCapturingMatrix
-                        || isCapturingPassAudit
                         || isCapturingSemanticTrees
                         || isCapturingTintStudy
                 )
@@ -414,7 +410,6 @@ struct GlassLabView: View {
                 }
                 .disabled(
                     isCapturingMatrix
-                        || isCapturingPassAudit
                         || isCapturingSemanticTrees
                         || isCapturingTintStudy
                 )
@@ -542,7 +537,6 @@ struct GlassLabView: View {
         .formStyle(.grouped)
         .disabled(
             isCapturingMatrix
-                || isCapturingPassAudit
                 || isCapturingSemanticTrees
                 || isCapturingTintStudy
         )

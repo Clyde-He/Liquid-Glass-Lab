@@ -11,7 +11,7 @@ Each operating system gets an immutable directory named by its public major vers
 ```text
 Golden/
   learnings/    executable assertions, grouped by what they claim
-  tools/        verifier, unifier, comparator, and per-study analyzers
+  tools/        verifier, comparator, capture-profile runner, and per-study analyzers
   macOS-26/
     unified/    the three sections every learning reads
     *.json      the per-study capture fixtures they are derived from
@@ -39,13 +39,7 @@ One coordinate for all three buys three things. Cross-version comparison becomes
 
 A cell field is **`null` when the capture did not control that axis** — not false, not a default. The archived sweeps leave real holes: legacy derived static sweeps may not record appearance, and the SwiftUI Materialize sweep has no Subdued concept. Recording those as null is what makes a learning that needs them skip loudly instead of passing by luck.
 
-The sections committed under **both** `macOS-26/` and `macOS-27/` are now direct **canonical** captures from the Lab exporter — 744 static-scalar rows, 378 static-tree rows, and 104 dynamic runs each. `unify.mjs` remains in the tree because it is how a per-study fixture set is bridged into the unified contract on a system the exporter has not yet run on:
-
-```sh
-node Golden/tools/unify.mjs <os-directory> --dry-run
-```
-
-On a protocol-v2 archive, `unify.mjs` is intentionally dry-run only: writing sections without atomically updating their authoritative module registrations would invalidate the archive. Registered transactional writes are owned by the promotion workflow.
+The sections committed under **both** `macOS-26/` and `macOS-27/` are direct **canonical** captures from the Lab exporter — 744 static-scalar rows, 378 static-tree rows, and 104 dynamic runs each. The former fixture-to-unified bridge has been retired: protocol-v2 archives are captured and promoted only through the registered transactional workflow.
 
 Nothing in the archive is transcoded today. Unified sections are committed so a fresh clone can verify without a build step. The exporter writes the compact contract without the presentation tree, structured layer dictionaries, or animation branch, none of which any accepted learning reads.
 
@@ -55,30 +49,27 @@ The root manifest uses module protocol v2. Its `modules` array is the registrati
 
 Two manifest fields carry weight:
 
-- **`platform`** may be set per fixture, overriding the directory default. This is not cosmetic — `macOS-27/` genuinely holds two builds, with the three recursive-pass-audit fixtures captured on `26A5388g` and the rest on `26A5378n`. `verify.mjs` fails when a fixture's embedded OS string disagrees with the entry filing it, so this cannot drift silently again.
+- **`platform`** may be set per fixture, overriding the directory default. This is not cosmetic — retained macOS 27 standalone studies and the direct Core capture span historical builds. `verify.mjs` fails when a fixture's embedded OS string disagrees with the entry filing it, so this cannot drift silently again.
 - **Each `core.*` module's `platform`** declares the build its unified payload must carry. All core modules in one OS archive must agree; `verify.mjs` compares that authoritative build with the payload metadata. The legacy `unifiedPlatform` field remains during v1 compatibility but no longer decides acceptance.
 - **`role`** separates `canonical` evidence from a `control` (a repeat or contrast kept as provenance) and from `derived` output computed off other fixtures. Only canonical fixtures should be cited as a result.
 
 These are the registered standalone captures. Some feed a unified section, while research and control fixtures remain independently registered; `unified/meta.json` records the provenance of each unified section under `generatedFrom`.
 
-The current macOS 27 directory contains 12 registered standalone fixtures. The core and control fixtures are:
+The current macOS 27 directory contains nine registered standalone fixtures. The retained control and derived fixtures include:
 
-- `recipe-matrix.json`: the canonical active-session Main × Subdued × Variant × Subvariant × representative-Height sweep;
-- `recursive-pass-audit.json`: the accepted 336-row fixed-geometry recursive Layer/Pass/property inventory captured on build `26A5388g`;
-- `recursive-pass-audit-stability-repeat.json`: the raw same-display-session repeat used to validate the canonical recursive fixture;
 - `recursive-pass-audit-display-context-a.json`: an earlier raw contrast whose topology is stable but whose display-sensitive resolved values differ;
 - `semantic-usage-trees.json`: all 24 SwiftUI Semantic Usage roles across real Main Off/On participation at one fixed geometry and Host;
 - `formula-analysis.json`: derived envelopes and size formulas from the 426 sample formula probe;
 - `window-context-matrix.json`: the controlled 19-configuration host audit.
 
-The current macOS 26 directory contains nine registered standalone fixtures plus the direct canonical four-file unified archive:
+The current macOS 26 directory contains seven registered standalone fixtures plus the direct canonical four-file unified archive:
 
 - `unified/static-scalar.json`: 744 rows, including the 672-cell Light/Dark core plus size, transposed-size, corner-radius, and real-key slices;
 - `unified/static-tree.json`: 378 rows, including the 336-cell core, 21 same-session repeats, and 21 appearance-slice rows;
 - `unified/dynamic.json`: 104 runs / 936 samples across Material, participation, appearance, backdrop, Tint, direction, and `shortSide` 48/200/400;
 - `unified/meta.json`: canonical provenance, hashes, slice counts, and the exact macOS build.
 
-Across both OS directories, the current archive contains 21 registered standalone fixtures (about 129 MB) and eight unified payload/meta files (about 31 MB). The standalone total intentionally includes research, control, and derived evidence; registration does not imply that every fixture belongs in a future Full capture profile. The proposed retirement or retention of each legacy fixture is tracked in [`evidence-retirement-ledger.json`](evidence-retirement-ledger.json).
+Across both OS directories, the current archive contains 16 registered standalone fixtures (about 69 MB) and eight unified payload/meta files (about 31 MB). Recipe Matrix, legacy Recursive audits, and the separate stability repeat were removed after their consumers moved to direct Core modules and the retirement ledger recorded the outcome claim by claim: full Recursive product coverage was replaced, while the old all-variant height sweep and full-product stability-repeat claims were explicitly retired. Materialize studies remain pending; the display-context control and formula analysis remain retained.
 
 The dynamic section is the evidence behind P1's baseline-driven curve. It is not a superset of the static sections: it covers only Variants 1 and 2 with a nil subvariant, in exchange for appearance, backdrop, Tint, direction, size, and progress axes the static products do not have.
 
@@ -165,7 +156,7 @@ node Golden/tools/compare.mjs \
   --fixture=semantic-usage-trees.json
 ```
 
-Compare independently captured Recursive Pass Audits with:
+Compare the independently captured direct Core static-tree modules that now own recursive product coverage with:
 
 ```sh
 node Golden/tools/compare.mjs \
@@ -244,7 +235,7 @@ It uses eight risk colors × eight contexts, an unchanged A/A screenshot control
 
 ## Core Recipe exporter
 
-The Playground's `Export Recipe Matrix` produces the canonical OS baseline. Its clean system sweep is:
+The retired `Export Recipe Matrix` produced the former canonical OS baseline. Its clean system sweep was:
 
 ```text
 3 Heights × Main × Subdued × Variant × Subvariant = 1,008 entries
@@ -259,11 +250,11 @@ Overrides = disabled
 
 Host and Window Margin are recorded as provenance, but they are not swept: controlled probes ruled out Host as a direct Recipe selector, and Margin only changes clipping room. The canonical matrix keeps small, normal, and oversize/capped Height representatives. The separate formula analysis owns the dense Height sweep as well as Width and Corner Radius controls and fitted formulas, avoiding a sixfold Size multiplier on every routine OS capture.
 
-The exporter writes only a complete active-session matrix: inactive capture pauses and retries its current context, and requested/actual Main acceptance is validated before the canonical `recipe-matrix.json` is replaced. A file with fewer than 1,008 unique rows is not a Golden Standard even if its axes envelope lists the full product.
+The retired Recipe Matrix exporter wrote only a complete active-session matrix: inactive capture paused and retried its current context, and requested/actual Main acceptance was validated before replacement. `core.static-scalar` replaces its Recipe product claim; the old all-variant 24/600-height claim is retired because direct capture intentionally uses Variants 1 and 2 for the size slice while retained formula analysis owns dense size behavior.
 
-## Recursive Pass Audit exporter
+## Retired Recursive Pass Audit
 
-The Playground's `Export Recursive Pass Audit` keeps structural completeness separate from the compact Recipe baseline:
+The former `Export Recursive Pass Audit` kept structural completeness separate from the compact Recipe baseline:
 
 ```text
 Main × Subdued × 21 Variants × 4 Subvariants = 336 entries
@@ -280,9 +271,9 @@ Overrides = disabled
 
 Every snapshot walks sublayers and masks, then records direct filters, background filters, compositing filters, and object-backed effects. Stable structural paths key the JSON objects. Filter `inputKeys` and effect `CA_attributes` keep capability separate from resolved `value`, `nil`, and `unreadable` states. SHA-256 topology and value signatures make it cheap to identify changed cells before reading precise nested diffs.
 
-This fixture is diagnostic rather than automatically accepted. A first capture should be repeated on the same build and in the same display session to establish which layer fields and values are stable before it is added to an OS manifest. The macOS 26 and macOS 27 fixtures have completed that review and are listed in their manifests.
+The two canonical standalone fixtures are retired in favor of `core.static-tree`. The old 336-cell repeat claim is also retired; the direct archive keeps a 21-cell same-session repeat sentinel and verifies it against the Core rows.
 
-The accepted macOS 27 capture and its immediate repeat contain the same 336 rows, eight topology signatures, 60 value signatures, layer payloads, pass inventories, and nonvolatile property values; only the top-level `capturedAt` timestamp differs. An earlier capture around a display-context transition kept the same topology and pass inventory but changed three resolved fields across 268 rows: `CASDFOutputEffect.maximum` plus the `DLCAFilter` `glassBackground` inputs `inputKeyFillHighlightEffectOffset` and `inputKeyFillHighlightHeight`. That capture is retained as provenance rather than promoted to canonical.
+An earlier capture around a display-context transition is retained because it preserves a claim absent from the direct archive: topology and pass inventory stay stable while display-sensitive resolved values move. Tests compare that control with `core.static-tree` and require the known highlight-offset delta to remain visible.
 
 ## Semantic Usage exporter
 
