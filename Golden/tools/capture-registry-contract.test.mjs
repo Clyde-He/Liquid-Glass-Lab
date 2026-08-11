@@ -8,7 +8,7 @@ const source = await readFile(
   "utf8"
 );
 
-const fullBlock = source.match(/static let full = Profile\(([\s\S]*?)\n    \)\n\n    static let driftScan/)?.[1] ?? "";
+const fullBlock = source.match(/static let full = Profile\(([\s\S]*?)\n    \)\n\n    static func full/)?.[1] ?? "";
 const driftBlock = source.match(/static let driftScan = Profile\(([\s\S]*?)\n    \)\n}/)?.[1] ?? "";
 const idsIn = (block) => [...block.matchAll(/Module\(id: "([^"]+)"/g)].map((match) => match[1]);
 
@@ -16,6 +16,13 @@ test("Swift Full registry matches the exact macOS 27 required profile", async ()
   const manifest = await readManifest("macOS-27");
   assert.deepEqual(idsIn(fullBlock), manifest.profiles.full.required);
   assert.doesNotMatch(fullBlock, /driver: nil/);
+});
+
+test("macOS 26 explicitly downgrades Semantic to optional", async () => {
+  const manifest = await readManifest("macOS-26");
+  assert.deepEqual(manifest.profiles.full.optional, ["semantic.usage-trees"]);
+  assert.match(source, /osMajor < 27/);
+  assert.match(source, /optional\.availability = \.optional/);
 });
 
 test("Drift Scan is explicitly noncanonical and nonpromotable", () => {

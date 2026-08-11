@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { validateManifestV2 } from "./lib/manifest.mjs";
+import { tintDocumentGateProblems } from "./lib/tint-compare.mjs";
 
 const FULL = [
   ["core", "--capture-golden", "unified"],
@@ -54,6 +56,10 @@ function platformFrom(operatingSystem) {
 async function payloadModule(root, id, file) {
   const bytes = await readFile(path.join(root, file));
   const payload = JSON.parse(bytes);
+  if (id.startsWith("tint.")) {
+    const problems = tintDocumentGateProblems(payload, id);
+    if (problems.length) throw new Error(`${id} failed admission: ${problems.join("; ")}`);
+  }
   const capturedAt = payload.capturedAt ?? payload.generatedAt ?? null;
   return {
     id, file, payloadSchemaVersion: payload.formatVersion ?? payload.schemaVersion ?? 1,
@@ -68,6 +74,10 @@ async function buildManifest(root, accepted) {
   const metaBytes = await readFile(path.join(root, "unified/meta.json"));
   const meta = JSON.parse(metaBytes);
   const platform = platformFrom(meta.operatingSystem ?? "");
+  const osMajor = Number.parseInt(platform.version, 10);
+  const required = osMajor >= 27
+    ? REQUIRED : REQUIRED.filter((id) => id !== "semantic.usage-trees");
+  const optional = osMajor >= 27 ? [] : ["semantic.usage-trees"];
   const modules = [];
   for (const [section, entry] of Object.entries(meta.sections ?? {})) {
     modules.push({
@@ -81,22 +91,28 @@ async function buildManifest(root, accepted) {
       role: "canonical", profileStatus: "required",
     });
   }
-  for (const [id, , file] of FULL.slice(1)) modules.push(await payloadModule(root, id, file));
+  for (const [id, , file] of FULL.slice(1)) {
+    const module = await payloadModule(root, id, file);
+    if (optional.includes(id)) module.profileStatus = "optional";
+    modules.push(module);
+  }
   const carriedForward = [];
   if (accepted) {
     const old = JSON.parse(await readFile(path.join(accepted, "manifest.json")));
     for (const oldModule of old.modules ?? []) {
-      if (oldModule.profileStatus !== "carried-forward") continue;
-      await copyFile(path.join(accepted, oldModule.file), path.join(root, oldModule.file));
+      if (REQUIRED.includes(oldModule.id)) continue;
+      const target = path.join(root, oldModule.file);
+      await mkdir(path.dirname(target), { recursive: true });
+      await copyFile(path.join(accepted, oldModule.file), target);
       modules.push(oldModule);
-      carriedForward.push(oldModule.id);
+      if (oldModule.profileStatus === "carried-forward") carriedForward.push(oldModule.id);
     }
   }
   const ids = new Set(modules.map(({ id }) => id));
-  const missing = REQUIRED.filter((id) => !ids.has(id));
+  const missing = required.filter((id) => !ids.has(id));
   if (missing.length) throw new Error(`incomplete Full staging: ${missing.join(", ")}`);
-  const builds = [...new Set(modules.filter(({ id }) => REQUIRED.includes(id)).map(({ platform }) => platform.build))];
-  if (modules.some(({ id, platform }) => REQUIRED.includes(id)
+  const builds = [...new Set(modules.filter(({ id }) => required.includes(id)).map(({ platform }) => platform.build))];
+  if (modules.some(({ id, platform }) => required.includes(id)
       && Object.values(platform).some((value) => value === "unknown"))) {
     throw new Error("Full platform provenance is incomplete");
   }
@@ -104,23 +120,29 @@ async function buildManifest(root, accepted) {
   const manifest = {
     protocolVersion: 2, status: "staged", platform, capturedAt: meta.capturedAt,
     modules, profiles: { full: {
-      required: REQUIRED, optional: [], unsupported: [], carriedForward,
+      required, optional, unsupported: [], carriedForward,
       captureBuildPolicy: "single-build", builds,
     } },
   };
+  const problems = validateManifestV2(manifest);
+  if (problems.length) throw new Error(`invalid staged manifest: ${problems.join("; ")}`);
   await writeFile(path.join(root, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 async function promote(staging, accepted) {
   if (!accepted) throw new Error("--promote requires --accepted");
   const previous = JSON.parse(await readFile(path.join(accepted, "manifest.json")));
   const previousRequired = previous.profiles?.full?.required ?? [];
-  if (JSON.stringify(previousRequired) !== JSON.stringify(REQUIRED)) {
+  const stagedPath = path.join(staging, "manifest.json");
+  const staged = JSON.parse(await readFile(stagedPath));
+  if (JSON.stringify(previousRequired) !== JSON.stringify(staged.profiles.full.required)) {
     throw new Error(
       "initial post-refactor promotion gate failed: accepted Full coverage differs from the registered profile"
     );
   }
   const backup = `${accepted}.previous`;
   await rm(backup, { recursive: true, force: true });
+  staged.status = "accepted";
+  await writeFile(stagedPath, `${JSON.stringify(staged, null, 2)}\n`);
   try {
     await rename(accepted, backup);
     await rename(staging, accepted);
@@ -128,7 +150,8 @@ async function promote(staging, accepted) {
     try { await rename(backup, accepted); } catch {}
     throw error;
   }
-  await rm(backup, { recursive: true, force: true });
+  try { await rm(backup, { recursive: true, force: true }); }
+  catch (error) { console.error(`warning: promoted successfully; backup cleanup failed: ${error.message}`); }
 }
 
 const profile = process.argv[2];

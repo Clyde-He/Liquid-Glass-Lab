@@ -166,7 +166,9 @@ extension GlassLabView {
             return lines
         }
         return (
-            report(GlassLabGoldenCaptureRegistry.full)
+            report(GlassLabGoldenCaptureRegistry.full(
+                forOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+            ))
                 + [""]
                 + report(GlassLabGoldenCaptureRegistry.driftScan)
         )
@@ -578,6 +580,14 @@ extension GlassLabView {
             at: parent,
             withIntermediateDirectories: true
         )
+        for candidate in (try? fileManager.contentsOfDirectory(
+            at: parent,
+            includingPropertiesForKeys: nil
+        )) ?? [] where candidate.lastPathComponent.hasPrefix(
+            ".\(directory.lastPathComponent).staging-"
+        ) {
+            try? fileManager.removeItem(at: candidate)
+        }
         let staging = parent.appendingPathComponent(
             ".\(directory.lastPathComponent).staging-\(UUID().uuidString)",
             isDirectory: true

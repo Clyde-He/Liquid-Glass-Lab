@@ -58,6 +58,18 @@ enum GlassLabGoldenCaptureRegistry {
         ]
     )
 
+    static func full(forOSMajor osMajor: Int) -> Profile {
+        guard osMajor < 27 else { return full }
+        var profile = full
+        profile.modules = profile.modules.map { module in
+            guard module.id == "semantic.usage-trees" else { return module }
+            var optional = module
+            optional.availability = .optional
+            return optional
+        }
+        return profile
+    }
+
     static let driftScan = Profile(
         id: "drift-scan",
         canonical: false,
