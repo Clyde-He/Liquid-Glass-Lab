@@ -1,41 +1,18 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
-import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { validateManifestV2 } from "./lib/manifest.mjs";
-import { tintDocumentGateProblems } from "./lib/tint-compare.mjs";
-
-const FULL = [
-  ["core", "--capture-golden", "unified"],
-  ["tint.parameterization.sweep", "--capture-tint-parameterization", "tint-parameterization-sweep.json"],
-  ["tint.parameterization.focused-2b", "--capture-tint-parameterization-focused", "tint-parameterization-focused-phase-2b.json"],
-  ["tint.parameterization.hue-2c", "--capture-tint-parameterization-phase-2c", "tint-parameterization-hue-phase-2c.json"],
-  ["tint.sync-resolution", "--verify-tint-sync-resolution", "tint-sync-resolution.json"],
-  ["tint.wide-gamut", "--verify-tint-wide-gamut-model", "tint-wide-gamut-model.json"],
-  ["semantic.usage-trees", "--capture-semantic-usage-trees", "semantic-usage-trees.json"],
-];
-const REQUIRED = [
-  "core.static-scalar", "core.static-tree", "core.dynamic",
-  ...FULL.slice(1).map(([id]) => id),
-];
+import {
+  CLAIMS, FULL_DRIVERS as FULL, FULL_MODULE_IDS as REQUIRED,
+  PROFILE_DEFINITION_VERSION, payloadModule, platformFrom, profileForMajor,
+  validateFullDirectory,
+} from "./lib/profile.mjs";
 const TINT_CHECKPOINT_FILES = FULL.slice(1, 4).map(([, , file]) => file);
 const TINT_CHECKPOINT_FLAGS = new Set(FULL.slice(1, 4).map(([, flag]) => flag));
-const CLAIMS = {
-  "core.static-scalar": ["recipe-values", "static-axis-response"],
-  "core.static-tree": ["recursive-topology", "pass-inventory", "resolved-pass-values"],
-  "core.dynamic": ["transition-curve", "dynamic-axis-response", "settled-endpoints"],
-  "tint.parameterization.sweep": ["tint-transform-family", "tint-matrix-fit"],
-  "tint.parameterization.focused-2b": ["tint-rgb-holdouts"],
-  "tint.parameterization.hue-2c": ["tint-hue-boundary"],
-  "tint.sync-resolution": ["flush-settled-tint-equivalence"],
-  "tint.wide-gamut": ["display-p3-tint-model"],
-  "semantic.usage-trees": ["semantic-role-topology"],
-  "external.window-context": ["window-context-invariance"],
-};
 const toolDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 function usage() {
@@ -72,13 +49,6 @@ function run(app, flag, destination) {
   mkdirSync(path.dirname(destination), { recursive: true });
   cpSync(artifact, destination, { recursive: true, force: true });
   rmSync(artifact, { recursive: true, force: true });
-}
-const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
-function platformFrom(operatingSystem) {
-  const version = /Version ([0-9.]+)/.exec(operatingSystem)?.[1]
-    ?? /macOS ([0-9.]+)/.exec(operatingSystem)?.[1] ?? "unknown";
-  const build = /Build ([^)]+)/.exec(operatingSystem)?.[1] ?? "unknown";
-  return { product: "macOS", version, build, architecture: process.arch };
 }
 function stripDynamicVolatileFields(value) {
   if (!value || typeof value !== "object") return;
@@ -123,49 +93,17 @@ function firstDifference(lhs, rhs, path = "runs") {
   }
   return null;
 }
-async function payloadModule(root, id, file) {
-  const bytes = await readFile(path.join(root, file));
-  const payload = JSON.parse(bytes);
-  if (id.startsWith("tint.")) {
-    const problems = tintDocumentGateProblems(payload, id);
-    if (problems.length) throw new Error(`${id} failed admission: ${problems.join("; ")}`);
-  }
-  if (id === "semantic.usage-trees") {
-    const context = payload.context ?? {};
-    const canonicalContext = context.hostType === "Panel"
-      && context.glassWidth === 480 && context.glassHeight === 200
-      && context.cornerRadius === 16 && context.windowMargin === 40;
-    const invalidEntry = !Array.isArray(payload.entries) || payload.entries.length !== 48
-      || payload.entries.some((entry) => entry.actualKey
-        || entry.actualMain !== entry.requestedMain
-        || (entry.isAvailable && entry.snapshot == null));
-    if (!canonicalContext || invalidEntry) {
-      throw new Error("semantic.usage-trees failed canonical context or completeness gates");
-    }
-  }
-  const capturedAt = payload.capturedAt ?? payload.generatedAt ?? null;
-  return {
-    id, file, payloadSchemaVersion: payload.formatVersion ?? payload.schemaVersion ?? 1,
-    planVersion: 1, platform: platformFrom(payload.operatingSystem ?? ""), capturedAt,
-    capture: { environment: payload.environment ?? payload.context ?? null, sessionID: payload.sessionID ?? null },
-    provenance: { kind: "direct-capture" }, coverageClaims: CLAIMS[id],
-    integrity: { sha256: sha256(bytes), bytes: bytes.length }, role: "canonical",
-    profileStatus: "required",
-  };
-}
 async function buildManifest(root, accepted) {
   const metaBytes = await readFile(path.join(root, "unified/meta.json"));
   const meta = JSON.parse(metaBytes);
   const platform = platformFrom(meta.operatingSystem ?? "");
   const osMajor = Number.parseInt(platform.version, 10);
-  const required = osMajor >= 27
-    ? REQUIRED : REQUIRED.filter((id) => id !== "semantic.usage-trees");
-  const optional = osMajor >= 27 ? [] : ["semantic.usage-trees"];
+  const { required, optional, unsupported } = profileForMajor(osMajor);
   const modules = [];
   for (const [section, entry] of Object.entries(meta.sections ?? {})) {
     modules.push({
       id: `core.${section}`, file: `unified/${entry.file}`,
-      payloadSchemaVersion: meta.schemaVersion ?? 1, planVersion: 1, platform,
+      payloadSchemaVersion: meta.schemaVersion ?? 1, planVersion: PROFILE_DEFINITION_VERSION, platform,
       capturedAt: meta.capturedAt, capture: { environment: null, sessionID: null },
       provenance: { kind: "direct-capture", payloadMetadata: "unified/meta.json" },
       coverageClaims: CLAIMS[`core.${section}`],
@@ -209,7 +147,7 @@ async function buildManifest(root, accepted) {
   const manifest = {
     protocolVersion: 2, status: "staged", platform, capturedAt: meta.capturedAt,
     modules, profiles: { full: {
-      required, optional, unsupported: [], carriedForward,
+      required, optional, unsupported, carriedForward,
       captureBuildPolicy: "single-build", builds,
     } },
   };
@@ -218,46 +156,7 @@ async function buildManifest(root, accepted) {
   await writeFile(path.join(root, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 async function validateStagingIntegrity(root) {
-  const manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
-  const problems = validateManifestV2(manifest);
-  const registered = new Set(["unified/meta.json"]);
-  for (const module of manifest.modules ?? []) {
-    registered.add(module.file);
-    try {
-      const bytes = await readFile(path.join(root, module.file));
-      if (bytes.length !== module.integrity.bytes) {
-        problems.push(`${module.file}: byte count disagrees with manifest`);
-      }
-      if (sha256(bytes) !== module.integrity.sha256) {
-        problems.push(`${module.file}: sha256 mismatch`);
-      }
-      JSON.parse(bytes.toString("utf8"));
-    } catch (error) {
-      problems.push(`${module.file}: ${error instanceof SyntaxError ? "not valid JSON" : "listed but missing"}`);
-    }
-  }
-  try {
-    const meta = JSON.parse(await readFile(path.join(root, "unified/meta.json"), "utf8"));
-    for (const module of (manifest.modules ?? []).filter(({ id }) => id.startsWith("core."))) {
-      const entry = meta.sections?.[module.id.slice("core.".length)];
-      if (!entry || entry.file !== path.basename(module.file)
-          || entry.sha256 !== module.integrity.sha256
-          || entry.bytes !== module.integrity.bytes) {
-        problems.push(`${module.file}: unified metadata disagrees with manifest`);
-      }
-    }
-  } catch {
-    problems.push("unified/meta.json: missing or not valid JSON");
-  }
-  async function scan(relative = "") {
-    for (const entry of await readdir(path.join(root, relative), { withFileTypes: true })) {
-      const file = path.join(relative, entry.name);
-      if (entry.isDirectory()) await scan(file);
-      else if (entry.name.endsWith(".json") && file !== "manifest.json"
-          && !registered.has(file)) problems.push(`${file}: on disk but unregistered`);
-    }
-  }
-  await scan();
+  const { problems } = await validateFullDirectory(root, { expectedStatus: "staged" });
   if (problems.length) throw new Error(`invalid Full staging: ${problems.join("; ")}`);
 }
 async function recreateStagingPreservingTintCheckpoints(staging) {

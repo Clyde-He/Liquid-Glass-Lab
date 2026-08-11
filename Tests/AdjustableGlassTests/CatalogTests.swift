@@ -6,44 +6,50 @@ import XCTest
 @available(macOS 26.0, *)
 final class CatalogTests: XCTestCase {
     @MainActor
-    func testPackageContainsVerifiedMacOS27Catalog() throws {
-        let url = try XCTUnwrap(
-            GlassMaterialAtlasCatalog.bundledAtlasURL(forMacOSMajor: 27)
-        )
-        let data = try Data(contentsOf: url)
-        let atlas = try JSONDecoder().decode(
-            GlassMaterialStyleAtlas.self,
-            from: data
-        )
+    func testEveryBundledCatalogIsStructurallyCertified() throws {
+        let requiredShortSides: [Double] = [48, 64, 96, 128, 160, 200, 320]
+        let urls = GlassMaterialAtlasCatalog.bundledAtlasURLs()
+        XCTAssertFalse(urls.isEmpty)
+        var majors = Set<Int>()
 
-        XCTAssertEqual(atlas.environment?.resolvedOSMajorVersion, 27)
-        XCTAssertEqual(atlas.environment?.osMajorVersion, 27)
-        XCTAssertFalse(atlas.hasTintMatrices)
-        XCTAssertTrue(
-            atlas.hasVerifiedMainOnCoverage(
-                shortSides: [48, 64, 96, 128, 160, 200, 320]
+        for url in urls {
+            let name = url.deletingPathExtension().lastPathComponent
+            let majorText = name.dropFirst(
+                GlassMaterialAtlasCatalog.resourcePrefix.count
             )
-        )
-    }
+            let major = try XCTUnwrap(Int(majorText))
+            XCTAssertEqual(name, "glass-macos-\(major)")
+            XCTAssertTrue(majors.insert(major).inserted)
 
-    @MainActor
-    func testPackageContainsVerifiedMacOS26Catalog() throws {
-        let url = try XCTUnwrap(
-            GlassMaterialAtlasCatalog.bundledAtlasURL(forMacOSMajor: 26)
-        )
-        let atlas = try JSONDecoder().decode(
-            GlassMaterialStyleAtlas.self,
-            from: Data(contentsOf: url)
-        )
-
-        XCTAssertEqual(atlas.environment?.osMajorVersion, 26)
-        XCTAssertEqual(atlas.environment?.resolvedOSMajorVersion, 26)
-        XCTAssertFalse(atlas.hasTintMatrices)
-        XCTAssertTrue(
-            atlas.hasVerifiedMainOnCoverage(
-                shortSides: [48, 64, 96, 128, 160, 200, 320]
+            let atlas = try JSONDecoder().decode(
+                GlassMaterialStyleAtlas.self,
+                from: Data(contentsOf: url)
             )
-        )
+            XCTAssertEqual(
+                atlas.environment?.schemaVersion,
+                GlassMaterialStyleAtlas.currentSchemaVersion
+            )
+            XCTAssertEqual(atlas.environment?.osMajorVersion, major)
+            XCTAssertEqual(atlas.environment?.resolvedOSMajorVersion, major)
+            XCTAssertFalse(atlas.hasTintMatrices)
+            XCTAssertEqual(GlassMaterialStyleAtlas.allTintCells.count, 8)
+            for cell in GlassMaterialStyleAtlas.allTintCells {
+                XCTAssertEqual(
+                    atlas.sampleShortSides(for: cell),
+                    requiredShortSides,
+                    "Wrong size coverage for \(name): \(cell)"
+                )
+                XCTAssertTrue(
+                    atlas.cellMatchesSupportedTopology(cell),
+                    "Unsupported topology for \(name): \(cell)"
+                )
+            }
+            XCTAssertTrue(
+                atlas.hasVerifiedMainOnCoverage(
+                    shortSides: requiredShortSides
+                )
+            )
+        }
     }
 
     @MainActor

@@ -66,15 +66,20 @@ export async function loadModuleDocument(directory, idOrAlias) {
  * here" rather than failing.
  */
 export async function loadUnified(osDirectory) {
-  const directory = path.join(goldenDirectory, osDirectory, "unified");
-  const manifest = await readManifest(osDirectory);
+  return loadUnifiedAt(path.join(goldenDirectory, osDirectory));
+}
+
+/** Loads unified sections from an arbitrary candidate directory. */
+export async function loadUnifiedAt(archiveDirectory) {
+  const directory = path.join(archiveDirectory, "unified");
+  const manifest = await readManifestAt(archiveDirectory);
   const sections = {};
   for (const name of SECTIONS) {
     const module = manifest.modules.find((entry) => entry.id === `core.${name}`);
     try {
       const document = normalizeUnifiedDocument(JSON.parse(
         await readFile(
-          module ? path.join(goldenDirectory, osDirectory, module.file)
+          module ? path.join(archiveDirectory, module.file)
             : path.join(directory, `${name}.json`),
           "utf8"
         )
