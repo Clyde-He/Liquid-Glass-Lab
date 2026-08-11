@@ -56,12 +56,15 @@ extension GlassLabView {
                     Button(
                         isCapturingMatrix
                             ? "Capturing…"
-                            : "Capture Golden Archive (unified/)"
+                            : "Capture Core Golden Modules (Atomic)"
                     ) {
                         exportGoldenArchive()
                     }
                     .disabled(isCapturingMatrix || isCapturingPassAudit)
-                    Text("Golden Archive replaces the two exports above. It writes unified/ as four files — static-scalar, static-tree, dynamic, and meta — in one run, so every section shares an environment and can be compared cell by cell. See Golden/CAPTURE-SPEC.md for what each slice exists to prove.")
+                    Button("Show Full / Drift Registry") {
+                        state.reportOutput = Self.goldenRegistryReport()
+                    }
+                    Text("The core driver stages static-scalar, static-tree, dynamic, and meta, validates completeness, then atomically replaces unified/. It is one driver inside Full Golden, not the whole Full profile: Full also requires Tint and Semantic modules. Drift Scan is explicitly noncanonical and cannot be promoted.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                     Text("Recipe Matrix records 1,008 compact Shader/Rim rows across representative Heights. Recursive Pass Audit is a separate 336-row Panel capture at 480×200@16 and Margin 40; it walks sublayers, masks, filters, background filters, compositing filters, and object-backed effects across Main × Subdued × Variant × Subvariant. Both exports pause while the app is inactive and require clean system state with Overrides disabled.")
@@ -211,131 +214,26 @@ extension GlassLabView {
         liveRefreshTask?.cancel()
         isCapturingSemanticTrees = true
         semanticCaptureTask = Task { @MainActor in
-            let originalUsage = state.semanticUsage
-            let originalMainState = state.isTestWindowMain
-            let originalVisibility = state.isTestWindowVisible
             let captureStartedAt = Date()
-            let activity = ProcessInfo.processInfo.beginActivity(
-                options: [
-                    .userInitiated,
-                    .idleSystemSleepDisabled,
-                    .idleDisplaySleepDisabled,
-                ],
-                reason: "Capturing Semantic Glass Usage Trees"
-            )
-
             defer {
-                ProcessInfo.processInfo.endActivity(activity)
-                state.semanticUsage = originalUsage
-                state.isTestWindowMain = originalMainState
-                state.isTestWindowVisible = originalVisibility
-                state.testWindow.sync(with: state)
                 isCapturingSemanticTrees = false
                 semanticCaptureTask = nil
                 scheduleLiveReadoutRefresh()
             }
 
             do {
-                if !state.isTestWindowVisible {
-                    state.isTestWindowVisible = true
-                    state.testWindow.sync(with: state)
-                }
-
-                var entries: [GlassLabSemanticTreeEntry] = []
-                let usages = GlassLabSemanticUsage.allCases
-                let mainStates = [false, true]
-                let expectedEntryCount = usages.count * mainStates.count
-                var captureIndex = 0
-
-                for requestedMain in mainStates {
-                    state.isTestWindowMain = requestedMain
-                    state.testWindow.sync(with: state)
-
-                    for usage in usages {
-                        captureIndex += 1
-                        let progress = "Semantic Usage \(captureIndex)/\(expectedEntryCount)"
-                            + " · Main \(requestedMain ? "On" : "Off")"
-                            + " · \(usage.displayName)"
-                        try await waitUntilApplicationIsActive(progress: progress)
-
-                        let runtime = GlassLabSemanticRuntime.shared
-                        let isAvailable = runtime.isAvailable(usage)
-                        let runtimeStatus = runtime.status(for: usage)
-                        var snapshot: GlassLabSemanticSnapshot?
-
-                        state.isTestWindowMain = requestedMain
-                        if isAvailable {
-                            state.semanticUsage = usage
-                        }
-                        state.testWindow.sync(with: state)
-                        snapshot = try await settleSemanticExportContext(
-                            capturesSnapshot: isAvailable,
-                            progress: progress
-                        )
-
-                        guard state.testWindow.isActuallyMain == requestedMain,
-                              !state.testWindow.isActuallyKey else {
-                            throw SemanticExportError.participationRejected(
-                                usage: usage.displayName,
-                                requestedMain: requestedMain
-                            )
-                        }
-                        if isAvailable, snapshot == nil {
-                            throw SemanticExportError.missingSnapshot(usage.displayName)
-                        }
-
-                        entries.append(
-                            GlassLabSemanticTreeEntry(
-                                roleTag: usage.rawValue,
-                                usage: usage.displayName,
-                                requestedMain: requestedMain,
-                                isAvailable: isAvailable,
-                                runtimeStatus: runtimeStatus,
-                                actualMain: state.testWindow.isActuallyMain,
-                                actualKey: state.testWindow.isActuallyKey,
-                                snapshot: snapshot
-                            )
-                        )
-                        state.reportOutput = "Captured \(progress)."
-                    }
-                }
-
-                guard entries.count == expectedEntryCount else {
-                    throw SemanticExportError.invalidEntryCount(
-                        expected: expectedEntryCount,
-                        actual: entries.count
-                    )
-                }
-
-                let document = GlassLabSemanticTreeExport(
-                    formatVersion: 2,
-                    generatedAt: ISO8601DateFormatter().string(from: Date()),
-                    operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
-                    axes: GlassLabSemanticTreeAxes(
-                        requestedMain: mainStates,
-                        roleTags: usages.map(\.rawValue)
-                    ),
-                    context: GlassLabSemanticTreeContext(
-                        hostType: state.windowHostType.rawValue,
-                        glassWidth: state.glassWidth,
-                        glassHeight: state.glassHeight,
-                        cornerRadius: state.cornerRadius,
-                        windowMargin: state.windowPadding
-                    ),
-                    entries: entries
-                )
-
+                let document = try await captureSemanticUsageTreesDocument()
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                 let data = try encoder.encode(document)
                 try data.write(to: destinationURL, options: .atomic)
-                let availableCount = entries.filter(\.isAvailable).count
-                let capturedCount = entries.count {
+                let availableCount = document.entries.filter(\.isAvailable).count
+                let capturedCount = document.entries.count {
                     $0.snapshot != nil
                 }
                 let duration = Date().timeIntervalSince(captureStartedAt)
                 state.reportOutput = "Exported \(capturedCount)/\(availableCount) available "
-                    + "Semantic Usage × Main trees (\(entries.count) entries) in "
+                    + "Semantic Usage × Main trees (\(document.entries.count) entries) in "
                     + "\(String(format: "%.1f", duration)) seconds to "
                     + destinationURL.path
             } catch is CancellationError {
@@ -345,6 +243,98 @@ extension GlassLabView {
                     + error.localizedDescription
             }
         }
+    }
+
+    @MainActor
+    func captureSemanticUsageTreesDocument() async throws
+        -> GlassLabSemanticTreeExport
+    {
+        let originalUsage = state.semanticUsage
+        let originalMainState = state.isTestWindowMain
+        let originalVisibility = state.isTestWindowVisible
+        let activity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .idleSystemSleepDisabled, .idleDisplaySleepDisabled],
+            reason: "Capturing Semantic Glass Usage Trees"
+        )
+        defer {
+            ProcessInfo.processInfo.endActivity(activity)
+            state.semanticUsage = originalUsage
+            state.isTestWindowMain = originalMainState
+            state.isTestWindowVisible = originalVisibility
+            state.testWindow.sync(with: state)
+        }
+        if !state.isTestWindowVisible {
+            state.isTestWindowVisible = true
+            state.testWindow.sync(with: state)
+        }
+
+        var entries: [GlassLabSemanticTreeEntry] = []
+        let usages = GlassLabSemanticUsage.allCases
+        let mainStates = [false, true]
+        let expectedEntryCount = usages.count * mainStates.count
+        var captureIndex = 0
+        for requestedMain in mainStates {
+            state.isTestWindowMain = requestedMain
+            state.testWindow.sync(with: state)
+            for usage in usages {
+                captureIndex += 1
+                let progress = "Semantic Usage \(captureIndex)/\(expectedEntryCount)"
+                    + " · Main \(requestedMain ? "On" : "Off")"
+                    + " · \(usage.displayName)"
+                try await waitUntilApplicationIsActive(progress: progress)
+                let runtime = GlassLabSemanticRuntime.shared
+                let isAvailable = runtime.isAvailable(usage)
+                let runtimeStatus = runtime.status(for: usage)
+                state.isTestWindowMain = requestedMain
+                if isAvailable { state.semanticUsage = usage }
+                state.testWindow.sync(with: state)
+                let snapshot = try await settleSemanticExportContext(
+                    capturesSnapshot: isAvailable,
+                    progress: progress
+                )
+                guard state.testWindow.isActuallyMain == requestedMain,
+                      !state.testWindow.isActuallyKey else {
+                    throw SemanticExportError.participationRejected(
+                        usage: usage.displayName,
+                        requestedMain: requestedMain
+                    )
+                }
+                if isAvailable, snapshot == nil {
+                    throw SemanticExportError.missingSnapshot(usage.displayName)
+                }
+                entries.append(GlassLabSemanticTreeEntry(
+                    roleTag: usage.rawValue,
+                    usage: usage.displayName,
+                    requestedMain: requestedMain,
+                    isAvailable: isAvailable,
+                    runtimeStatus: runtimeStatus,
+                    actualMain: state.testWindow.isActuallyMain,
+                    actualKey: state.testWindow.isActuallyKey,
+                    snapshot: snapshot
+                ))
+                state.reportOutput = "Captured \(progress)."
+            }
+        }
+        guard entries.count == expectedEntryCount else {
+            throw SemanticExportError.invalidEntryCount(
+                expected: expectedEntryCount,
+                actual: entries.count
+            )
+        }
+        return GlassLabSemanticTreeExport(
+            formatVersion: 2,
+            generatedAt: ISO8601DateFormatter().string(from: Date()),
+            operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
+            axes: .init(requestedMain: mainStates, roleTags: usages.map(\.rawValue)),
+            context: .init(
+                hostType: state.windowHostType.rawValue,
+                glassWidth: state.glassWidth,
+                glassHeight: state.glassHeight,
+                cornerRadius: state.cornerRadius,
+                windowMargin: state.windowPadding
+            ),
+            entries: entries
+        )
     }
 
     @MainActor

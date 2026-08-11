@@ -85,6 +85,11 @@ async function checkIntegrity(osDirectory) {
   async function scan(relative = "") {
     for (const entry of await readdir(path.join(directory, relative), { withFileTypes: true })) {
       const file = path.join(relative, entry.name);
+      // A killed Core transaction may leave its hidden sibling staging
+      // directory behind. It is never accepted evidence and the next capture
+      // may safely clean or replace it, so do not classify its payloads as
+      // archive orphans.
+      if (entry.isDirectory() && entry.name.startsWith(".unified.staging-")) continue;
       if (entry.isDirectory()) await scan(file);
       else if (entry.name.endsWith(".json") && file !== "manifest.json"
           && !registered.has(file)) problems.push(`${file}: on disk but unregistered`);

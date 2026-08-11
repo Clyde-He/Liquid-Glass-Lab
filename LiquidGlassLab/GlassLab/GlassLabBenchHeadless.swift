@@ -131,6 +131,9 @@ extension GlassLabView {
             of: "--verify-removal-warmup"
         )
         let goldenFlag = arguments.firstIndex(of: "--capture-golden")
+        let semanticGoldenFlag = arguments.firstIndex(
+            of: "--capture-semantic-usage-trees"
+        )
         let planFlag = arguments.firstIndex(of: "--print-golden-plan")
         let atlasFlag = arguments.firstIndex(of: "--verify-style-atlas")
         let tintParameterizationFlag = arguments.firstIndex(
@@ -156,6 +159,7 @@ extension GlassLabView {
             resizeFlag,
             removalWarmupFlag,
             goldenFlag,
+            semanticGoldenFlag,
             atlasFlag,
             tintWideGamutFlag,
             tintSyncFlag,
@@ -198,6 +202,36 @@ extension GlassLabView {
 
         var exitCode: Int32 = 0
         do {
+            if semanticGoldenFlag != nil {
+                state.rendererMode = .semanticUsage
+                selectedSemanticPage = .general
+                state.windowHostType = .panel
+                state.glassWidth = 480
+                state.glassHeight = 200
+                state.cornerRadius = 16
+                state.windowPadding = 40
+                state.isTestWindowKey = false
+                configureSemanticTransitionProbe()
+                state.testWindow.sync(with: state)
+                let document = try await captureSemanticUsageTreesDocument()
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let payload = try encoder.encode(document)
+                var written = destination
+                do {
+                    try payload.write(to: destination, options: .atomic)
+                } catch {
+                    written = URL(fileURLWithPath: NSTemporaryDirectory())
+                        .appendingPathComponent(destination.lastPathComponent)
+                    try payload.write(to: written, options: .atomic)
+                }
+                FileHandle.standardError.write(Data(
+                    "Captured \(document.entries.count) Semantic Usage rows\n"
+                        .appending("Wrote \(written.path)\n").utf8
+                ))
+                state.testWindow.tearDown()
+                exit(0)
+            }
             if tintSyncFlag != nil || tintWideGamutFlag != nil {
                 let document: GlassLabTintSyncResolutionDocument
                 if tintWideGamutFlag != nil {
@@ -279,7 +313,7 @@ extension GlassLabView {
                     (report + "\nWrote \(destination.path)\n").utf8
                 ))
                 state.testWindow.tearDown()
-                exit(0)
+                exit(document.complete ? 0 : 2)
             }
             let payload: Data
             let report: String
