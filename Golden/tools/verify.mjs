@@ -44,7 +44,7 @@ async function checkIntegrity(osDirectory) {
   const directory = path.join(goldenDirectory, osDirectory);
   const manifest = await readManifest(osDirectory);
   const problems = [];
-  const registered = new Set();
+  const registered = new Set((manifest.modules ?? []).map((module) => module.file));
 
   for (const entry of manifest.fixtures ?? []) {
     registered.add(entry.file);
@@ -81,10 +81,16 @@ async function checkIntegrity(osDirectory) {
     }
   }
 
-  for (const name of await readdir(directory)) {
-    if (!name.endsWith(".json") || name === "manifest.json") continue;
-    if (!registered.has(name)) problems.push(`${name}: on disk but unregistered`);
+  registered.add("unified/meta.json");
+  async function scan(relative = "") {
+    for (const entry of await readdir(path.join(directory, relative), { withFileTypes: true })) {
+      const file = path.join(relative, entry.name);
+      if (entry.isDirectory()) await scan(file);
+      else if (entry.name.endsWith(".json") && file !== "manifest.json"
+          && !registered.has(file)) problems.push(`${file}: on disk but unregistered`);
+    }
   }
+  await scan();
 
   // Manifest v2 is the registration and integrity authority for unified
   // modules. unified/meta.json remains payload metadata and may repeat capture

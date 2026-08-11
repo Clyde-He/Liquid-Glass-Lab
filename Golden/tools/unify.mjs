@@ -15,16 +15,14 @@
 //   unified/dynamic.json         Materialize runs, N progress samples per cell
 //   unified/meta.json            provenance and declared axes for the three
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
-import { goldenDirectory, sha256 } from "./lib/golden.mjs";
+import { goldenDirectory, loadModuleDocument, readManifestAt, sha256 } from "./lib/golden.mjs";
 import {
   CELL_FIELDS, makeCell, cellKey, axisValues, sweptAxes, variantFromUsage,
 } from "./lib/cell.mjs";
 
 export const UNIFIED_SCHEMA_VERSION = 1;
-
-const readJSON = async (file) => JSON.parse(await readFile(file, "utf8"));
 
 /** `[{key, value}]` -> `{key: value}`. Halves the byte cost of every filter. */
 function inputMap(inputs) {
@@ -207,39 +205,47 @@ function declaredAxes(cells) {
 
 export async function unify(osDirectory, { dryRun = false } = {}) {
   const base = path.join(goldenDirectory, osDirectory);
-  const manifest = await readJSON(path.join(base, "manifest.json"));
-  const entryFor = (id) => (manifest.fixtures ?? []).find((f) => f.id === id);
+  const manifest = await readManifestAt(base);
+  if (!dryRun && manifest.sourceProtocolVersion === 2) {
+    throw new Error(
+      "manifest v2 archives may only use unify.mjs --dry-run; "
+      + "registered writes require transactional promotion"
+    );
+  }
   const load = async (id) => {
-    const entry = entryFor(id);
-    if (!entry) return null;
-    return { entry, document: await readJSON(path.join(base, entry.file)) };
+    try {
+      return await loadModuleDocument(base, id);
+    } catch (error) {
+      if (String(error.message).startsWith("Unknown Golden module")) return null;
+      throw error;
+    }
   };
 
   const sections = {};
   const provenance = {};
 
-  const recipe = await load("recipe-matrix");
+  const recipe = await load("legacy.recipe-matrix");
   if (recipe) {
     sections["static-scalar"] = {
       ...unifyStaticScalar(recipe.document),
       capturedAt: recipe.document.capturedAt ?? null,
       operatingSystem: recipe.document.operatingSystem ?? null,
     };
-    provenance["static-scalar"] = ["recipe-matrix"];
+    provenance["static-scalar"] = [recipe.module.id];
   }
 
-  const audit = await load("recursive-pass-audit");
+  const audit = await load("legacy.recursive-pass-audit");
   if (audit) {
     sections["static-tree"] = {
       ...unifyStaticTree(audit.document),
       capturedAt: audit.document.capturedAt ?? null,
       operatingSystem: audit.document.operatingSystem ?? null,
     };
-    provenance["static-tree"] = ["recursive-pass-audit"];
+    provenance["static-tree"] = [audit.module.id];
   }
 
   const dynamicSources = [];
-  for (const id of ["materialize-environment-matrix", "materialize-geometry-sweep"]) {
+  for (const id of ["legacy.materialize-environment", "legacy.materialize-geometry"]) {
     const loaded = await load(id);
     if (loaded) dynamicSources.push({ id, document: loaded.document });
   }

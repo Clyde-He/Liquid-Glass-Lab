@@ -2,11 +2,14 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { resolveModulePath } from "./lib/golden.mjs";
+import { tintDocumentGateProblems } from "./lib/tint-compare.mjs";
 
 function usage() {
   console.error(
     "Usage: node compare.mjs <baseline-dir> <candidate-dir> "
-      + "[--fixture=recipe-matrix.json|recursive-pass-audit.json] "
+      + "[--module=core.static-scalar|core.static-tree|tint.*] "
+      + "[--fixture=<legacy-file-alias>] "
       + "[--recursive-mode=semantic|raw] "
       + "[--tolerance=1e-6] [--limit=100] "
       + "[--include-volatile]"
@@ -25,12 +28,25 @@ function option(name, fallback) {
 
 const baselineDirectory = path.resolve(positional[0]);
 const candidateDirectory = path.resolve(positional[1]);
-const fixtureName = option("fixture", "recipe-matrix.json");
+const requestedModule = option("module", null);
+const fixtureAlias = option("fixture", null);
+const moduleOrAlias = requestedModule ?? fixtureAlias ?? "core.static-scalar";
+const baselineModule = option("baseline-module", moduleOrAlias);
+const candidateModule = option("candidate-module", moduleOrAlias);
+const comparisonLabel = baselineModule === candidateModule
+  ? baselineModule : `${baselineModule} -> ${candidateModule}`;
 const tolerance = Number(option("tolerance", "1e-6"));
 const differenceLimit = Number(option("limit", "100"));
 const includeVolatile = process.argv.slice(2).includes("--include-volatile");
-const isPassAudit = fixtureName === "recursive-pass-audit.json";
+let isPassAudit = ["legacy.recursive-pass-audit", "recursive-pass-audit", "recursive-pass-audit.json"]
+  .includes(baselineModule) || ["legacy.recursive-pass-audit", "recursive-pass-audit", "recursive-pass-audit.json"]
+  .includes(candidateModule) || baselineModule === "core.static-tree" || candidateModule === "core.static-tree";
 const recursiveMode = option("recursive-mode", "semantic");
+const tintMode = option("tint-mode", "structural");
+const baselineSlice = option("baseline-slice", "core");
+const candidateSlice = option("candidate-slice", "core");
+let isTintModule = baselineModule.startsWith("tint.")
+  || candidateModule.startsWith("tint.");
 
 // Values proven to change between active captures on the same OS build due to
 // display/runtime environment rather than a Recipe axis. Raw fixtures retain
@@ -45,17 +61,17 @@ if (!Number.isFinite(tolerance) || tolerance < 0) {
 if (!Number.isInteger(differenceLimit) || differenceLimit < 1) {
   throw new Error(`Invalid difference limit: ${differenceLimit}`);
 }
-if (isPassAudit && !new Set(["semantic", "raw"]).has(recursiveMode)) {
-  throw new Error(`Invalid Recursive comparison mode: ${recursiveMode}`);
-}
-
 function readJSON(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
-function entries(document) {
+function entries(document, slice = "core") {
   if (Array.isArray(document)) return document;
   if (Array.isArray(document.entries)) return document.entries;
+  if (document.section === "static-tree" && Array.isArray(document.rows)) {
+    return document.rows.filter((row) => row.slice === slice);
+  }
+  if (Array.isArray(document.rows)) return document.rows;
   throw new Error("Fixture must be a JSON array or an object with an entries array.");
 }
 
@@ -64,6 +80,31 @@ function scalar(value) {
 }
 
 function identity(row, document) {
+  if (row.colorID && row.cell) {
+    return [
+      "tint", `color=${row.colorID}`,
+      `light=${scalar(row.cell.isLightAppearance)}`,
+      `clear=${scalar(row.cell.isClear)}`,
+      `main=${scalar(row.cell.hasMainParticipation)}`,
+    ].join("|");
+  }
+  if (row.cell) {
+    const cell = row.cell;
+    const identity = [
+      "recipe", `main=${scalar(cell.main)}`, `subdued=${scalar(cell.subdued)}`,
+      `size=${scalar(cell.width)}x${scalar(cell.height)}`,
+      `radius=${scalar(cell.cornerRadius)}`, `v=${scalar(cell.variant)}`,
+      `s=${scalar(cell.subvariant)}`,
+    ];
+    if (document.section !== "static-tree") {
+      identity.push(
+        `key=${scalar(cell.key)}`, `appearance=${scalar(cell.appearance)}`,
+        `backdrop=${scalar(cell.backdrop)}`, `tint=${scalar(cell.tint)}`,
+        `host=${scalar(cell.host)}`, `direction=${scalar(cell.direction)}`
+      );
+    }
+    return identity.join("|");
+  }
   if (Number.isInteger(row.roleTag) && "requestedMain" in row) {
     const context = document.context ?? {};
     return [
@@ -78,10 +119,11 @@ function identity(row, document) {
   }
 
   return [
-    scalar(row.context),
+    "recipe",
     `main=${scalar(row.requestedMain)}`,
     `subdued=${scalar(row.subdued)}`,
-    `size=${scalar(row.glassWidth)}x${scalar(row.glassHeight)}@${scalar(row.cornerRadius)}`,
+    `size=${scalar(row.glassWidth)}x${scalar(row.glassHeight)}`,
+    `radius=${scalar(row.cornerRadius)}`,
     `v=${scalar(row.variant)}`,
     `s=${scalar(row.subvariant)}`,
   ].join("|");
@@ -191,6 +233,70 @@ function passSortIdentity(pass) {
     .join("|");
 }
 
+const passMap = (row) => row.snapshot?.passes ?? row.passes ?? {};
+const topologySignature = (row) =>
+  row.snapshot?.topologySignature ?? row.topologySignature;
+const valueSignature = (row) => row.snapshot?.valueSignature ?? row.valueSignature;
+
+function compareTintStructurally(
+  baselineRows, candidateRows, missingRows, addedRows,
+  baselineDocument, candidateDocument, baselineModuleID, candidateModuleID
+) {
+  const invalid = [];
+  const classificationChanges = [];
+  const matricesOf = (row) => row.flushMatrix || row.settledMatrix
+    ? [row.flushMatrix, row.settledMatrix] : [row.matrix];
+  for (const [label, document, moduleID] of [
+    ["baseline", baselineDocument, baselineModuleID],
+    ["candidate", candidateDocument, candidateModuleID],
+  ]) {
+    for (const problem of tintDocumentGateProblems(document, moduleID)) {
+      invalid.push({ side: label, documentGate: problem });
+    }
+  }
+  for (const [label, rows] of [["baseline", baselineRows], ["candidate", candidateRows]]) {
+    for (const [key, row] of rows) {
+      for (const [index, matrix] of matricesOf(row).entries()) {
+        if (!Array.isArray(matrix) || matrix.length !== 20 || !matrix.every(Number.isFinite)) {
+          invalid.push({ side: label, row: key, matrix: index, matrixLength: matrix?.length ?? null });
+        }
+      }
+      if (row.passed === false || row.pairedProofAtFlush === false
+          || row.pairedProofWhenSettled === false) {
+        invalid.push({ side: label, row: key, proofGate: false });
+      }
+    }
+  }
+  for (const key of [...baselineRows.keys()].filter((item) => candidateRows.has(item)).sort()) {
+    const before = baselineRows.get(key);
+    const after = candidateRows.get(key);
+    const fields = [
+      "structure", "isInCertifiedDomain", "passed", "sourceColor",
+      "pairedProofAtFlush", "pairedProofWhenSettled", "maximumDifference",
+    ];
+    for (const field of fields) {
+      if (JSON.stringify(before[field] ?? null) !== JSON.stringify(after[field] ?? null)) {
+        classificationChanges.push({ row: key, field, before: before[field] ?? null, after: after[field] ?? null });
+      }
+    }
+  }
+  return {
+    summary: {
+      fixture: comparisonLabel, tintMode: "structural",
+      baseline: baselineDirectory, candidate: candidateDirectory,
+      baselineRows: baselineRows.size, candidateRows: candidateRows.size,
+      missingRows: missingRows.length, addedRows: addedRows.length,
+      invalidMatrices: invalid.length,
+      classificationChanges: classificationChanges.length,
+      coefficientValuesCompared: false,
+    },
+    missingRowIdentities: missingRows.slice(0, differenceLimit),
+    addedRowIdentities: addedRows.slice(0, differenceLimit),
+    invalidMatrices: invalid.slice(0, differenceLimit),
+    classificationChanges: classificationChanges.slice(0, differenceLimit),
+  };
+}
+
 function layerPathTokens(layerPath) {
   const tokens = [];
   const pattern = /(?:^root|\.sublayers\[(\d+)\]|\.mask):([^.|]+)/g;
@@ -287,7 +393,7 @@ function minimumCostPassPairs(baselinePasses, candidatePasses) {
 
 function passGroups(row) {
   const groups = new Map();
-  for (const pass of Object.values(row.snapshot?.passes ?? {})) {
+  for (const pass of Object.values(passMap(row))) {
     const key = passGroupIdentity(pass);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(pass);
@@ -355,10 +461,10 @@ function comparePassAuditsSemantically(
   for (const rowKey of matchedRowKeys) {
     const baselineRow = baselineRows.get(rowKey);
     const candidateRow = candidateRows.get(rowKey);
-    if (baselineRow.snapshot?.topologySignature
-        !== candidateRow.snapshot?.topologySignature) topologyChangedRows += 1;
-    if (baselineRow.snapshot?.valueSignature
-        !== candidateRow.snapshot?.valueSignature) valueChangedRows += 1;
+    if (topologySignature(baselineRow)
+        !== topologySignature(candidateRow)) topologyChangedRows += 1;
+    if (valueSignature(baselineRow)
+        !== valueSignature(candidateRow)) valueChangedRows += 1;
 
     const baselineGroups = passGroups(baselineRow);
     const candidateGroups = passGroups(candidateRow);
@@ -551,7 +657,7 @@ function comparePassAuditsSemantically(
   }
 
   const totalPasses = (rows) => [...rows.values()].reduce(
-    (total, row) => total + Object.keys(row.snapshot?.passes ?? {}).length,
+    (total, row) => total + Object.keys(passMap(row)).length,
     0
   );
   const propertyValueChangeSummary = [...propertyValueChanges.values()]
@@ -563,7 +669,7 @@ function comparePassAuditsSemantically(
   const passClassChangeSummary = aggregateValues(classChanges);
   const propertyInventoryChangeSummary = aggregateValues(propertyInventoryChanges);
   const summary = {
-    fixture: fixtureName,
+    fixture: comparisonLabel,
     recursiveMode: "semantic",
     semanticScope: "pass inventory, pass metadata, and pass properties",
     baseline: baselineDirectory,
@@ -600,16 +706,16 @@ function comparePassAuditsSemantically(
       volatileChangedValues + volatileMissingFields + volatileAddedFields
         > volatileDifferences.length,
     baselineTopologySignatures: new Set(
-      [...baselineRows.values()].map((row) => row.snapshot?.topologySignature)
+      [...baselineRows.values()].map(topologySignature)
     ).size,
     candidateTopologySignatures: new Set(
-      [...candidateRows.values()].map((row) => row.snapshot?.topologySignature)
+      [...candidateRows.values()].map(topologySignature)
     ).size,
     baselineValueSignatures: new Set(
-      [...baselineRows.values()].map((row) => row.snapshot?.valueSignature)
+      [...baselineRows.values()].map(valueSignature)
     ).size,
     candidateValueSignatures: new Set(
-      [...candidateRows.values()].map((row) => row.snapshot?.valueSignature)
+      [...candidateRows.values()].map(valueSignature)
     ).size,
     rawTopologyChangedRows: topologyChangedRows,
     rawValueChangedRows: valueChangedRows,
@@ -633,15 +739,56 @@ function comparePassAuditsSemantically(
   };
 }
 
-const baselinePath = path.join(baselineDirectory, fixtureName);
-const candidatePath = path.join(candidateDirectory, fixtureName);
+async function comparisonPath(directory, requested) {
+  try {
+    const resolved = await resolveModulePath(directory, requested);
+    return { file: resolved.file, module: resolved.module, fallback: false };
+  } catch (error) {
+    if (fixtureAlias && error.code === "ENOENT") {
+      console.error(`warning: no manifest; comparing scratch fixture ${fixtureAlias}`);
+      return { file: path.join(directory, fixtureAlias), module: null, fallback: true };
+    }
+    throw error;
+  }
+}
+
+const baselineResolved = await comparisonPath(baselineDirectory, baselineModule);
+const candidateResolved = await comparisonPath(candidateDirectory, candidateModule);
+const baselinePath = baselineResolved.file;
+const candidatePath = candidateResolved.file;
+const resolvedIDs = [baselineResolved.module?.id, candidateResolved.module?.id].filter(Boolean);
+isPassAudit ||= resolvedIDs.includes("legacy.recursive-pass-audit")
+  || resolvedIDs.includes("core.static-tree");
+isTintModule ||= resolvedIDs.some((id) => id.startsWith("tint."));
+if (resolvedIDs.includes("core.dynamic")) {
+  throw new Error("core.dynamic comparison is not implemented; use Golden learnings for dynamic gates");
+}
+if (isPassAudit && !new Set(["semantic", "raw"]).has(recursiveMode)) {
+  throw new Error(`Invalid Recursive comparison mode: ${recursiveMode}`);
+}
+if (isTintModule && !new Set(["structural", "values"]).has(tintMode)) {
+  throw new Error(`Invalid Tint comparison mode: ${tintMode}`);
+}
 const baselineDocument = readJSON(baselinePath);
 const candidateDocument = readJSON(candidatePath);
-const baselineRows = indexRows(entries(baselineDocument), baselineDocument, "baseline");
-const candidateRows = indexRows(entries(candidateDocument), candidateDocument, "candidate");
+const baselineRows = indexRows(
+  entries(baselineDocument, baselineSlice), baselineDocument, "baseline"
+);
+const candidateRows = indexRows(
+  entries(candidateDocument, candidateSlice), candidateDocument, "candidate"
+);
 
 const missingRows = [...baselineRows.keys()].filter((key) => !candidateRows.has(key)).sort();
 const addedRows = [...candidateRows.keys()].filter((key) => !baselineRows.has(key)).sort();
+
+if (isTintModule && tintMode === "structural") {
+  console.log(JSON.stringify(compareTintStructurally(
+    baselineRows, candidateRows, missingRows, addedRows,
+    baselineDocument, candidateDocument,
+    baselineResolved.module?.id, candidateResolved.module?.id
+  ), null, 2));
+  process.exit(0);
+}
 
 if (isPassAudit && recursiveMode === "semantic") {
   console.log(JSON.stringify(comparePassAuditsSemantically(
@@ -670,10 +817,10 @@ for (const key of [...baselineRows.keys()].filter((rowKey) => candidateRows.has(
   const baselineRow = baselineRows.get(key);
   const candidateRow = candidateRows.get(key);
   if (isPassAudit) {
-    if (baselineRow.snapshot?.topologySignature
-        !== candidateRow.snapshot?.topologySignature) topologyChangedRows += 1;
-    if (baselineRow.snapshot?.valueSignature
-        !== candidateRow.snapshot?.valueSignature) valueChangedRows += 1;
+    if (topologySignature(baselineRow)
+        !== topologySignature(candidateRow)) topologyChangedRows += 1;
+    if (valueSignature(baselineRow)
+        !== valueSignature(candidateRow)) valueChangedRows += 1;
   }
   const baselineValues = flatten(baselineRow);
   const candidateValues = flatten(candidateRow);
@@ -734,7 +881,7 @@ for (const key of [...baselineRows.keys()].filter((rowKey) => candidateRows.has(
 }
 
 const summary = {
-  fixture: fixtureName,
+  fixture: comparisonLabel,
   ...(isPassAudit ? { recursiveMode: "raw" } : {}),
   baseline: baselineDirectory,
   candidate: candidateDirectory,
@@ -761,16 +908,16 @@ const summary = {
       > volatileDifferences.length,
   ...(isPassAudit ? {
     baselineTopologySignatures: new Set(
-      [...baselineRows.values()].map((row) => row.snapshot?.topologySignature)
+      [...baselineRows.values()].map(topologySignature)
     ).size,
     candidateTopologySignatures: new Set(
-      [...candidateRows.values()].map((row) => row.snapshot?.topologySignature)
+      [...candidateRows.values()].map(topologySignature)
     ).size,
     baselineValueSignatures: new Set(
-      [...baselineRows.values()].map((row) => row.snapshot?.valueSignature)
+      [...baselineRows.values()].map(valueSignature)
     ).size,
     candidateValueSignatures: new Set(
-      [...candidateRows.values()].map((row) => row.snapshot?.valueSignature)
+      [...candidateRows.values()].map(valueSignature)
     ).size,
     topologyChangedRows,
     valueChangedRows,

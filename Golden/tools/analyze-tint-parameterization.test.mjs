@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
   analyzeTintParameterization,
 } from "./analyze-tint-parameterization.mjs";
+import { goldenDirectory, loadModuleDocument } from "./lib/golden.mjs";
 
 const LUMA = [0.2126, 0.7152, 0.0722];
 
@@ -138,17 +138,17 @@ function addAlphaVariant(document, alpha) {
   document.completedColorCount += 1;
 }
 
-test("macOS 27 Golden sweeps pass the complete parameterized matrix gate", () => {
+test("macOS 27 Golden sweeps pass the complete parameterized matrix gate", async () => {
   const fixtures = [
-    "tint-parameterization-sweep.json",
-    "tint-parameterization-focused-phase-2b.json",
-    "tint-parameterization-hue-phase-2c.json",
+    "tint.parameterization.sweep",
+    "tint.parameterization.focused-2b",
+    "tint.parameterization.hue-2c",
   ];
   let rowCount = 0;
   let maximumResidual = 0;
-  for (const name of fixtures) {
-    const document = JSON.parse(
-      readFileSync(new URL(`../macOS-27/${name}`, import.meta.url), "utf8")
+  for (const moduleID of fixtures) {
+    const { document } = await loadModuleDocument(
+      `${goldenDirectory}/macOS-27`, moduleID
     );
     const result = analyzeTintParameterization(document);
     assert.equal(result.parameterizationSupported, true);
