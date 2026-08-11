@@ -2,6 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -45,9 +46,22 @@ function option(name) {
   return index < 0 ? null : process.argv[index + 1];
 }
 function run(app, flag, destination) {
-  const result = spawnSync(app, [flag, destination], { stdio: "inherit" });
+  const handoff = `@temporary/${process.pid}-${path.basename(destination)}`;
+  const checkpoint = existsSync(destination) && statSync(destination).isFile()
+    ? readFileSync(destination) : undefined;
+  const args = [flag, handoff];
+  if (checkpoint) args.push("--checkpoint-stdin");
+  const result = spawnSync(app, args, { encoding: "utf8", input: checkpoint });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${flag} exited ${result.status}`);
+  const artifact = /^GLASS_LAB_ARTIFACT_PATH=(.+)$/m.exec(result.stderr ?? "")?.[1];
+  if (!artifact) throw new Error(`${flag} did not report an artifact path`);
+  rmSync(destination, { recursive: true, force: true });
+  mkdirSync(path.dirname(destination), { recursive: true });
+  cpSync(artifact, destination, { recursive: true, force: true });
+  rmSync(artifact, { recursive: true, force: true });
 }
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 function platformFrom(operatingSystem) {

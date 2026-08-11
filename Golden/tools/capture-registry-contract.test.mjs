@@ -33,6 +33,9 @@ test("Full validates complete staging integrity before promotion", () => {
   assert.match(runnerSource, /await validateStagingIntegrity\(staging\);\n  const previous/);
   assert.match(runnerSource, /sha256 mismatch/);
   assert.match(runnerSource, /on disk but unregistered/);
+  assert.match(runnerSource, /GLASS_LAB_ARTIFACT_PATH/);
+  assert.match(runnerSource, /--checkpoint-stdin/);
+  assert.match(source, /driver: "--capture-golden"/);
 });
 
 test("Drift Scan is explicitly noncanonical and nonpromotable", () => {

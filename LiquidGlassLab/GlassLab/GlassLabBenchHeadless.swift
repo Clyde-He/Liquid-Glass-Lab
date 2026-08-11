@@ -192,9 +192,30 @@ extension GlassLabView {
             ))
             exit(0)
         }
-        let destination = URL(
-            fileURLWithPath: arguments[arguments.index(after: flagIndex)]
-        )
+        let requestedDestination = arguments[arguments.index(after: flagIndex)]
+        let destination: URL
+        if requestedDestination.hasPrefix("@temporary/") {
+            destination = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent(
+                    String(requestedDestination.dropFirst("@temporary/".count))
+                )
+            try? FileManager.default.removeItem(at: destination)
+            if arguments.contains("--checkpoint-stdin") {
+                let checkpoint = FileHandle.standardInput.readDataToEndOfFile()
+                if !checkpoint.isEmpty {
+                    do {
+                        try checkpoint.write(to: destination, options: .atomic)
+                    } catch {
+                        FileHandle.standardError.write(Data(
+                            "Headless checkpoint handoff failed: \(error)\n".utf8
+                        ))
+                        exit(1)
+                    }
+                }
+            }
+        } else {
+            destination = URL(fileURLWithPath: requestedDestination)
+        }
         NSApplication.shared.activate(ignoringOtherApps: true)
         // Let the scene, the test window, and the first Recipe resolution
         // settle before the first participation request.
@@ -227,7 +248,8 @@ extension GlassLabView {
                 }
                 FileHandle.standardError.write(Data(
                     "Captured \(document.entries.count) Semantic Usage rows\n"
-                        .appending("Wrote \(written.path)\n").utf8
+                        .appending("Wrote \(written.path)\n")
+                        .appending("GLASS_LAB_ARTIFACT_PATH=\(written.path)\n").utf8
                 ))
                 state.testWindow.tearDown()
                 exit(0)
@@ -256,6 +278,7 @@ extension GlassLabView {
                             + "\n"
                             + document.failureReport
                             + "\nWrote \(written.path)\n"
+                            + "GLASS_LAB_ARTIFACT_PATH=\(written.path)\n"
                     ).utf8
                 ))
                 state.testWindow.tearDown()
@@ -280,6 +303,7 @@ extension GlassLabView {
                             + "\n"
                             + document.failureReport
                             + "\nWrote \(written.path)\n"
+                            + "GLASS_LAB_ARTIFACT_PATH=\(written.path)\n"
                     ).utf8
                 ))
                 state.testWindow.tearDown()
@@ -310,7 +334,8 @@ extension GlassLabView {
                     "Complete: \(document.complete ? "yes" : "no")",
                 ].joined(separator: "\n")
                 FileHandle.standardError.write(Data(
-                    (report + "\nWrote \(destination.path)\n").utf8
+                    (report + "\nWrote \(destination.path)\n"
+                        + "GLASS_LAB_ARTIFACT_PATH=\(destination.path)\n").utf8
                 ))
                 state.testWindow.tearDown()
                 exit(document.complete ? 0 : 2)
@@ -322,7 +347,8 @@ extension GlassLabView {
                 // reports rather than handing back one payload to write.
                 let meta = try await captureGoldenArchive(into: destination)
                 FileHandle.standardError.write(Data(
-                    (Self.goldenReport(meta) + "\nWrote \(destination.path)\n").utf8
+                    (Self.goldenReport(meta) + "\nWrote \(destination.path)\n"
+                        + "GLASS_LAB_ARTIFACT_PATH=\(destination.path)\n").utf8
                 ))
                 state.testWindow.tearDown()
                 exit(0)
@@ -379,7 +405,8 @@ extension GlassLabView {
                 try payload.write(to: written, options: .atomic)
             }
             FileHandle.standardError.write(Data(
-                (report + "\nWrote \(written.path)\n").utf8
+                (report + "\nWrote \(written.path)\n"
+                    + "GLASS_LAB_ARTIFACT_PATH=\(written.path)\n").utf8
             ))
         } catch {
             let message = (error as? LocalizedError)?.errorDescription
