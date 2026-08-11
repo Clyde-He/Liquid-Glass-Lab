@@ -196,6 +196,7 @@ final class GlassLabHUDPanelController {
         panel.contentView = container
 
         let glassView = AdjustableGlassEffectView()
+        glassView.useExternallyManagedMaterialStrength()
         glassView.cornerRadius = 24
         container.addSubview(glassView)
 
