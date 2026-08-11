@@ -149,6 +149,13 @@ async function promote(staging, accepted) {
   const previousRequired = previous.profiles?.full?.required ?? [];
   const stagedPath = path.join(staging, "manifest.json");
   const staged = JSON.parse(await readFile(stagedPath));
+  const samePlatform = previous.platform?.product === staged.platform?.product
+    && Number.parseInt(previous.platform?.version, 10)
+      === Number.parseInt(staged.platform?.version, 10)
+    && previous.platform?.architecture === staged.platform?.architecture;
+  if (!samePlatform) {
+    throw new Error("promotion target product, OS major, or architecture does not match staging");
+  }
   if (JSON.stringify(previousRequired) !== JSON.stringify(staged.profiles.full.required)) {
     throw new Error(
       "initial post-refactor promotion gate failed: accepted Full coverage differs from the registered profile"
@@ -157,23 +164,37 @@ async function promote(staging, accepted) {
   const comparisons = [];
   let equivalent = true;
   for (const id of staged.profiles.full.required.filter((id) => id !== "core.dynamic")) {
-    const args = [
-      path.join(toolDirectory, "compare.mjs"), accepted, staging,
-      `--module=${id}`, "--limit=20",
-    ];
-    if (id.startsWith("tint.")) args.push("--tint-mode=values");
-    const result = spawnSync(process.execPath, args, { encoding: "utf8" });
-    if (result.status !== 0) throw new Error(`equivalence comparison failed for ${id}: ${result.stderr}`);
-    const report = JSON.parse(result.stdout);
-    comparisons.push({ id, summary: report.summary });
-    const summary = report.summary;
-    if (["missingRows", "addedRows", "missingFields", "addedFields", "changedValues"]
-      .some((field) => (summary[field] ?? 0) !== 0)) equivalent = false;
+    const slices = id === "core.static-tree" ? ["core", "repeat", "appearance"] : [null];
+    for (const slice of slices) {
+      const args = [
+        path.join(toolDirectory, "compare.mjs"), accepted, staging,
+        `--module=${id}`, "--limit=20",
+      ];
+      if (id.startsWith("tint.")) args.push("--tint-mode=values");
+      if (slice) args.push(`--baseline-slice=${slice}`, `--candidate-slice=${slice}`);
+      const result = spawnSync(process.execPath, args, { encoding: "utf8" });
+      if (result.status !== 0) throw new Error(`equivalence comparison failed for ${id}: ${result.stderr}`);
+      const report = JSON.parse(result.stdout);
+      comparisons.push({ id, slice, summary: report.summary });
+      const summary = report.summary;
+      if ([
+        "missingRows", "addedRows", "missingPasses", "addedPasses",
+        "missingFields", "addedFields", "changedValues",
+        "topologyChangedRows", "valueChangedRows",
+      ].some((field) => (summary[field] ?? 0) !== 0)) equivalent = false;
+    }
   }
-  const oldDynamic = previous.modules.find(({ id }) => id === "core.dynamic")?.statistics?.rows;
-  const newDynamic = staged.modules.find(({ id }) => id === "core.dynamic")?.statistics?.rows;
-  if (oldDynamic !== newDynamic) equivalent = false;
-  comparisons.push({ id: "core.dynamic", baselineRows: oldDynamic, candidateRows: newDynamic });
+  const oldDynamicFile = previous.modules.find(({ id }) => id === "core.dynamic")?.file;
+  const newDynamicFile = staged.modules.find(({ id }) => id === "core.dynamic")?.file;
+  const oldDynamic = JSON.parse(await readFile(path.join(accepted, oldDynamicFile)));
+  const newDynamic = JSON.parse(await readFile(path.join(staging, newDynamicFile)));
+  const dynamicEquivalent = JSON.stringify(oldDynamic.runs) === JSON.stringify(newDynamic.runs);
+  if (!dynamicEquivalent) equivalent = false;
+  comparisons.push({
+    id: "core.dynamic", equivalent: dynamicEquivalent,
+    baselineRuns: oldDynamic.runs?.length ?? null,
+    candidateRuns: newDynamic.runs?.length ?? null,
+  });
   await writeFile(`${staging}.equivalence.json`, `${JSON.stringify({ equivalent, comparisons }, null, 2)}\n`);
   if (!equivalent && !process.argv.includes("--accept-drift")) {
     throw new Error(`Full value equivalence failed; inspect ${staging}.equivalence.json and rerun with --accept-drift after approval`);
