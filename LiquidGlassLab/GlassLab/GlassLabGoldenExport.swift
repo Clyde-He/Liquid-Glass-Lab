@@ -20,6 +20,8 @@ enum GlassLabGoldenExportError: LocalizedError {
     case contextRejected(slice: String, detail: String)
     case emptySection(String)
     case duplicateRow(section: String, cell: String)
+    case incompleteProfile(missing: [String])
+    case promotionFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -30,6 +32,10 @@ enum GlassLabGoldenExportError: LocalizedError {
         case let .duplicateRow(section, cell):
             "Section \(section) produced an unintended duplicate at \(cell). "
                 + "This section does not permit repeated cells."
+        case let .incompleteProfile(missing):
+            "Golden staging is incomplete; missing \(missing.joined(separator: ", "))."
+        case let .promotionFailed(detail):
+            "Golden staging could not be promoted atomically: \(detail)"
         }
     }
 }
@@ -77,7 +83,7 @@ extension GlassLabView {
     /// window is created — which is the cheapest possible time to notice that a
     /// slice collides with the core product or sweeps nothing.
     static func goldenPlanReport() -> String {
-        var lines = ["== Golden capture plan =="]
+        var lines = ["== Golden core capture plan =="]
 
         func summarize(
             _ title: String,
@@ -137,6 +143,34 @@ extension GlassLabView {
             )
         }
         return lines.joined(separator: "\n")
+    }
+
+    static func goldenRegistryReport() -> String {
+        func report(_ profile: GlassLabGoldenCaptureRegistry.Profile) -> [String] {
+            var lines = [
+                "== \(profile.id) ==",
+                "Canonical: \(profile.canonical ? "yes" : "no")",
+                "Promotable: \(profile.promotable ? "yes" : "no")",
+            ]
+            for module in profile.modules {
+                lines.append(
+                    "  \(module.availability.rawValue)  \(module.id)"
+                    + "  driver=\(module.driver ?? "missing")"
+                    + "  resume=\(module.resumeScope)"
+                )
+            }
+            let problems = profile.validationProblems()
+            lines.append(
+                problems.isEmpty ? "Registry: valid" : "Registry: \(problems.joined(separator: "; "))"
+            )
+            return lines
+        }
+        return (
+            report(GlassLabGoldenCaptureRegistry.full)
+                + [""]
+                + report(GlassLabGoldenCaptureRegistry.driftScan)
+        )
+            .joined(separator: "\n")
     }
 
     static func goldenReport(_ meta: GoldenMeta) -> String {
@@ -538,10 +572,62 @@ extension GlassLabView {
         tree: GoldenStaticTreeDocument,
         dynamic: GoldenDynamicDocument
     ) throws -> GoldenMeta {
-        try FileManager.default.createDirectory(
-            at: directory,
+        let fileManager = FileManager.default
+        let parent = directory.deletingLastPathComponent()
+        try fileManager.createDirectory(
+            at: parent,
             withIntermediateDirectories: true
         )
+        let staging = parent.appendingPathComponent(
+            ".\(directory.lastPathComponent).staging-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(
+            at: staging,
+            withIntermediateDirectories: false
+        )
+        defer { try? fileManager.removeItem(at: staging) }
+
+        let meta = try writeGoldenArchivePayload(
+            into: staging,
+            capturedAt: capturedAt,
+            operatingSystem: operatingSystem,
+            scalar: scalar,
+            tree: tree,
+            dynamic: dynamic
+        )
+        let required = Set(["static-scalar", "static-tree", "dynamic"])
+        let missing = required.subtracting(meta.sections.keys).sorted()
+        guard missing.isEmpty else {
+            throw GlassLabGoldenExportError.incompleteProfile(missing: missing)
+        }
+        do {
+            if fileManager.fileExists(atPath: directory.path) {
+                _ = try fileManager.replaceItemAt(
+                    directory,
+                    withItemAt: staging,
+                    backupItemName: nil,
+                    options: []
+                )
+            } else {
+                try fileManager.moveItem(at: staging, to: directory)
+            }
+        } catch {
+            throw GlassLabGoldenExportError.promotionFailed(
+                error.localizedDescription
+            )
+        }
+        return meta
+    }
+
+    private static func writeGoldenArchivePayload(
+        into directory: URL,
+        capturedAt: String,
+        operatingSystem: String,
+        scalar: GoldenStaticScalarDocument,
+        tree: GoldenStaticTreeDocument,
+        dynamic: GoldenDynamicDocument
+    ) throws -> GoldenMeta {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
 

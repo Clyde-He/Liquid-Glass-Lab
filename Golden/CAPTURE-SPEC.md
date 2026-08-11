@@ -1,5 +1,9 @@
 # Capture specification
 
+The registered `full` profile is the only canonical promotable capture and requires Core, Tint, and Semantic modules. `drift-scan` is a fast noncanonical diagnostic profile and must never be promoted. Core module output is staged and atomically replaces `unified/`; Tint retains per-color checkpoints, while Core remains a single-session driver.
+
+Run a profile through `node Golden/tools/capture-profile.mjs <full|drift-scan> --app /path/to/LiquidGlassLab --output /path/to/result`. Full writes to `<output>.full-staging`, validates the exact required module set and a single capture build, and stops without touching the accepted directory. Add `--accepted /path/to/Golden/macOS-N --promote` only after reviewing the staged result; promotion swaps the complete OS directory and rolls back if the swap fails. Drift Scan writes a separate Style Atlas + Tint Sync diagnostic directory with `canonical: false` and `promotable: false`.
+
 What the exporter must produce, derived from the claims that have to be re-derivable — not from what the archive happens to contain today. If every fixture were deleted, this document is enough to rebuild the archive.
 
 The unified archive is **three sections per OS, plus a meta file. Four files.** Nothing else belongs in `unified/`.
