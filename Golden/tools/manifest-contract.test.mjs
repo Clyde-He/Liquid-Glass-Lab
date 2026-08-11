@@ -10,12 +10,25 @@ import {
 } from "./lib/manifest.mjs";
 
 test("committed manifests use protocol v2 and expose exact Full profiles", async () => {
-  for (const os of ["macOS-26", "macOS-27"]) {
+  const expected = {
+    "macOS-26": {
+      required: ["core.static-scalar", "core.static-tree", "core.dynamic", "tint.parameterization.sweep", "tint.parameterization.focused-2b", "tint.parameterization.hue-2c", "tint.sync-resolution", "tint.wide-gamut"],
+      optional: ["semantic.usage-trees"], unsupported: [], carriedForward: [],
+    },
+    "macOS-27": {
+      required: ["core.static-scalar", "core.static-tree", "core.dynamic", "tint.parameterization.sweep", "tint.parameterization.focused-2b", "tint.parameterization.hue-2c", "tint.sync-resolution", "tint.wide-gamut", "semantic.usage-trees"],
+      optional: [], unsupported: [], carriedForward: ["external.window-context"],
+    },
+  };
+  for (const os of Object.keys(expected)) {
     const manifest = await readManifest(os);
     assert.equal(manifest.sourceProtocolVersion, MANIFEST_PROTOCOL_VERSION);
     assert.deepEqual(validateManifestV2(manifest), []);
     const full = profileModules(manifest);
-    assert.ok(full.required.length >= 7);
+    assert.deepEqual(manifest.profiles.full.required, expected[os].required);
+    assert.deepEqual(manifest.profiles.full.optional, expected[os].optional);
+    assert.deepEqual(manifest.profiles.full.unsupported, expected[os].unsupported);
+    assert.deepEqual(manifest.profiles.full.carriedForward, expected[os].carriedForward);
     assert.ok(full.required.every(Boolean));
     assert.ok(full.carriedForward.every(Boolean));
   }
@@ -44,6 +57,13 @@ test("v2 validation rejects profile references to unknown modules", () => {
     } },
   });
   assert.ok(problems.some((problem) => problem.includes("unknown module missing")));
+  const optionalTypo = validateManifestV2({
+    protocolVersion: 2, modules: [],
+    profiles: { full: {
+      required: [], optional: ["semantic.usage-treez"], unsupported: [], carriedForward: [],
+    } },
+  });
+  assert.ok(optionalTypo.some((problem) => problem.includes("unknown module semantic.usage-treez")));
 });
 
 test("v2 validation requires the documented module contract", () => {

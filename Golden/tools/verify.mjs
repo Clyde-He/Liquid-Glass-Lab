@@ -60,6 +60,11 @@ async function checkIntegrity(osDirectory) {
     } else if (sha256(bytes) !== entry.sha256) {
       problems.push(`${entry.file}: sha256 mismatch`);
     }
+    const authoritativeModule = manifest.modules.find((module) => module.file === entry.file);
+    if (authoritativeModule?.integrity?.bytes !== undefined
+        && bytes.length !== authoritativeModule.integrity.bytes) {
+      problems.push(`${entry.file}: byte count disagrees with manifest`);
+    }
     let document;
     try {
       document = JSON.parse(bytes.toString("utf8"));
@@ -129,6 +134,9 @@ async function checkIntegrity(osDirectory) {
       if (metaEntry?.sha256 && metaEntry.sha256 !== entry.sha256) {
         problems.push(`${module.file}: payload meta checksum disagrees with manifest`);
       }
+      if (metaEntry?.bytes !== undefined && metaEntry.bytes !== entry.bytes) {
+        problems.push(`${module.file}: payload meta byte count disagrees with manifest`);
+      }
       if (metaEntry?.rows !== undefined && metaEntry.rows !== module.statistics?.rows) {
         problems.push(`${module.file}: payload meta row count disagrees with manifest`);
       }
@@ -140,6 +148,9 @@ async function checkIntegrity(osDirectory) {
         const bytes = await readFile(path.join(directory, module.file));
         if (sha256(bytes) !== entry.sha256) {
           problems.push(`${module.file}: sha256 mismatch — recapture or rerun unify.mjs`);
+        }
+        if (bytes.length !== entry.bytes) {
+          problems.push(`${module.file}: byte count disagrees with manifest`);
         }
         // Checksums prove the file matches its manifest entry, but they cannot
         // detect an archive that is simply

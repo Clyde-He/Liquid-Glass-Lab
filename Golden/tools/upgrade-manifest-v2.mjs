@@ -59,7 +59,7 @@ for (const osDirectory of await osDirectories()) {
       payloadSchemaVersion: fixture.schemaVersion ?? fixture.formatVersion ?? 1,
       planVersion: 1,
       platform: fixture.platform ?? manifest.platform,
-      capturedAt: fixture.capturedAt ?? payloadHeader.capturedAt ?? payloadHeader.generatedAt ?? null,
+      capturedAt: payloadHeader.capturedAt ?? payloadHeader.generatedAt ?? fixture.capturedAt ?? null,
       capture: {
         environment: fixture.environment ?? payloadHeader.environment ?? null,
         sessionID: payloadHeader.sessionID ?? null,

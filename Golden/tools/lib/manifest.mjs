@@ -23,6 +23,11 @@ const LEGACY_MODULE_IDS = {
   "recursive-pass-audit-display-context-a": "control.recursive-display-context",
 };
 
+export const KNOWN_MODULE_IDS = new Set([
+  ...Object.values(LEGACY_MODULE_IDS),
+  "core.static-scalar", "core.static-tree", "core.dynamic",
+]);
+
 export const legacyModuleID = (fixtureID) =>
   LEGACY_MODULE_IDS[fixtureID] ?? `legacy.${fixtureID}`;
 
@@ -72,7 +77,7 @@ export function validateManifestV2(manifest) {
     for (const field of ["required", "optional", "unsupported", "carriedForward"]) {
       if (!Array.isArray(profile[field])) problems.push(`${profileName}.${field} must be an array`);
       for (const id of profile[field] ?? []) {
-        if (!["optional", "unsupported"].includes(field) && !ids.has(id)) {
+        if (!ids.has(id) && !(["optional", "unsupported"].includes(field) && KNOWN_MODULE_IDS.has(id))) {
           problems.push(`${profileName}.${field}: unknown module ${id}`);
         }
       }
