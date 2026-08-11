@@ -1399,10 +1399,27 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     /// display environment changes. Idempotent for an already-ready,
     /// unchanged controller.
     public func prepareIfNeeded() {
+        guard !usesExternallyManagedMaterialStrength else { return }
         if effectController == nil {
             rebuildEffectController()
         }
         effectController?.ensureReady()
+    }
+
+    /// Gives an internal Lab harness sole ownership of `materialStrength`.
+    ///
+    /// The Style Atlas verifier installs the atlas it just captured directly;
+    /// leaving the product controller attached would let its bundled catalog
+    /// replace that reference atlas on the next configuration change. This is
+    /// intentionally internal so product consumers retain the single managed
+    /// controller path.
+    func useExternallyManagedMaterialStrength() {
+        guard !usesExternallyManagedMaterialStrength else { return }
+        usesExternallyManagedMaterialStrength = true
+        effectController?.invalidate()
+        effectController = nil
+        status = .idle
+        updateRequiredWindowInset()
     }
 
     /// Applies several product properties as one controller transaction. The
@@ -1445,6 +1462,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         GlassMaterialRenderExperiment.currentProductDefault
             .windowInsetMarginWidthOverride.map { CGFloat($0) }
     private var effectController: GlassEffectController?
+    private var usesExternallyManagedMaterialStrength = false
     private var configurationUpdateDepth = 0
     private var hasDeferredConfigurationUpdate = false
     private var hasDeferredStrengthRefresh = false
@@ -1557,6 +1575,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     }
 
     private func rebuildEffectController() {
+        guard !usesExternallyManagedMaterialStrength else { return }
         effectControllerGeneration += 1
         effectController?.invalidate()
         effectController = nil
@@ -1589,6 +1608,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     /// healthy controller is never rebuilt or invalidated by a host change:
     /// the rendered material belongs to this view, not to the host.
     private func updateReferenceHost() {
+        guard !usesExternallyManagedMaterialStrength else { return }
         guard let controller = effectController else {
             rebuildEffectController()
             return
