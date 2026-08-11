@@ -50,6 +50,8 @@ Nothing in the archive is transcoded today. Unified sections are committed so a 
 
 Every OS directory contains a `manifest.json` describing the default OS build and capture date, capture conditions, fixture schemas, entry counts, and SHA-256 checksums. A new capture should replace a Golden only after its focus/activation conditions and Cartesian-product coverage have been accepted.
 
+The root manifest uses module protocol v2. Its `modules` array is the registration authority for standalone and unified payloads, and the `full` profile names the exact required, optional, unsupported, and carried-forward module IDs for that OS. The legacy `fixtures` array remains temporarily for v1 consumer compatibility; the shared resolver validates v2 and synthesizes the legacy view from authoritative module identity, platform, role, and integrity fields. `unified/meta.json` remains payload metadata, not a second registration authority. The complete field contract is documented in [`MANIFEST-PROTOCOL.md`](MANIFEST-PROTOCOL.md).
+
 Two manifest fields carry weight:
 
 - **`platform`** may be set per fixture, overriding the directory default. This is not cosmetic — `macOS-27/` genuinely holds two builds, with the three recursive-pass-audit fixtures captured on `26A5388g` and the rest on `26A5378n`. `verify.mjs` fails when a fixture's embedded OS string disagrees with the entry filing it, so this cannot drift silently again.

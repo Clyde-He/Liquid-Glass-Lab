@@ -15,6 +15,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CELL_FIELDS, axisValues, sweptAxes } from "./cell.mjs";
+import { normalizeManifest } from "./manifest.mjs";
 
 // .../Golden/tools/lib/golden.mjs -> .../Golden
 export const goldenDirectory = path.dirname(
@@ -37,7 +38,7 @@ export async function readManifest(osDirectory) {
     path.join(goldenDirectory, osDirectory, "manifest.json"),
     "utf8"
   );
-  return JSON.parse(raw);
+  return normalizeManifest(JSON.parse(raw), { osDirectory, goldenDirectory });
 }
 
 /**

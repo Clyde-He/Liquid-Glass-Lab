@@ -443,5 +443,555 @@
         "Retained as the evidence that those three values are display/runtime sensitive."
       ]
     }
-  ]
+  ],
+  "protocolVersion": 2,
+  "modules": [
+    {
+      "id": "legacy.recipe-matrix",
+      "file": "recipe-matrix.json",
+      "payloadSchemaVersion": 1,
+      "planVersion": 1,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5378n",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-20",
+      "capture": {
+        "environment": {
+          "hostType": "Panel",
+          "windowMargin": 40,
+          "scrim": false,
+          "reducedTintOpacity": false,
+          "adaptiveAppearance": 2,
+          "tint": null,
+          "overridesEnabled": false
+        },
+        "sessionID": null
+      },
+      "provenance": {
+        "kind": "direct-capture",
+        "fixtureID": "recipe-matrix"
+      },
+      "coverageClaims": [
+        "legacy-recipe-product",
+        "representative-height-response"
+      ],
+      "integrity": {
+        "sha256": "3ba86700d84786f430fee9928f8d8ddf47d03f4ed27226c344fb965b3b0be35c",
+        "bytes": 7393522
+      },
+      "role": "canonical",
+      "profileStatus": "excluded"
+    },
+    {
+      "id": "legacy.recursive-pass-audit",
+      "file": "recursive-pass-audit.json",
+      "payloadSchemaVersion": 1,
+      "planVersion": 1,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-21T17:08:08Z",
+      "capture": {
+        "environment": {
+          "hostType": "Panel",
+          "windowMargin": 40,
+          "width": 480,
+          "height": 200,
+          "cornerRadius": 16,
+          "scrim": false,
+          "reducedTintOpacity": false,
+          "adaptiveAppearance": 2,
+          "tint": null,
+          "overridesEnabled": false
+        },
+        "sessionID": null
+      },
+      "provenance": {
+        "kind": "direct-capture",
+        "fixtureID": "recursive-pass-audit"
+      },
+      "coverageClaims": [
+        "legacy-recursive-topology",
+        "legacy-pass-values"
+      ],
+      "integrity": {
+        "sha256": "9d08d935c7e8faa8357be96716641ddb443a30cdf1732f43ed0790773e95f40b",
+        "bytes": 15194953
+      },
+      "role": "canonical",
+      "profileStatus": "excluded"
+    },
+    {
+      "id": "semantic.usage-trees",
+      "file": "semantic-usage-trees.json",
+      "payloadSchemaVersion": 2,
+      "planVersion": 1,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5378n",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-20",
+      "capture": {
+        "environment": {
+          "hostType": "Panel",
+          "windowMargin": 40,
+          "width": 480,
+          "height": 200,
+          "cornerRadius": 16
+        },
+        "sessionID": null
+      },
+      "provenance": {
+        "kind": "direct-capture",
+        "fixtureID": "semantic-usage-trees"
+      },
+      "coverageClaims": [
+        "semantic-role-topology"
+      ],
+      "integrity": {
+        "sha256": "b97180c2c9efd32c5105e0dc56d578cf99a5ecd5df9ca379f45a79f1b52eeedf",
+        "bytes": 652312
+      },
+      "role": "canonical",
+      "profileStatus": "required"
+    },
+    {
+      "id": "tint.parameterization.sweep",
+      "file": "tint-parameterization-sweep.json",
+      "payloadSchemaVersion": 1,
+      "planVersion": 1,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-30T04:37:49Z",
+      "capture": {
+        "environment": {
+          "displaySignature": "Studio Display XDR @2.0x",
+          "atlasSchemaVersion": 2
+        },
+        "sessionID": null
+      },
+      "provenance": {
+        "kind": "direct-capture",
+        "fixtureID": "tint-parameterization-sweep"
+      },
+      "coverageClaims": [
+        "tint-transform-family",
+        "tint-matrix-fit"
+      ],
+      "integrity": {
+        "sha256": "16ff4af8dd05a7a975462e2d4806d817201adfe915e23ea408960895534a3120",
+        "bytes": 1073516
+      },
+      "role": "canonical",
+      "profileStatus": "required"
+    },
+    {
+      "id": "tint.parameterization.focused-2b",
+      "file": "tint-parameterization-focused-phase-2b.json",
+      "payloadSchemaVersion": 1,
+      "planVersion": 1,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-30T04:59:11Z",
+      "capture": {
+        "environment": {
+          "displaySignature": "Studio Display XDR @2.0x",
+          "atlasSchemaVersion": 2
+        },
+        "sessionID": null
+      },
+      "provenance": {
+        "kind": "direct-capture",
+        "fixtureID": "tint-parameterization-focused-phase-2b"
+      },
+      "coverageClaims": [
+        "tint-rgb-holdouts"
+      ],
+      "integrity": {
+        "sha256": "37904f0b6911450c8c1876abaf00cf81a9b874c3c5bfbd03a7a2573e66f4bb92",
+        "bytes": 1008859
+      },
+      "role": "canonical",
+      "profileStatus": "required"
+    },
+    {
+      "id": "tint.parameterization.hue-2c",
+      "file": "tint-parameterization-hue-phase-2c.json",
+      "payloadSchemaVersion": 1,
+      "planVersion": 1,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-30T05:33:33Z",
+      "capture": {
+        "environment": {
+          "displaySignature": "Studio Display XDR @2.0x",
+          "atlasSchemaVersion": 2
+        },
+        "sessionID": null
+      },
+      "provenance": {
+        "kind": "direct-capture",
+        "fixtureID": "tint-parameterization-hue-phase-2c"
+      },
+      "coverageClaims": [
+        "tint-hue-boundary"
+      ],
+      "integrity": {
+        "sha256": "880668e22e1450cc3368a1cac4f169295488aae40b76303fb76ab9dba4fc1d15",
+        "bytes": 1038962
+      },
+      "role": "canonical",
+      "profileStatus": "required"
+    },
+    {
+      "id": "tint.sync-resolution",
+      "file": "tint-sync-resolution.json",
+      "payloadSchemaVersion": 1,
+      "planVersion": 1,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-08-02T05:29:30Z",
+      "capture": {
+        "environment": {
+          "displaySignature": "Studio Display XDR @2.0x",
+          "atlasSchemaVersion": 2
+        },
+        "sessionID": null
+      },
+      "provenance": {
+        "kind": "direct-capture",
+        "fixtureID": "tint-sync-resolution"
+      },
+      "coverageClaims": [
+        "flush-settled-tint-equivalence"
+      ],
+      "integrity": {
+        "sha256": "64b98f00afc9791b8357a9cb64bf661afd141758b7c535aefcc6fc98025da7d6",
+        "bytes": 162946
+      },
+      "role": "canonical",
+      "profileStatus": "required"
+    },
+    {
+      "id": "tint.wide-gamut",
+      "file": "tint-wide-gamut-model.json",
+      "payloadSchemaVersion": 1,
+      "planVersion": 1,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-08-02T05:25:38Z",
+      "capture": {
+        "environment": {
+          "displaySignature": "Studio Display XDR @2.0x",
+          "atlasSchemaVersion": 2
+        },
+        "sessionID": null
+      },
+      "provenance": {
+        "kind": "direct-capture",
+        "fixtureID": "tint-wide-gamut-model"
+      },
+      "coverageClaims": [
+        "display-p3-tint-model"
+      ],
+      "integrity": {
+        "sha256": "de226c1015b76157c8328ac4c46924ab5a5b0a1eda7f17122d587d5cd9a528ca",
+        "bytes": 520256
+      },
+      "role": "canonical",
+      "profileStatus": "required"
+    },
+    {
+      "id": "research.formula-analysis",
+      "file": "formula-analysis.json",
+      "payloadSchemaVersion": 1,
+      "planVersion": 1,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5378n",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-20",
+      "capture": {
+        "environment": null,
+        "sessionID": null
+      },
+      "provenance": {
+        "kind": "direct-capture",
+        "fixtureID": "formula-analysis"
+      },
+      "coverageClaims": [
+        "size-formula-envelopes"
+      ],
+      "integrity": {
+        "sha256": "7695ddc86cc277f50b2df370135bbfc0f4b868cd184f32de1db818bf97d6af26",
+        "bytes": 514776
+      },
+      "role": "derived",
+      "profileStatus": "excluded"
+    },
+    {
+      "id": "external.window-context",
+      "file": "window-context-matrix.json",
+      "payloadSchemaVersion": 1,
+      "planVersion": 1,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5378n",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-20",
+      "capture": {
+        "environment": null,
+        "sessionID": null
+      },
+      "provenance": {
+        "kind": "direct-capture",
+        "fixtureID": "window-context-matrix"
+      },
+      "coverageClaims": [
+        "window-context-invariance"
+      ],
+      "integrity": {
+        "sha256": "aded9cbf7d3326be401c6f0d10dedd7eda8f3ded0a48ee2daad3dea11f0ff0f4",
+        "bytes": 75648
+      },
+      "role": "canonical",
+      "profileStatus": "carried-forward"
+    },
+    {
+      "id": "control.recursive-stability",
+      "file": "recursive-pass-audit-stability-repeat.json",
+      "payloadSchemaVersion": 1,
+      "planVersion": 1,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-20",
+      "capture": {
+        "environment": null,
+        "sessionID": null
+      },
+      "provenance": {
+        "kind": "direct-capture",
+        "fixtureID": "recursive-pass-audit-stability-repeat"
+      },
+      "coverageClaims": [
+        "same-session-recursive-stability"
+      ],
+      "integrity": {
+        "sha256": "70d07ea0c3ac565f42457a52fe5ca0b3df5fe74ffa3d6e26e3facd594c00c5a3",
+        "bytes": 15194953
+      },
+      "role": "control",
+      "profileStatus": "excluded"
+    },
+    {
+      "id": "control.recursive-display-context",
+      "file": "recursive-pass-audit-display-context-a.json",
+      "payloadSchemaVersion": 1,
+      "planVersion": 1,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-20",
+      "capture": {
+        "environment": null,
+        "sessionID": null
+      },
+      "provenance": {
+        "kind": "direct-capture",
+        "fixtureID": "recursive-pass-audit-display-context-a"
+      },
+      "coverageClaims": [
+        "display-context-contrast"
+      ],
+      "integrity": {
+        "sha256": "881d1c730d99e962e2995b26d994f596600455c1392151ce1dd52a8a00754362",
+        "bytes": 15193717
+      },
+      "role": "control",
+      "profileStatus": "excluded"
+    },
+    {
+      "id": "core.dynamic",
+      "file": "unified/dynamic.json",
+      "payloadSchemaVersion": 1,
+      "planVersion": 1,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-28T09:50:28Z",
+      "capture": {
+        "environment": null,
+        "sessionID": null
+      },
+      "provenance": {
+        "kind": "direct-capture",
+        "payloadMetadata": "unified/meta.json"
+      },
+      "coverageClaims": [
+        "transition-curve",
+        "dynamic-axis-response",
+        "settled-endpoints"
+      ],
+      "integrity": {
+        "sha256": "5bd8e548dbe11fd8dd10a4285125bbf1c9f873b2db21c921fc313f3609b1f471",
+        "bytes": 5443033
+      },
+      "statistics": {
+        "rows": 104,
+        "repeatedCells": 4,
+        "slices": {
+          "backdrop": 4,
+          "core": 96,
+          "repeat": 4
+        }
+      },
+      "role": "canonical",
+      "profileStatus": "required"
+    },
+    {
+      "id": "core.static-scalar",
+      "file": "unified/static-scalar.json",
+      "payloadSchemaVersion": 1,
+      "planVersion": 1,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-28T09:50:28Z",
+      "capture": {
+        "environment": null,
+        "sessionID": null
+      },
+      "provenance": {
+        "kind": "direct-capture",
+        "payloadMetadata": "unified/meta.json"
+      },
+      "coverageClaims": [
+        "recipe-values",
+        "static-axis-response"
+      ],
+      "integrity": {
+        "sha256": "b21fe6c5f75f356efed1c61f51ffb33f23e07da8e24f226202c7fa711722cbe5",
+        "bytes": 2200448
+      },
+      "statistics": {
+        "rows": 744,
+        "repeatedCells": 0,
+        "slices": {
+          "core": 672,
+          "cornerRadius": 12,
+          "key": 4,
+          "size": 48,
+          "transposed": 8
+        }
+      },
+      "role": "canonical",
+      "profileStatus": "required"
+    },
+    {
+      "id": "core.static-tree",
+      "file": "unified/static-tree.json",
+      "payloadSchemaVersion": 1,
+      "planVersion": 1,
+      "platform": {
+        "product": "macOS",
+        "version": "27.0",
+        "build": "26A5388g",
+        "architecture": "arm64"
+      },
+      "capturedAt": "2026-07-28T09:50:28Z",
+      "capture": {
+        "environment": null,
+        "sessionID": null
+      },
+      "provenance": {
+        "kind": "direct-capture",
+        "payloadMetadata": "unified/meta.json"
+      },
+      "coverageClaims": [
+        "recursive-topology",
+        "pass-inventory",
+        "resolved-pass-values"
+      ],
+      "integrity": {
+        "sha256": "cc8468c4125c9df9c8630e089914b147c72660626c61730db66e2c7920646f93",
+        "bytes": 9043623
+      },
+      "statistics": {
+        "rows": 378,
+        "repeatedCells": 21,
+        "slices": {
+          "appearance": 21,
+          "core": 336,
+          "repeat": 21
+        }
+      },
+      "role": "canonical",
+      "profileStatus": "required"
+    }
+  ],
+  "profiles": {
+    "full": {
+      "required": [
+        "core.static-scalar",
+        "core.static-tree",
+        "core.dynamic",
+        "tint.parameterization.sweep",
+        "tint.parameterization.focused-2b",
+        "tint.parameterization.hue-2c",
+        "tint.sync-resolution",
+        "tint.wide-gamut",
+        "semantic.usage-trees"
+      ],
+      "optional": [],
+      "unsupported": [],
+      "carriedForward": [
+        "external.window-context"
+      ]
+    }
+  }
 }

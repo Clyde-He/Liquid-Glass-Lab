@@ -81,9 +81,9 @@ async function checkIntegrity(osDirectory) {
     if (!registered.has(name)) problems.push(`${name}: on disk but unregistered`);
   }
 
-  // The unified sections carry their own checksums in unified/meta.json rather
-  // than the manifest, because they are transcoded output and are regenerated
-  // as a set whenever a source fixture changes.
+  // Manifest v2 is the registration and integrity authority for unified
+  // modules. unified/meta.json remains payload metadata and may repeat capture
+  // details, but its section table no longer decides which files are accepted.
   const unifiedDirectory = path.join(directory, "unified");
   let unifiedCount = 0;
   try {
@@ -117,15 +117,20 @@ async function checkIntegrity(osDirectory) {
       );
     }
 
-    for (const [name, entry] of Object.entries(meta.sections ?? {})) {
+    const unifiedModules = (manifest.modules ?? []).filter(
+      (module) => module.id.startsWith("core.") && module.file.startsWith("unified/")
+    );
+    for (const module of unifiedModules) {
+      const name = module.id.slice("core.".length);
+      const entry = module.integrity;
       unifiedCount += 1;
       try {
-        const bytes = await readFile(path.join(unifiedDirectory, entry.file));
+        const bytes = await readFile(path.join(directory, module.file));
         if (sha256(bytes) !== entry.sha256) {
-          problems.push(`unified/${entry.file}: sha256 mismatch — rerun unify.mjs`);
+          problems.push(`${module.file}: sha256 mismatch — recapture or rerun unify.mjs`);
         }
-        // Checksums prove the file matches its meta entry, and both are written
-        // in the same pass — so they cannot detect an archive that is simply
+        // Checksums prove the file matches its manifest entry, but they cannot
+        // detect an archive that is simply
         // older than the code that produced it. A cell missing a field the
         // schema now defines is exactly that drift, and it is silent: the
         // missing field reads as null, which the archive treats as a legitimate
@@ -136,15 +141,15 @@ async function checkIntegrity(osDirectory) {
           const absent = CELL_FIELDS.filter((field) => !(field in cell));
           if (absent.length > 0) {
             problems.push(
-              `unified/${entry.file}: cells predate the current schema, `
+              `${module.file}: cells predate the current schema, `
               + `missing ${absent.join(", ")} — recapture or rerun unify.mjs`
             );
           }
         }
       } catch {
-        problems.push(`unified/${entry.file}: listed in meta but missing`);
+        problems.push(`${module.file}: listed in manifest but missing`);
       }
-      if (entry.rows === 0) problems.push(`unified/${name}: no rows`);
+      if (module.statistics?.rows === 0) problems.push(`unified/${name}: no rows`);
     }
   } catch {
     problems.push("unified/meta.json: missing — run unify.mjs");
