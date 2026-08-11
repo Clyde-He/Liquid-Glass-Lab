@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "status": "planning",
+  "status": "partially-approved",
   "policy": {
     "allowedFinalDispositions": [
       "coverage-replaced",
@@ -22,12 +22,17 @@
       "bytes": 5747485,
       "build": "25G5065a",
       "role": "canonical",
-      "claims": ["recipe-core-values", "representative-height-response"],
-      "consumers": ["tools/compare.mjs", "tools/unify.mjs", "GlassLabBenchTools.swift"],
-      "replacementModules": ["core.static-scalar"],
-      "coverageDelta": "pending-v1-v2-equivalence",
+      "claims": [
+        "recipe-core-values",
+        "representative-height-response"
+      ],
+      "consumers": [],
+      "replacementModules": [
+        "core.static-scalar"
+      ],
+      "coverageDelta": "core.static-scalar direct capture covers the product and representative-size claims",
       "proposedDisposition": "coverage-replaced",
-      "decision": "pending"
+      "decision": "coverage-replaced"
     },
     {
       "path": "macOS-27/recipe-matrix.json",
@@ -35,12 +40,17 @@
       "bytes": 7393522,
       "build": "26A5378n",
       "role": "canonical",
-      "claims": ["recipe-core-values", "representative-height-response"],
-      "consumers": ["tools/compare.mjs", "tools/unify.mjs", "GlassLabBenchTools.swift"],
-      "replacementModules": ["core.static-scalar"],
-      "coverageDelta": "pending-v1-v2-equivalence",
+      "claims": [
+        "recipe-core-values",
+        "representative-height-response"
+      ],
+      "consumers": [],
+      "replacementModules": [
+        "core.static-scalar"
+      ],
+      "coverageDelta": "core.static-scalar direct capture covers the product and representative-size claims",
       "proposedDisposition": "coverage-replaced",
-      "decision": "pending"
+      "decision": "coverage-replaced"
     },
     {
       "path": "macOS-26/recursive-pass-audit.json",
@@ -48,12 +58,18 @@
       "bytes": 12578756,
       "build": "25G5065a",
       "role": "canonical",
-      "claims": ["recursive-topology", "pass-inventory", "resolved-pass-values"],
-      "consumers": ["tools/compare.mjs", "tools/compare.test.mjs", "tools/unify.mjs", "GlassLabBenchTools.swift"],
-      "replacementModules": ["core.static-tree"],
-      "coverageDelta": "pending-semantic-comparator-port",
+      "claims": [
+        "recursive-topology",
+        "pass-inventory",
+        "resolved-pass-values"
+      ],
+      "consumers": [],
+      "replacementModules": [
+        "core.static-tree"
+      ],
+      "coverageDelta": "core.static-tree semantic comparison preserves cross-version topology and pass claims",
       "proposedDisposition": "coverage-replaced",
-      "decision": "pending"
+      "decision": "coverage-replaced"
     },
     {
       "path": "macOS-27/recursive-pass-audit.json",
@@ -61,12 +77,18 @@
       "bytes": 15194953,
       "build": "26A5388g",
       "role": "canonical",
-      "claims": ["recursive-topology", "pass-inventory", "resolved-pass-values"],
-      "consumers": ["tools/compare.mjs", "tools/compare.test.mjs", "tools/unify.mjs", "GlassLabBenchTools.swift"],
-      "replacementModules": ["core.static-tree"],
-      "coverageDelta": "pending-semantic-comparator-port",
+      "claims": [
+        "recursive-topology",
+        "pass-inventory",
+        "resolved-pass-values"
+      ],
+      "consumers": [],
+      "replacementModules": [
+        "core.static-tree"
+      ],
+      "coverageDelta": "core.static-tree directly carries the complete 336-cell product",
       "proposedDisposition": "coverage-replaced",
-      "decision": "pending"
+      "decision": "coverage-replaced"
     },
     {
       "path": "macOS-27/recursive-pass-audit-stability-repeat.json",
@@ -74,12 +96,16 @@
       "bytes": 15194953,
       "build": "26A5388g",
       "role": "control",
-      "claims": ["same-session-recursive-stability"],
-      "consumers": ["tools/compare.test.mjs"],
-      "replacementModules": ["core.static-tree"],
-      "coverageDelta": "pending-repeat-row-equivalence",
+      "claims": [
+        "same-session-recursive-stability"
+      ],
+      "consumers": [],
+      "replacementModules": [
+        "core.static-tree"
+      ],
+      "coverageDelta": "core.static-tree repeat slice preserves same-session stability evidence",
       "proposedDisposition": "coverage-replaced",
-      "decision": "pending"
+      "decision": "coverage-replaced"
     },
     {
       "path": "macOS-27/recursive-pass-audit-display-context-a.json",
@@ -87,8 +113,13 @@
       "bytes": 15193717,
       "build": "26A5388g",
       "role": "control",
-      "claims": ["display-context-topology-stability", "display-sensitive-resolved-values"],
-      "consumers": ["tools/compare.test.mjs"],
+      "claims": [
+        "display-context-topology-stability",
+        "display-sensitive-resolved-values"
+      ],
+      "consumers": [
+        "tools/compare.test.mjs"
+      ],
       "replacementModules": [],
       "coverageDelta": "claim-not-present-in-current-unified-capture",
       "proposedDisposition": "retained",
@@ -100,9 +131,17 @@
       "bytes": 41343908,
       "build": "25G5065a",
       "role": "canonical",
-      "claims": ["materialize-environment-response", "appearance-endpoints", "backdrop-invariance"],
-      "consumers": ["tools/analyze-materialize-environment-study.mjs", "tools/unify.mjs"],
-      "replacementModules": ["core.dynamic"],
+      "claims": [
+        "materialize-environment-response",
+        "appearance-endpoints",
+        "backdrop-invariance"
+      ],
+      "consumers": [
+        "tools/analyze-materialize-environment-study.mjs"
+      ],
+      "replacementModules": [
+        "core.dynamic"
+      ],
       "coverageDelta": "pending-v1-v2-equivalence",
       "proposedDisposition": "coverage-replaced",
       "decision": "pending"
@@ -113,9 +152,18 @@
       "bytes": 6839394,
       "build": "25G5065a",
       "role": "canonical",
-      "claims": ["materialize-short-side-scaling", "sdf-inflation", "endpoint-size-response"],
-      "consumers": ["tools/unify.mjs", "GlassLabBenchHeadless.swift"],
-      "replacementModules": ["core.dynamic", "core.static-scalar"],
+      "claims": [
+        "materialize-short-side-scaling",
+        "sdf-inflation",
+        "endpoint-size-response"
+      ],
+      "consumers": [
+        "GlassLabBenchHeadless.swift"
+      ],
+      "replacementModules": [
+        "core.dynamic",
+        "core.static-scalar"
+      ],
       "coverageDelta": "pending-v1-v2-equivalence",
       "proposedDisposition": "coverage-replaced",
       "decision": "pending"
@@ -126,8 +174,13 @@
       "bytes": 514776,
       "build": "26A5378n",
       "role": "derived",
-      "claims": ["size-formula-envelopes", "variant-family-formulas"],
-      "consumers": ["documentation"],
+      "claims": [
+        "size-formula-envelopes",
+        "variant-family-formulas"
+      ],
+      "consumers": [
+        "documentation"
+      ],
       "replacementModules": [],
       "coverageDelta": "no-equivalent-reproducible-generator",
       "proposedDisposition": "retained",

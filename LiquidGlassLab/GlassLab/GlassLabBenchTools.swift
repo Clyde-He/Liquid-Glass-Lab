@@ -37,22 +37,7 @@ extension GlassLabView {
 
             if state.rendererMode == .recipe {
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Button("Copy Glass Report") { copyReport() }
-                        Button(isCapturingMatrix ? "Capturing…" : "Export Recipe Matrix (JSON)") {
-                            exportMatrix()
-                        }
-                        .disabled(isCapturingMatrix || isCapturingPassAudit)
-                    }
-                    Button(
-                        isCapturingPassAudit
-                            ? "Auditing…"
-                            : "Export Recursive Pass Audit (JSON)"
-                    ) {
-                        exportPassAudit()
-                    }
-                    .disabled(isCapturingMatrix || isCapturingPassAudit)
-                    Divider()
+                    Button("Copy Glass Report") { copyReport() }
                     Button(
                         isCapturingMatrix
                             ? "Capturing…"
@@ -65,9 +50,6 @@ extension GlassLabView {
                         state.reportOutput = Self.goldenRegistryReport()
                     }
                     Text("The core driver stages static-scalar, static-tree, dynamic, and meta, validates completeness, then atomically replaces unified/. It is one driver inside Full Golden, not the whole Full profile: Full also requires Tint and Semantic modules. Drift Scan is explicitly noncanonical and cannot be promoted.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Text("Recipe Matrix records 1,008 compact Shader/Rim rows across representative Heights. Recursive Pass Audit is a separate 336-row Panel capture at 480×200@16 and Margin 40; it walks sublayers, masks, filters, background filters, compositing filters, and object-backed effects across Main × Subdued × Variant × Subvariant. Both exports pause while the app is inactive and require clean system state with Overrides disabled.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }

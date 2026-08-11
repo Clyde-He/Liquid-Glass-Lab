@@ -139,15 +139,15 @@ The static sections sweep appearance and record their fixed Light backdrop. **Su
 | `dynamic` | 104 runs / 936 samples | ≈ 5 MB |
 | **per OS** | | **≈ 14 MB, 4 files** |
 
-Two OS directories: **8 files, ≈ 28 MB**, against today's 21 registered standalone fixtures and ≈129 MB. The current standalone count includes research, control, and derived evidence that is intentionally outside the unified payload.
+Two OS directories: **8 files, ≈ 28 MB**, alongside 16 registered standalone fixtures and ≈69 MB. The standalone count includes research, control, and derived evidence intentionally outside the unified payload.
 
-## Retirement candidates
+## Retirement status
 
-Direct export makes the following fixtures candidates for retirement, but emission alone is not a deletion gate. A fixture may be removed only after every consumer has migrated, v1/v2 resolution is equivalent, its hash and claims are recorded in [`evidence-retirement-ledger.json`](evidence-retirement-ledger.json), and every claim has an approved `coverage-replaced` or `claim-retired` disposition.
+Deletion requires migrated consumers, v1/v2 resolution equivalence, recorded integrity, preserved learning results, and an approved claim disposition in [`evidence-retirement-ledger.json`](evidence-retirement-ledger.json).
 
-- `recipe-matrix.json` → `static-scalar` core plus the size slice
-- `recursive-pass-audit.json` → `static-tree` core
-- `recursive-pass-audit-stability-repeat.json` → `static-tree` repeat rows
+- `recipe-matrix.json` → retired; replaced by `static-scalar` core plus the size slice
+- `recursive-pass-audit.json` → retired; replaced by `static-tree` core
+- `recursive-pass-audit-stability-repeat.json` → retired; replaced by `static-tree` repeat rows
 - `recursive-pass-audit-display-context-a.json` → retained as reduced/control evidence until an explicit replacement preserves the display-context contrast claim
 - `materialize-environment-matrix.json`, `materialize-geometry-sweep.json` → `dynamic`
 - `formula-analysis.json` → retained until an equivalent reproducible generator and validation gate exist

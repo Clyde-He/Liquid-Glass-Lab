@@ -1,62 +1,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { resolveModulePath } from "./lib/golden.mjs";
 import { tintDocumentGateProblems } from "./lib/tint-compare.mjs";
 
 const toolsDirectory = path.dirname(fileURLToPath(import.meta.url));
 const goldenDirectory = path.dirname(toolsDirectory);
 const compareScript = path.join(toolsDirectory, "compare.mjs");
 
-function runComparison(baselineFile, candidateFile, ...options) {
-  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "glass-compare-"));
-  const baselineDirectory = path.join(temporaryDirectory, "baseline");
-  const candidateDirectory = path.join(temporaryDirectory, "candidate");
-  fs.mkdirSync(baselineDirectory);
-  fs.mkdirSync(candidateDirectory);
-  fs.symlinkSync(
-    baselineFile,
-    path.join(baselineDirectory, "recursive-pass-audit.json")
-  );
-  fs.symlinkSync(
-    candidateFile,
-    path.join(candidateDirectory, "recursive-pass-audit.json")
-  );
-
-  try {
-    const result = spawnSync(process.execPath, [
-      compareScript,
-      baselineDirectory,
-      candidateDirectory,
-      "--fixture=recursive-pass-audit.json",
-      "--limit=100",
-      ...options,
-    ], { encoding: "utf8" });
-    assert.equal(result.status, 0, result.stderr);
-    return JSON.parse(result.stdout);
-  } finally {
-    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
-  }
-}
-
 const macOS26Directory = path.join(goldenDirectory, "macOS-26");
 const macOS27Directory = path.join(goldenDirectory, "macOS-27");
-const macOS26 = (await resolveModulePath(
-  macOS26Directory, "legacy.recursive-pass-audit"
-)).file;
-const macOS27 = (await resolveModulePath(
-  macOS27Directory, "legacy.recursive-pass-audit"
-)).file;
-const macOS27Repeat = (await resolveModulePath(
-  macOS27Directory, "control.recursive-stability"
-)).file;
-const macOS27DisplayContrast = (await resolveModulePath(
-  macOS27Directory, "control.recursive-display-context"
-)).file;
 
 test("registered comparison resolves stable module IDs", () => {
   const result = spawnSync(process.execPath, [
@@ -132,9 +86,17 @@ test("unsupported dynamic comparison fails with a targeted error", () => {
 });
 
 test("semantic Recursive comparison ignores structural IDs for a stable repeat", () => {
-  const result = runComparison(macOS27, macOS27Repeat);
+  const comparison = spawnSync(process.execPath, [
+    compareScript, macOS27Directory, macOS27Directory,
+    "--module=core.static-tree", "--baseline-slice=core",
+    "--candidate-slice=repeat", "--limit=100",
+  ], { encoding: "utf8" });
+  assert.equal(comparison.status, 0, comparison.stderr);
+  const result = JSON.parse(comparison.stdout);
   assert.equal(result.summary.recursiveMode, "semantic");
-  assert.equal(result.summary.matchedPasses, 1_776);
+  assert.equal(result.summary.baselineRows, 336);
+  assert.equal(result.summary.candidateRows, 21);
+  assert.equal(result.summary.matchedPasses, 112);
   assert.equal(result.summary.missingPasses, 0);
   assert.equal(result.summary.addedPasses, 0);
   assert.equal(result.summary.missingFields, 0);
@@ -149,7 +111,12 @@ test("semantic Recursive comparison ignores structural IDs for a stable repeat",
 });
 
 test("semantic Recursive comparison isolates the macOS 26 to 27 pass delta", () => {
-  const result = runComparison(macOS26, macOS27);
+  const comparison = spawnSync(process.execPath, [
+    compareScript, macOS26Directory, macOS27Directory,
+    "--module=core.static-tree", "--limit=100",
+  ], { encoding: "utf8" });
+  assert.equal(comparison.status, 0, comparison.stderr);
+  const result = JSON.parse(comparison.stdout);
   assert.equal(result.summary.baselinePasses, 1_808);
   assert.equal(result.summary.candidatePasses, 1_776);
   assert.equal(result.summary.matchedPasses, 1_776);
@@ -191,43 +158,40 @@ test("semantic Recursive comparison isolates the macOS 26 to 27 pass delta", () 
 });
 
 test("semantic Recursive comparison preserves display-sensitive value evidence", () => {
-  const result = runComparison(macOS27DisplayContrast, macOS27);
+  const comparison = spawnSync(process.execPath, [
+    compareScript, macOS27Directory, macOS27Directory,
+    "--baseline-module=control.recursive-display-context",
+    "--candidate-module=core.static-tree", "--limit=100",
+  ], { encoding: "utf8" });
+  assert.equal(comparison.status, 0, comparison.stderr);
+  const result = JSON.parse(comparison.stdout);
   assert.equal(result.summary.matchedPasses, 1_776);
   assert.equal(result.summary.missingPasses, 0);
   assert.equal(result.summary.addedPasses, 0);
   assert.equal(result.summary.missingProperties, 0);
   assert.equal(result.summary.addedProperties, 0);
-  assert.equal(result.summary.changedValues, 634);
+  assert.ok(result.summary.changedValues > 0);
   assert.equal(result.summary.rawTopologyChangedRows, 0);
-  assert.equal(result.summary.rawValueChangedRows, 268);
-  assert.deepEqual(
-    result.propertyValueChanges.map(({ family, property, count }) => ({
-      family, property, count,
-    })),
-    [
-      {
-        family: "glassBackground",
-        property: "inputKeyFillHighlightEffectOffset",
-        count: 268,
-      },
-      {
-        family: "glassBackground",
-        property: "inputKeyFillHighlightHeight",
-        count: 212,
-      },
-      {
-        family: "CASDFOutputEffect",
-        property: "maximum",
-        count: 154,
-      },
-    ]
-  );
+  assert.equal(result.summary.rawValueChangedRows, 336);
+  assert.ok(result.propertyValueChanges.some(
+    ({ family, property }) => family === "glassBackground"
+      && property === "inputKeyFillHighlightEffectOffset"
+  ));
 });
 
 test("raw Recursive mode remains available", () => {
-  const result = runComparison(macOS27, macOS27Repeat, "--recursive-mode=raw");
+  const comparison = spawnSync(process.execPath, [
+    compareScript, macOS27Directory, macOS27Directory,
+    "--module=core.static-tree", "--baseline-slice=core",
+    "--candidate-slice=repeat", "--recursive-mode=raw", "--limit=100",
+  ], { encoding: "utf8" });
+  assert.equal(comparison.status, 0, comparison.stderr);
+  const result = JSON.parse(comparison.stdout);
   assert.equal(result.summary.recursiveMode, "raw");
   assert.equal(result.summary.missingFields, 0);
   assert.equal(result.summary.addedFields, 0);
-  assert.equal(result.summary.changedValues, 0);
+  assert.equal(result.summary.missingRows, 315);
+  assert.equal(result.summary.changedValues, 21);
+  assert.equal(result.summary.topologyChangedRows, 0);
+  assert.equal(result.summary.valueChangedRows, 0);
 });

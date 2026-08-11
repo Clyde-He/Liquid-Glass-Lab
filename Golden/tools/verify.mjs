@@ -158,7 +158,7 @@ async function checkIntegrity(osDirectory) {
       try {
         const bytes = await readFile(path.join(directory, module.file));
         if (sha256(bytes) !== entry.sha256) {
-          problems.push(`${module.file}: sha256 mismatch — recapture or rerun unify.mjs`);
+          problems.push(`${module.file}: sha256 mismatch — recapture the registered profile`);
         }
         if (bytes.length !== entry.bytes) {
           problems.push(`${module.file}: byte count disagrees with manifest`);
@@ -176,7 +176,7 @@ async function checkIntegrity(osDirectory) {
           if (absent.length > 0) {
             problems.push(
               `${module.file}: cells predate the current schema, `
-              + `missing ${absent.join(", ")} — recapture or rerun unify.mjs`
+              + `missing ${absent.join(", ")} — recapture the registered profile`
             );
           }
         }
@@ -186,7 +186,7 @@ async function checkIntegrity(osDirectory) {
       if (module.statistics?.rows === 0) problems.push(`unified/${name}: no rows`);
     }
   } catch {
-    problems.push("unified/meta.json: missing — run unify.mjs");
+    problems.push("unified/meta.json: missing — recapture the registered profile");
   }
 
   return {
