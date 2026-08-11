@@ -55,6 +55,15 @@ function platformFrom(operatingSystem) {
   const build = /Build ([^)]+)/.exec(operatingSystem)?.[1] ?? "unknown";
   return { product: "macOS", version, build, architecture: process.arch };
 }
+function stripDynamicVolatileFields(value) {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    for (const item of value) stripDynamicVolatileFields(item);
+    return;
+  }
+  delete value.inputMaxHeadroom;
+  for (const child of Object.values(value)) stripDynamicVolatileFields(child);
+}
 function normalizedDynamicRuns(runs) {
   const problems = [];
   const normalized = structuredClone(runs ?? []);
@@ -62,6 +71,7 @@ function normalizedDynamicRuns(runs) {
     delete run.maximumAttachedAnimationDuration;
     for (const [sampleIndex, sample] of (run.samples ?? []).entries()) {
       delete sample.elapsed;
+      stripDynamicVolatileFields(sample);
       if (Number.isFinite(sample.progress) && Number.isFinite(sample.requestedProgress)) {
         const delta = Math.abs(sample.progress - sample.requestedProgress);
         if (delta <= 0.02) sample.progress = sample.requestedProgress;
@@ -70,6 +80,23 @@ function normalizedDynamicRuns(runs) {
     }
   }
   return { normalized, problems };
+}
+function firstDifference(lhs, rhs, path = "runs") {
+  if (Object.is(lhs, rhs)) return null;
+  if (typeof lhs !== "object" || lhs === null
+      || typeof rhs !== "object" || rhs === null) {
+    return `${path}: ${JSON.stringify(lhs)} != ${JSON.stringify(rhs)}`;
+  }
+  const lhsKeys = Object.keys(lhs);
+  const rhsKeys = Object.keys(rhs);
+  if (JSON.stringify(lhsKeys) !== JSON.stringify(rhsKeys)) {
+    return `${path}: keys ${JSON.stringify(lhsKeys)} != ${JSON.stringify(rhsKeys)}`;
+  }
+  for (const key of lhsKeys) {
+    const difference = firstDifference(lhs[key], rhs[key], `${path}.${key}`);
+    if (difference) return difference;
+  }
+  return null;
 }
 async function payloadModule(root, id, file) {
   const bytes = await readFile(path.join(root, file));
@@ -214,8 +241,12 @@ async function promote(staging, accepted) {
   if (durationDeltas.some((delta) => delta > 0.05)) {
     dynamicProblems.push(`maximum animation duration delta ${Math.max(...durationDeltas)}`);
   }
-  const dynamicEquivalent = dynamicProblems.length === 0
-    && JSON.stringify(oldNormalized.normalized) === JSON.stringify(newNormalized.normalized);
+  const payloadDifference = firstDifference(
+    oldNormalized.normalized,
+    newNormalized.normalized
+  );
+  if (payloadDifference) dynamicProblems.push(payloadDifference);
+  const dynamicEquivalent = dynamicProblems.length === 0;
   if (!dynamicEquivalent) equivalent = false;
   comparisons.push({
     id: "core.dynamic", equivalent: dynamicEquivalent,
