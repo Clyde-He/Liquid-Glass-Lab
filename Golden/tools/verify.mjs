@@ -60,6 +60,11 @@ async function checkIntegrity(osDirectory) {
     } else if (sha256(bytes) !== entry.sha256) {
       problems.push(`${entry.file}: sha256 mismatch`);
     }
+    const authoritativeModule = manifest.modules.find((module) => module.file === entry.file);
+    if (authoritativeModule?.integrity?.bytes !== undefined
+        && bytes.length !== authoritativeModule.integrity.bytes) {
+      problems.push(`${entry.file}: byte count disagrees with manifest`);
+    }
     let document;
     try {
       document = JSON.parse(bytes.toString("utf8"));
@@ -81,9 +86,9 @@ async function checkIntegrity(osDirectory) {
     if (!registered.has(name)) problems.push(`${name}: on disk but unregistered`);
   }
 
-  // The unified sections carry their own checksums in unified/meta.json rather
-  // than the manifest, because they are transcoded output and are regenerated
-  // as a set whenever a source fixture changes.
+  // Manifest v2 is the registration and integrity authority for unified
+  // modules. unified/meta.json remains payload metadata and may repeat capture
+  // details, but its section table no longer decides which files are accepted.
   const unifiedDirectory = path.join(directory, "unified");
   let unifiedCount = 0;
   try {
@@ -99,12 +104,17 @@ async function checkIntegrity(osDirectory) {
     // this check a unified archive dropped in from the wrong build verifies
     // fully green, since the section checksums only prove the files match their
     // own meta entry.
+    const unifiedModules = (manifest.modules ?? []).filter(
+      (module) => module.id.startsWith("core.") && module.file.startsWith("unified/")
+    );
+    const declaredBuilds = [...new Set(
+      unifiedModules.map((module) => module.platform?.build).filter(Boolean)
+    )];
     const unifiedBuild = buildOf(meta);
-    const declaredUnified = manifest.unifiedPlatform?.build ?? null;
-    if (declaredUnified === null) {
+    const declaredUnified = declaredBuilds.length === 1 ? declaredBuilds[0] : null;
+    if (declaredBuilds.length !== 1) {
       problems.push(
-        "manifest.json: no unifiedPlatform.build — declare the build the "
-        + "unified sections must carry"
+        `manifest.json: unified modules must declare one build, got ${declaredBuilds.join(", ")}`
       );
     } else if (unifiedBuild === null) {
       problems.push(
@@ -117,15 +127,33 @@ async function checkIntegrity(osDirectory) {
       );
     }
 
-    for (const [name, entry] of Object.entries(meta.sections ?? {})) {
+    for (const module of unifiedModules) {
+      const name = module.id.slice("core.".length);
+      const entry = module.integrity;
+      const metaEntry = meta.sections?.[name];
+      if (metaEntry?.sha256 && metaEntry.sha256 !== entry.sha256) {
+        problems.push(`${module.file}: payload meta checksum disagrees with manifest`);
+      }
+      if (metaEntry?.bytes !== undefined && metaEntry.bytes !== entry.bytes) {
+        problems.push(`${module.file}: payload meta byte count disagrees with manifest`);
+      }
+      if (metaEntry?.rows !== undefined && metaEntry.rows !== module.statistics?.rows) {
+        problems.push(`${module.file}: payload meta row count disagrees with manifest`);
+      }
+      if (meta.role !== undefined && meta.role !== module.role) {
+        problems.push(`${module.file}: payload meta role disagrees with manifest`);
+      }
       unifiedCount += 1;
       try {
-        const bytes = await readFile(path.join(unifiedDirectory, entry.file));
+        const bytes = await readFile(path.join(directory, module.file));
         if (sha256(bytes) !== entry.sha256) {
-          problems.push(`unified/${entry.file}: sha256 mismatch — rerun unify.mjs`);
+          problems.push(`${module.file}: sha256 mismatch — recapture or rerun unify.mjs`);
         }
-        // Checksums prove the file matches its meta entry, and both are written
-        // in the same pass — so they cannot detect an archive that is simply
+        if (bytes.length !== entry.bytes) {
+          problems.push(`${module.file}: byte count disagrees with manifest`);
+        }
+        // Checksums prove the file matches its manifest entry, but they cannot
+        // detect an archive that is simply
         // older than the code that produced it. A cell missing a field the
         // schema now defines is exactly that drift, and it is silent: the
         // missing field reads as null, which the archive treats as a legitimate
@@ -136,15 +164,15 @@ async function checkIntegrity(osDirectory) {
           const absent = CELL_FIELDS.filter((field) => !(field in cell));
           if (absent.length > 0) {
             problems.push(
-              `unified/${entry.file}: cells predate the current schema, `
+              `${module.file}: cells predate the current schema, `
               + `missing ${absent.join(", ")} — recapture or rerun unify.mjs`
             );
           }
         }
       } catch {
-        problems.push(`unified/${entry.file}: listed in meta but missing`);
+        problems.push(`${module.file}: listed in manifest but missing`);
       }
-      if (entry.rows === 0) problems.push(`unified/${name}: no rows`);
+      if (module.statistics?.rows === 0) problems.push(`unified/${name}: no rows`);
     }
   } catch {
     problems.push("unified/meta.json: missing — run unify.mjs");

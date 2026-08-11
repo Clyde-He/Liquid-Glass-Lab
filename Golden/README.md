@@ -50,10 +50,12 @@ Nothing in the archive is transcoded today. Unified sections are committed so a 
 
 Every OS directory contains a `manifest.json` describing the default OS build and capture date, capture conditions, fixture schemas, entry counts, and SHA-256 checksums. A new capture should replace a Golden only after its focus/activation conditions and Cartesian-product coverage have been accepted.
 
+The root manifest uses module protocol v2. Its `modules` array is the registration authority for standalone and unified payloads, and the `full` profile names the exact required, optional, unsupported, and carried-forward module IDs for that OS. The legacy `fixtures` array remains temporarily for v1 consumer compatibility; the shared resolver validates v2 and synthesizes the legacy view from authoritative module identity, platform, role, and integrity fields. `unified/meta.json` remains payload metadata, not a second registration authority. The complete field contract is documented in [`MANIFEST-PROTOCOL.md`](MANIFEST-PROTOCOL.md).
+
 Two manifest fields carry weight:
 
 - **`platform`** may be set per fixture, overriding the directory default. This is not cosmetic — `macOS-27/` genuinely holds two builds, with the three recursive-pass-audit fixtures captured on `26A5388g` and the rest on `26A5378n`. `verify.mjs` fails when a fixture's embedded OS string disagrees with the entry filing it, so this cannot drift silently again.
-- **`unifiedPlatform`** declares the build the `unified/` sections must carry, separately from `platform`, because a direct capture legitimately comes from a newer build than the source fixtures filed beside it — `macOS-27/` holds `26A5378n` fixtures under a `26A5388g` unified capture. `verify.mjs` fails when `unified/meta.json` disagrees, and the learnings are labelled with *this* build, since they read the unified sections and nothing else. Without it a unified archive dropped in from the wrong build verified fully green: the section checksums only prove each file matches its own meta entry.
+- **Each `core.*` module's `platform`** declares the build its unified payload must carry. All core modules in one OS archive must agree; `verify.mjs` compares that authoritative build with the payload metadata. The legacy `unifiedPlatform` field remains during v1 compatibility but no longer decides acceptance.
 - **`role`** separates `canonical` evidence from a `control` (a repeat or contrast kept as provenance) and from `derived` output computed off other fixtures. Only canonical fixtures should be cited as a result.
 
 These are the registered standalone captures. Some feed a unified section, while research and control fixtures remain independently registered; `unified/meta.json` records the provenance of each unified section under `generatedFrom`.
@@ -89,7 +91,7 @@ One command checks file integrity and then re-derives every accepted learning fr
 node Golden/tools/verify.mjs
 ```
 
-Integrity covers manifest checksums, unregistered files, fixtures whose embedded OS build disagrees with the manifest entry filing them, and the unified sections' own checksums from `unified/meta.json`.
+Integrity covers authoritative manifest checksums and byte counts, unregistered files, fixtures whose embedded OS build disagrees with their module registration, and consistency between unified payload metadata and the root manifest.
 
 Learnings live in `Golden/learnings/` — each one is a finding from `Documentation/` written as an executable assertion, naming the claim it encodes and the document it came from.
 
