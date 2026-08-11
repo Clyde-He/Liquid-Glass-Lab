@@ -14,9 +14,9 @@ export const BOOTSTRAP_GATE_NAMES = [
   "noUndispositionedSkips", "noStaleDispositions", "canonicalTargetAbsent",
 ];
 
-function command(commandName, args) {
+function command(commandName, args, cwd = repositoryRoot) {
   const result = spawnSync(commandName, args, {
-    cwd: repositoryRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
+    cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -77,10 +77,25 @@ export async function assertReviewedPayloadInventory(root, reviewed) {
   }
 }
 
-export function gitState() {
-  const revision = command("git", ["rev-parse", "HEAD"]);
-  const trackedDiff = command("git", ["diff", "--binary", "HEAD", "--"]);
-  return { revision, trackedDiffSha256: sha256(Buffer.from(trackedDiff)) };
+export function gitState(root = repositoryRoot) {
+  const revision = command("git", ["rev-parse", "HEAD"], root);
+  const trackedDiff = command("git", ["diff", "--binary", "HEAD", "--"], root);
+  const worktreeStatus = command(
+    "git", ["status", "--porcelain=v1", "--untracked-files=all"], root
+  );
+  return {
+    revision,
+    clean: worktreeStatus.length === 0,
+    trackedDiffSha256: sha256(Buffer.from(trackedDiff)),
+    worktreeStatusSha256: sha256(Buffer.from(worktreeStatus)),
+  };
+}
+
+export function assertCleanGitState(state = gitState()) {
+  if (!state.clean) {
+    throw new Error("release workflow requires a clean tree with no tracked or untracked changes");
+  }
+  return state;
 }
 
 async function acceptedDirectories() {
@@ -230,6 +245,7 @@ export async function assertReviewedComparisonEvidence(report, context, candidat
 }
 
 export async function buildBootstrapReport(context) {
+  const git = assertCleanGitState();
   const dispositions = await readDispositions();
   const archives = context.baseline
     ? [context.baseline, { name: context.name, directory: context.candidate }]
@@ -259,7 +275,7 @@ export async function buildBootstrapReport(context) {
       }
       : { waived: true, reason: context.waiver },
     profileDefinitionVersion: PROFILE_DEFINITION_VERSION,
-    git: gitState(), verification, ...evidence,
+    git, verification, ...evidence,
     gates: {
       fullAdmission: true, exactProfile: true, directCapture: true,
       structuredVerification: true, noUndispositionedSkips: true,
@@ -287,6 +303,9 @@ export async function assertReportStillCurrent(report, context) {
       || !Array.isArray(report.comparisons)) {
     throw new Error("review report has no valid release-ready verification or comparisons");
   }
+  if (report.git?.clean !== true) {
+    throw new Error("review report was not created from a clean tree");
+  }
   await assertReviewedInventory(context.candidate, report.candidate);
   await assertReviewedComparisonEvidence(report, context);
   if (context.baseline) {
@@ -305,7 +324,7 @@ export async function assertReportStillCurrent(report, context) {
   } else if (!report.baseline?.waived || report.baseline.reason !== context.waiver) {
     throw new Error("review report baseline waiver does not match");
   }
-  if (JSON.stringify(gitState()) !== JSON.stringify(report.git)) {
+  if (JSON.stringify(assertCleanGitState()) !== JSON.stringify(report.git)) {
     throw new Error("Golden tooling or git revision changed after review");
   }
 }

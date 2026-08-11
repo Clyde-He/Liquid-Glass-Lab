@@ -5,11 +5,14 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  archiveInventory, assertReportStillCurrent, assertReviewedComparisonEvidence,
-  BOOTSTRAP_GATE_NAMES, bootstrapComparisonEvidence, gitState, inventoryDigest,
-  pathsOverlap, resolveBootstrapContext,
+  archiveInventory, assertCleanGitState, assertReportStillCurrent,
+  assertReviewedComparisonEvidence, BOOTSTRAP_GATE_NAMES,
+  bootstrapComparisonEvidence, gitState, inventoryDigest, pathsOverlap,
+  resolveBootstrapContext,
 } from "./lib/bootstrap.mjs";
+import { importArtifactEnvelope } from "./lib/artifact-handoff.mjs";
 import { catalogDocumentProblems, packageResourceProblems } from "./lib/catalog-certification.mjs";
+import { compareStableDynamicRuns } from "./lib/dynamic-equivalence.mjs";
 import { acceptedArchivesReplacing, goldenDirectory } from "./lib/golden.mjs";
 import {
   PAYLOAD_SCHEMA_VERSIONS, PROFILE_DEFINITION_VERSION, moduleAdmissionProblems,
@@ -33,6 +36,106 @@ test("module paths and bootstrap paths reject traversal and overlap", () => {
   }
   assert.equal(pathsOverlap("/private/tmp/macOS-28", "/private/tmp/macOS-28/child"), true);
   assert.equal(pathsOverlap("/private/tmp/macOS-28", "/private/tmp/macOS-29"), false);
+});
+
+test("release git state rejects both tracked changes and untracked files", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "golden-git-state-test-"));
+  const git = (...args) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  try {
+    assert.equal(git("init").status, 0);
+    await writeFile(path.join(root, "tracked.txt"), "accepted\n");
+    assert.equal(git("add", "tracked.txt").status, 0);
+    assert.equal(git("-c", "user.name=Golden Test", "-c", "user.email=golden@example.invalid",
+      "commit", "-m", "fixture").status, 0);
+    assert.equal(assertCleanGitState(gitState(root)).clean, true);
+
+    await writeFile(path.join(root, "untracked.txt"), "must fail closed\n");
+    const untracked = gitState(root);
+    assert.equal(untracked.clean, false);
+    assert.throws(() => assertCleanGitState(untracked), /no tracked or untracked changes/);
+
+    await rm(path.join(root, "untracked.txt"));
+    await writeFile(path.join(root, "tracked.txt"), "changed\n");
+    const tracked = gitState(root);
+    assert.equal(tracked.clean, false);
+    assert.throws(() => assertCleanGitState(tracked), /clean tree/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("artifact stdout handoff reconstructs bytes and rejects traversal", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "golden-artifact-handoff-test-"));
+  try {
+    const destination = path.join(root, "artifact.json");
+    const bytes = Buffer.from("{\"passed\":true}\n");
+    const envelope = JSON.stringify({
+      schemaVersion: 1,
+      rootKind: "file",
+      entries: [{ path: "artifact", bytes: bytes.length, data: bytes.toString("base64") }],
+    });
+    assert.deepEqual(importArtifactEnvelope(envelope, destination), {
+      rootKind: "file", entryCount: 1,
+    });
+    assert.deepEqual(await readFile(destination), bytes);
+
+    const largeBytes = Buffer.alloc(9 * 1024 * 1024, 0xab);
+    const directory = path.join(root, "directory");
+    const directoryEnvelope = JSON.stringify({
+      schemaVersion: 1,
+      rootKind: "directory",
+      entries: [{
+        path: "unified/static-tree.json",
+        bytes: largeBytes.length,
+        data: largeBytes.toString("base64"),
+      }],
+    });
+    assert.deepEqual(importArtifactEnvelope(directoryEnvelope, directory), {
+      rootKind: "directory", entryCount: 1,
+    });
+    assert.equal((await stat(path.join(directory, "unified/static-tree.json"))).size,
+      largeBytes.length);
+
+    const traversal = JSON.stringify({
+      schemaVersion: 1,
+      rootKind: "directory",
+      entries: [{ path: "../escape", bytes: 0, data: "" }],
+    });
+    assert.throws(() => importArtifactEnvelope(traversal, path.join(root, "directory")),
+      /invalid artifact handoff entry/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Dynamic equivalence ignores animation timing but detects stable endpoint drift", () => {
+  const run = {
+    slice: "core", usage: "Regular", cell: { direction: "insertion" },
+    maximumAttachedAnimationDuration: 0.1,
+    samples: [
+      { phase: "preflight", elapsed: 0, value: 0 },
+      { phase: "sample", elapsed: 0.5, progress: 0.4,
+        filters: [{ inputs: { inputMaxHeadroom: "100", value: 4 } }] },
+      { phase: "settled", elapsed: 1.1, progress: 1, value: 10,
+        filters: [{ inputs: { inputMaxHeadroom: "999", value: 10 } }] },
+    ],
+  };
+  const timingOnly = structuredClone(run);
+  timingOnly.maximumAttachedAnimationDuration = 0.12;
+  timingOnly.samples[1].elapsed = 0.8;
+  timingOnly.samples[1].progress = 0.9;
+  timingOnly.samples[1].filters[0].inputs.value = 9;
+  timingOnly.samples[2].elapsed = 2;
+  timingOnly.samples[2].filters[0].inputs.inputMaxHeadroom = "12345";
+  assert.equal(compareStableDynamicRuns([run], [timingOnly]).equivalent, true);
+
+  const drifted = structuredClone(timingOnly);
+  drifted.samples[2].value = 11;
+  const comparison = compareStableDynamicRuns([run], [drifted]);
+  assert.equal(comparison.equivalent, false);
+  assert.equal(comparison.changedRuns, 1);
+  assert.equal(comparison.stableDifferenceCount, 1);
+  assert.match(comparison.stableDifferences[0], /samples\[0\]\.value/);
 });
 
 test("bootstrap rejects case-mismatched staging and an existing canonical target", async () => {

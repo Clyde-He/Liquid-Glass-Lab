@@ -4,7 +4,9 @@ import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { archiveInventory, gitState, repositoryRoot } from "./lib/bootstrap.mjs";
+import {
+  archiveInventory, assertCleanGitState, repositoryRoot,
+} from "./lib/bootstrap.mjs";
 import { goldenDirectory } from "./lib/golden.mjs";
 import { validateCatalogFile, packageResourceProblems } from "./lib/catalog-certification.mjs";
 import { sha256, validateFullDirectory } from "./lib/profile.mjs";
@@ -66,7 +68,7 @@ function run(name, commandName, commandArgs, { environment = {}, expectedTest = 
 }
 
 try {
-  const before = gitState();
+  const before = assertCleanGitState();
   const full = await validateFullDirectory(golden, { expectedStatus: "accepted" });
   if (full.problems.length) throw new Error(`selected Golden failed Full admission: ${full.problems.join("; ")}`);
   gates.push({ name: "accepted Full Golden", passed: true });
@@ -101,7 +103,7 @@ try {
   });
   run("full Swift Package tests", "swift", ["test", "--scratch-path", swiftScratch]);
 
-  const after = gitState();
+  const after = assertCleanGitState();
   if (JSON.stringify(before) !== JSON.stringify(after)) {
     throw new Error("certification changed tracked source or Golden files");
   }

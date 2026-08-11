@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertReportStillCurrent, assertReviewedComparisonEvidence, assertReviewedInventory,
-  assertReviewedPayloadInventory, buildBootstrapReport, gitState, repositoryRoot,
+  assertReviewedPayloadInventory, assertCleanGitState, buildBootstrapReport, repositoryRoot,
   resolveBootstrapContext,
 } from "./lib/bootstrap.mjs";
 import { readDispositions, releaseVerificationProblems, verifyArchiveSet } from "./lib/verify-engine.mjs";
@@ -88,7 +88,7 @@ if (!accept) {
     const checked = await validateFullDirectory(transaction, { expectedStatus: "accepted" });
     if (checked.problems.length) throw new Error(`accepted transaction invalid: ${checked.problems.join("; ")}`);
     await assertReviewedPayloadInventory(transaction, report.candidate);
-    if (JSON.stringify(gitState()) !== JSON.stringify(report.git)) {
+    if (JSON.stringify(assertCleanGitState()) !== JSON.stringify(report.git)) {
       throw new Error("tooling or git revision changed before atomic installation");
     }
     const helper = path.join(path.dirname(fileURLToPath(import.meta.url)), "atomic-create.swift");

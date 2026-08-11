@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { importArtifactEnvelope } from "./lib/artifact-handoff.mjs";
+import { compareStableDynamicRuns } from "./lib/dynamic-equivalence.mjs";
 import { validateManifestV2 } from "./lib/manifest.mjs";
 import { acceptedArchivesReplacing } from "./lib/golden.mjs";
 import {
@@ -31,71 +33,25 @@ function run(app, flag, destination) {
   const handoff = `@temporary/${process.pid}-${path.basename(destination)}`;
   const checkpoint = existsSync(destination) && statSync(destination).isFile()
     ? readFileSync(destination) : undefined;
-  const args = [flag, handoff];
+  const args = [flag, handoff, "--artifact-stdout"];
   if (checkpoint) args.push("--checkpoint-stdin");
-  const result = spawnSync(app, args, { encoding: "utf8", input: checkpoint });
-  if (result.stdout) process.stdout.write(result.stdout);
+  const result = spawnSync(app, args, {
+    encoding: "utf8", input: checkpoint, maxBuffer: 128 * 1024 * 1024,
+  });
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) throw result.error;
-  const artifact = /^GLASS_LAB_ARTIFACT_PATH=(.+)$/m.exec(result.stderr ?? "")?.[1];
+  let handedOff = false;
+  if (result.stdout?.trim()) {
+    importArtifactEnvelope(result.stdout, destination);
+    handedOff = true;
+  }
   if (result.status !== 0) {
-    if (TINT_CHECKPOINT_FLAGS.has(flag) && artifact && existsSync(artifact)) {
-      rmSync(destination, { recursive: true, force: true });
-      mkdirSync(path.dirname(destination), { recursive: true });
-      cpSync(artifact, destination, { force: true });
-      rmSync(artifact, { force: true });
+    if (TINT_CHECKPOINT_FLAGS.has(flag) && handedOff) {
       process.stderr.write(`Recovered Tint checkpoint after ${flag} failure\n`);
     }
     throw new Error(`${flag} exited ${result.status ?? "by signal"}`);
   }
-  if (!artifact) throw new Error(`${flag} did not report an artifact path`);
-  rmSync(destination, { recursive: true, force: true });
-  mkdirSync(path.dirname(destination), { recursive: true });
-  cpSync(artifact, destination, { recursive: true, force: true });
-  rmSync(artifact, { recursive: true, force: true });
-}
-function stripDynamicVolatileFields(value) {
-  if (!value || typeof value !== "object") return;
-  if (Array.isArray(value)) {
-    for (const item of value) stripDynamicVolatileFields(item);
-    return;
-  }
-  delete value.inputMaxHeadroom;
-  for (const child of Object.values(value)) stripDynamicVolatileFields(child);
-}
-function normalizedDynamicRuns(runs) {
-  const problems = [];
-  const normalized = structuredClone(runs ?? []);
-  for (const [runIndex, run] of normalized.entries()) {
-    delete run.maximumAttachedAnimationDuration;
-    for (const [sampleIndex, sample] of (run.samples ?? []).entries()) {
-      delete sample.elapsed;
-      stripDynamicVolatileFields(sample);
-      if (Number.isFinite(sample.progress) && Number.isFinite(sample.requestedProgress)) {
-        const delta = Math.abs(sample.progress - sample.requestedProgress);
-        if (delta <= 0.02) sample.progress = sample.requestedProgress;
-        else problems.push(`run ${runIndex} sample ${sampleIndex}: progress delta ${delta}`);
-      }
-    }
-  }
-  return { normalized, problems };
-}
-function firstDifference(lhs, rhs, path = "runs") {
-  if (Object.is(lhs, rhs)) return null;
-  if (typeof lhs !== "object" || lhs === null
-      || typeof rhs !== "object" || rhs === null) {
-    return `${path}: ${JSON.stringify(lhs)} != ${JSON.stringify(rhs)}`;
-  }
-  const lhsKeys = Object.keys(lhs);
-  const rhsKeys = Object.keys(rhs);
-  if (JSON.stringify(lhsKeys) !== JSON.stringify(rhsKeys)) {
-    return `${path}: keys ${JSON.stringify(lhsKeys)} != ${JSON.stringify(rhsKeys)}`;
-  }
-  for (const key of lhsKeys) {
-    const difference = firstDifference(lhs[key], rhs[key], `${path}.${key}`);
-    if (difference) return difference;
-  }
-  return null;
+  if (!handedOff) throw new Error(`${flag} did not hand off an artifact over stdout`);
 }
 async function buildManifest(root, accepted) {
   const metaBytes = await readFile(path.join(root, "unified/meta.json"));
@@ -233,37 +189,9 @@ async function promote(staging, accepted) {
   const newDynamicFile = staged.modules.find(({ id }) => id === "core.dynamic")?.file;
   const oldDynamic = JSON.parse(await readFile(path.join(accepted, oldDynamicFile)));
   const newDynamic = JSON.parse(await readFile(path.join(staging, newDynamicFile)));
-  const oldNormalized = normalizedDynamicRuns(oldDynamic.runs);
-  const newNormalized = normalizedDynamicRuns(newDynamic.runs);
-  const dynamicProblems = [...oldNormalized.problems, ...newNormalized.problems];
-  const durationDeltas = (oldDynamic.runs ?? []).map((run, index) => {
-    const baseline = run.maximumAttachedAnimationDuration;
-    const candidate = newDynamic.runs?.[index]?.maximumAttachedAnimationDuration;
-    if (!Number.isFinite(baseline) || !Number.isFinite(candidate)) {
-      dynamicProblems.push(
-        `run ${index}: maximumAttachedAnimationDuration must be finite on both sides`
-      );
-      return Number.POSITIVE_INFINITY;
-    }
-    return Math.abs(baseline - candidate);
-  });
-  if (durationDeltas.some((delta) => delta > 0.05)) {
-    dynamicProblems.push(`maximum animation duration delta ${Math.max(...durationDeltas)}`);
-  }
-  const payloadDifference = firstDifference(
-    oldNormalized.normalized,
-    newNormalized.normalized
-  );
-  if (payloadDifference) dynamicProblems.push(payloadDifference);
-  const dynamicEquivalent = dynamicProblems.length === 0;
-  if (!dynamicEquivalent) equivalent = false;
-  comparisons.push({
-    id: "core.dynamic", equivalent: dynamicEquivalent,
-    baselineRuns: oldDynamic.runs?.length ?? null,
-    candidateRuns: newDynamic.runs?.length ?? null,
-    maximumAnimationDurationDelta: Math.max(0, ...durationDeltas),
-    problems: dynamicProblems,
-  });
+  const dynamicComparison = compareStableDynamicRuns(oldDynamic.runs, newDynamic.runs);
+  if (!dynamicComparison.equivalent) equivalent = false;
+  comparisons.push({ id: "core.dynamic", ...dynamicComparison });
   await writeFile(`${staging}.equivalence.json`, `${JSON.stringify({ equivalent, comparisons }, null, 2)}\n`);
   if (!equivalent && !process.argv.includes("--accept-drift")) {
     throw new Error(`Full value equivalence failed; inspect ${staging}.equivalence.json and rerun with --accept-drift after approval`);

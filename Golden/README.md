@@ -108,6 +108,8 @@ node Golden/tools/capture-profile.mjs drift-scan \
 
 Use this immediately after installing a new macOS build to decide whether a Full capture is warranted. Compare or inspect the two reports, but do not file this directory under `Golden/macOS-N`.
 
+Every driver keeps the capture app active for its full run and returns its file or directory as a framed stdout artifact. The Node runner reconstructs that artifact in staging, so it never needs privacy access to the sandbox container; retained Tint checkpoints travel back to the app over stdin.
+
 ### 2. Complete canonical capture
 
 `full` is the Golden superset: Core static scalar/tree/dynamic, every registered Tint study, and the Semantic usage tree required by the per-major profile. It writes and validates `<output>.full-staging` without touching accepted data:
@@ -131,7 +133,7 @@ node Golden/tools/bootstrap-new-major.mjs \
   --accept
 ```
 
-Preview is the default. The report binds the manifest and complete file inventory, shared profile version, comparisons, Dynamic coverage, verifier outcomes, git revision, and tooling diff. Acceptance regenerates comparison evidence and structured verification from the copied transaction before creating `Golden/macOS-N` through a no-replace atomic rename, and preserves the original staging directory. If no lower accepted baseline exists, an explicit `--waive-baseline "reason"` is required. Refreshing an already accepted major continues to use `capture-profile.mjs full --accepted Golden/macOS-N --promote`; promotion substitutes staging into the complete accepted archive set and reruns both per-version and cross-version learnings before replacement. Bootstrap never replaces an existing major.
+Preview is the default. The report binds the manifest and complete file inventory, shared profile version, comparisons, Dynamic coverage, verifier outcomes, git revision, and clean worktree state including untracked files. Acceptance regenerates comparison evidence and structured verification from the copied transaction before creating `Golden/macOS-N` through a no-replace atomic rename, and preserves the original staging directory. If no lower accepted baseline exists, an explicit `--waive-baseline "reason"` is required. Refreshing an already accepted major continues to use `capture-profile.mjs full --accepted Golden/macOS-N --promote`; promotion substitutes staging into the complete accepted archive set and reruns both per-version and cross-version learnings before replacement. Bootstrap never replaces an existing major.
 
 ### 3. Package certification against Golden
 
@@ -143,7 +145,7 @@ node Golden/tools/certify-package.mjs \
   --report /private/tmp/macOS-27-package-certification.json
 ```
 
-Certification requires an accepted exact Full profile, structured Golden verification with no undispositioned skip or stale reviewed disposition, the exact per-major Catalog contract, Swift decoding/topology tests, a selected-major Golden-backed Tint synthesis test, and the full Swift Package test suite. SwiftPM builds in an isolated temporary scratch directory, and `swift package dump-package` must show `Catalog` as the only product resource; `Golden` remains repository-only research evidence.
+Certification requires a clean tree with no tracked or untracked changes, an accepted exact Full profile, structured Golden verification with no undispositioned skip or stale reviewed disposition, the exact per-major Catalog contract, Swift decoding/topology tests, a selected-major Golden-backed Tint synthesis test, and the full Swift Package test suite. SwiftPM builds in an isolated temporary scratch directory, and `swift package dump-package` must show `Catalog` as the only product resource; `Golden` remains repository-only research evidence.
 
 ### Two kinds of learning
 
