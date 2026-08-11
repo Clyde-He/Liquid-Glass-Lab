@@ -135,18 +135,18 @@ The static sections sweep appearance and record their fixed Light backdrop. **Su
 | `dynamic` | 104 runs / 936 samples | ≈ 5 MB |
 | **per OS** | | **≈ 14 MB, 4 files** |
 
-Two OS directories: **8 files, ≈ 28 MB**, against today's 11 source files and 138 MB.
+Two OS directories: **8 files, ≈ 28 MB**, against today's 21 registered standalone fixtures and ≈129 MB. The current standalone count includes research, control, and derived evidence that is intentionally outside the unified payload.
 
-## Retired on completion
+## Retirement candidates
 
-Once the exporter emits these sections directly, these are deleted — their evidence lives in the sections above:
+Direct export makes the following fixtures candidates for retirement, but emission alone is not a deletion gate. A fixture may be removed only after every consumer has migrated, v1/v2 resolution is equivalent, its hash and claims are recorded in [`evidence-retirement-ledger.json`](evidence-retirement-ledger.json), and every claim has an approved `coverage-replaced` or `claim-retired` disposition.
 
 - `recipe-matrix.json` → `static-scalar` core plus the size slice
 - `recursive-pass-audit.json` → `static-tree` core
 - `recursive-pass-audit-stability-repeat.json` → `static-tree` repeat rows
-- `recursive-pass-audit-display-context-a.json` → not carried forward; it was provenance for a decision already made, and display context is not a cell axis
+- `recursive-pass-audit-display-context-a.json` → retained as reduced/control evidence until an explicit replacement preserves the display-context contrast claim
 - `materialize-environment-matrix.json`, `materialize-geometry-sweep.json` → `dynamic`
-- `formula-analysis.json` → deleted. It is a computed report, not evidence; regenerate it from the size slice when needed
+- `formula-analysis.json` → retained until an equivalent reproducible generator and validation gate exist
 
 Kept outside `unified/`:
 
