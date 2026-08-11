@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { resolveModulePath } from "./lib/golden.mjs";
 
 const toolsDirectory = path.dirname(fileURLToPath(import.meta.url));
 const goldenDirectory = path.dirname(toolsDirectory);
@@ -41,18 +42,55 @@ function runComparison(baselineFile, candidateFile, ...options) {
   }
 }
 
-const macOS26 = path.join(goldenDirectory, "macOS-26", "recursive-pass-audit.json");
-const macOS27 = path.join(goldenDirectory, "macOS-27", "recursive-pass-audit.json");
-const macOS27Repeat = path.join(
-  goldenDirectory,
-  "macOS-27",
-  "recursive-pass-audit-stability-repeat.json"
-);
-const macOS27DisplayContrast = path.join(
-  goldenDirectory,
-  "macOS-27",
-  "recursive-pass-audit-display-context-a.json"
-);
+const macOS26Directory = path.join(goldenDirectory, "macOS-26");
+const macOS27Directory = path.join(goldenDirectory, "macOS-27");
+const macOS26 = (await resolveModulePath(
+  macOS26Directory, "legacy.recursive-pass-audit"
+)).file;
+const macOS27 = (await resolveModulePath(
+  macOS27Directory, "legacy.recursive-pass-audit"
+)).file;
+const macOS27Repeat = (await resolveModulePath(
+  macOS27Directory, "control.recursive-stability"
+)).file;
+const macOS27DisplayContrast = (await resolveModulePath(
+  macOS27Directory, "control.recursive-display-context"
+)).file;
+
+test("registered comparison resolves stable module IDs", () => {
+  const result = spawnSync(process.execPath, [
+    compareScript, macOS26Directory, macOS27Directory,
+    "--module=core.static-tree", "--limit=1",
+  ], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).summary.fixture, "core.static-tree");
+});
+
+test("core static-tree preserves semantic Recursive assertions", () => {
+  const result = spawnSync(process.execPath, [
+    compareScript, macOS26Directory, macOS27Directory,
+    "--module=core.static-tree", "--limit=1",
+  ], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.summary.baselineRows, 336);
+  assert.equal(report.summary.candidateRows, 336);
+  assert.equal(report.summary.matchedPasses, 1_776);
+  assert.equal(report.summary.missingPasses, 32);
+  assert.equal(report.summary.addedPasses, 0);
+});
+
+test("Tint modules compare structure without treating coefficients as invariants", () => {
+  const result = spawnSync(process.execPath, [
+    compareScript, macOS26Directory, macOS27Directory,
+    "--module=tint.sync-resolution", "--limit=1",
+  ], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.summary.tintMode, "structural");
+  assert.equal(report.summary.invalidMatrices, 0);
+  assert.equal(report.summary.coefficientValuesCompared, false);
+});
 
 test("semantic Recursive comparison ignores structural IDs for a stable repeat", () => {
   const result = runComparison(macOS27, macOS27Repeat);

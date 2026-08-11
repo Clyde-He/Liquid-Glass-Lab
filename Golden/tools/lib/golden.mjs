@@ -15,7 +15,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CELL_FIELDS, axisValues, sweptAxes } from "./cell.mjs";
-import { normalizeManifest } from "./manifest.mjs";
+import { normalizeManifest, resolveModule } from "./manifest.mjs";
 
 // .../Golden/tools/lib/golden.mjs -> .../Golden
 export const goldenDirectory = path.dirname(
@@ -34,11 +34,30 @@ export async function osDirectories() {
 }
 
 export async function readManifest(osDirectory) {
-  const raw = await readFile(
-    path.join(goldenDirectory, osDirectory, "manifest.json"),
-    "utf8"
-  );
-  return normalizeManifest(JSON.parse(raw), { osDirectory, goldenDirectory });
+  return readManifestAt(path.join(goldenDirectory, osDirectory));
+}
+
+export async function readManifestAt(directory) {
+  const raw = await readFile(path.join(directory, "manifest.json"), "utf8");
+  return normalizeManifest(JSON.parse(raw), {
+    osDirectory: path.basename(directory),
+    goldenDirectory: path.dirname(directory),
+  });
+}
+
+export async function resolveModulePath(directory, idOrAlias) {
+  const manifest = await readManifestAt(directory);
+  const module = resolveModule(manifest, idOrAlias);
+  if (!module) throw new Error(`Unknown Golden module or alias: ${idOrAlias}`);
+  return { manifest, module, file: path.join(directory, module.file) };
+}
+
+export async function loadModuleDocument(directory, idOrAlias) {
+  const resolved = await resolveModulePath(directory, idOrAlias);
+  return {
+    ...resolved,
+    document: JSON.parse(await readFile(resolved.file, "utf8")),
+  };
 }
 
 /**

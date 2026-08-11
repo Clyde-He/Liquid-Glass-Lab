@@ -47,12 +47,12 @@ final class TintMatrixSynthesizerTests: XCTestCase {
         var worstHoldout = worst
         var rowCount = 0
 
-        for name in [
-            "tint-parameterization-sweep.json",
-            "tint-parameterization-focused-phase-2b.json",
-            "tint-parameterization-hue-phase-2c.json",
+        for moduleID in [
+            "tint.parameterization.sweep",
+            "tint.parameterization.focused-2b",
+            "tint.parameterization.hue-2c",
         ] {
-            let document = try loadSweep(named: name)
+            let document = try loadSweep(moduleID: moduleID)
             for row in document.rows {
                 let synthesized = try XCTUnwrap(
                     GlassMaterialTintMatrixSynthesizer.matrix(
@@ -60,7 +60,7 @@ final class TintMatrixSynthesizerTests: XCTestCase {
                         cell: row.cell,
                         osMajorVersion: 27
                     ),
-                    "No synthesized matrix for \(row.colorID) in \(name)"
+                    "No synthesized matrix for \(row.colorID) in \(moduleID)"
                 )
                 XCTAssertEqual(synthesized.count, row.matrix.count)
                 rowCount += 1
@@ -74,7 +74,7 @@ final class TintMatrixSynthesizerTests: XCTestCase {
                         value: residual,
                         colorID: row.colorID,
                         coefficient: coefficient,
-                        fixture: name
+                        fixture: moduleID
                     )
                     if residual > worst.value { worst = observation }
                     if row.colorID.hasPrefix("rgb-holdout-"),
@@ -103,7 +103,7 @@ final class TintMatrixSynthesizerTests: XCTestCase {
     func testMacOS27DisplayP3BoundaryAndHoldoutPassExtendedModelGate()
         throws {
         let document = try loadWideGamutDocument(
-            named: "tint-wide-gamut-model.json"
+            moduleID: "tint.wide-gamut"
         )
         var worst = Residual(
             value: 0,
@@ -167,7 +167,7 @@ final class TintMatrixSynthesizerTests: XCTestCase {
     func testMacOS26DisplayP3BoundaryAndHoldoutPassExtendedModelGate()
         throws {
         let document = try loadWideGamutDocument(
-            named: "tint-wide-gamut-model.json",
+            moduleID: "tint.wide-gamut",
             directory: "Golden/macOS-26"
         )
         var worst = Residual(
@@ -259,7 +259,7 @@ final class TintMatrixSynthesizerTests: XCTestCase {
     func testMacOS27DisplayP3GoldenAlphaSweepOnlyChangesCoefficient18()
         throws {
         let document = try loadWideGamutDocument(
-            named: "tint-sync-resolution.json"
+            moduleID: "tint.sync-resolution"
         )
         let alphaRows = document.rows.filter {
             $0.colorID.hasPrefix("alpha-p3-")
@@ -304,13 +304,13 @@ final class TintMatrixSynthesizerTests: XCTestCase {
         var worstGrayHoldout = worst
         var rowCount = 0
 
-        for name in [
-            "tint-parameterization-sweep.json",
-            "tint-parameterization-focused-phase-2b.json",
-            "tint-parameterization-hue-phase-2c.json",
+        for moduleID in [
+            "tint.parameterization.sweep",
+            "tint.parameterization.focused-2b",
+            "tint.parameterization.hue-2c",
         ] {
             let document = try loadSweep(
-                named: name,
+                moduleID: moduleID,
                 directory: "Golden/macOS-26"
             )
             for row in document.rows {
@@ -320,7 +320,7 @@ final class TintMatrixSynthesizerTests: XCTestCase {
                         cell: row.cell,
                         osMajorVersion: 26
                     ),
-                    "No synthesized matrix for \(row.colorID) in \(name)"
+                    "No synthesized matrix for \(row.colorID) in \(moduleID)"
                 )
                 XCTAssertEqual(synthesized.count, row.matrix.count)
                 rowCount += 1
@@ -334,7 +334,7 @@ final class TintMatrixSynthesizerTests: XCTestCase {
                         value: residual,
                         colorID: row.colorID,
                         coefficient: coefficient,
-                        fixture: name
+                        fixture: moduleID
                     )
                     if residual > worst.value { worst = observation }
                     if row.colorID.hasPrefix("rgb-holdout-"),
@@ -831,37 +831,58 @@ final class TintMatrixSynthesizerTests: XCTestCase {
         }
     }
 
-    private func loadSweep(
-        named name: String,
-        directory: String = "Golden/macOS-27"
-    ) throws -> SweepDocument {
+    private struct GoldenManifest: Decodable {
+        struct Module: Decodable {
+            var id: String
+            var file: String
+        }
+
+        var modules: [Module]
+    }
+
+    private func moduleURL(
+        _ moduleID: String,
+        directory: String
+    ) throws -> URL {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let url = repositoryRoot
-            .appendingPathComponent(directory)
-            .appendingPathComponent(name)
+        let osDirectory = repositoryRoot.appendingPathComponent(directory)
+        let manifest = try JSONDecoder().decode(
+            GoldenManifest.self,
+            from: Data(
+                contentsOf: osDirectory.appendingPathComponent("manifest.json")
+            )
+        )
+        let module = try XCTUnwrap(
+            manifest.modules.first { $0.id == moduleID },
+            "Golden module \(moduleID) is not registered in \(directory)"
+        )
+        return osDirectory.appendingPathComponent(module.file)
+    }
+
+    private func loadSweep(
+        moduleID: String,
+        directory: String = "Golden/macOS-27"
+    ) throws -> SweepDocument {
         return try JSONDecoder().decode(
             SweepDocument.self,
-            from: Data(contentsOf: url)
+            from: Data(
+                contentsOf: try moduleURL(moduleID, directory: directory)
+            )
         )
     }
 
     private func loadWideGamutDocument(
-        named name: String,
+        moduleID: String,
         directory: String = "Golden/macOS-27"
     ) throws -> WideGamutDocument {
-        let repositoryRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let url = repositoryRoot
-            .appendingPathComponent(directory)
-            .appendingPathComponent(name)
         return try JSONDecoder().decode(
             WideGamutDocument.self,
-            from: Data(contentsOf: url)
+            from: Data(
+                contentsOf: try moduleURL(moduleID, directory: directory)
+            )
         )
     }
 

@@ -126,6 +126,15 @@ node Golden/tools/compare.mjs \
   Golden/macOS-26
 ```
 
+The default module is `core.static-scalar`. Select any registered payload by stable module ID:
+
+```sh
+node Golden/tools/compare.mjs \
+  Golden/macOS-27 \
+  Golden/macOS-26 \
+  --module=core.static-tree
+```
+
 The comparator matches rows by their semantic axes instead of array order, compares numeric values with a configurable tolerance, and reports missing rows, new rows, missing fields, new fields, changed values, and volatile environmental differences. Recipe rows use their context, Main, Subdued, Size, Variant, and Subvariant identity. Semantic rows use their fixed document environment plus `roleTag × requestedMain`; arrays are expanded to precise layer/filter/effect fields instead of being reported as one opaque JSON change.
 
 `inputs.inputMaxHeadroom` is retained in every raw fixture but reported separately by default: same-build active captures changed between the `9999` unbounded sentinel and display-derived `1.2` while all other comparable Shader, Rim, and geometry values remained stable.
@@ -161,7 +170,7 @@ Compare independently captured Recursive Pass Audits with:
 node Golden/tools/compare.mjs \
   Golden/macOS-26 \
   Golden/macOS-27 \
-  --fixture=recursive-pass-audit.json
+  --module=core.static-tree
 ```
 
 Recursive comparison defaults to `--recursive-mode=semantic`. It matches rows by Recipe axes, groups passes by channel plus family, and pairs duplicate families by owner-path and property-inventory similarity. The report separates pass additions/removals, client-object and owner-class transitions, property inventory changes, and resolved-value changes. Numeric descriptions honor the requested tolerance, while nested `inputMaxHeadroom` remains classified as volatile by default.
@@ -172,9 +181,11 @@ The semantic mode intentionally excludes raw Layer fields, structural IDs, and w
 node Golden/tools/compare.mjs \
   Golden/macOS-26 \
   Golden/macOS-27 \
-  --fixture=recursive-pass-audit.json \
+  --module=core.static-tree \
   --recursive-mode=raw
 ```
+
+Legacy `--fixture=<file>` remains available for paired control evidence and temporary unregistered captures. Canonical cross-version comparisons should use module IDs. Tint modules default to structural comparison: row coverage, matrix validity, and classification changes are checked without treating OS-specific coefficients as invariants. Pass `--tint-mode=values` only for an investigation that intentionally needs raw coefficient deltas.
 
 This distinction matters because a whole-tree wrapper changed between the accepted macOS 26 and macOS 27 captures. Raw mode faithfully reports that structural replacement; semantic mode prevents it from obscuring matched pass families and property changes. Both modes still report the distinct topology and value-signature counts plus raw changed-row totals.
 

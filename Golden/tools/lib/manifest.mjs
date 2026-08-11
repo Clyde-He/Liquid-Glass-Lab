@@ -181,6 +181,15 @@ export function moduleByID(manifest, id) {
   return manifest.modules.find((module) => module.id === id) ?? null;
 }
 
+export function resolveModule(manifest, idOrAlias) {
+  return moduleByID(manifest, idOrAlias)
+    ?? manifest.modules.find((module) => module.file === idOrAlias)
+    ?? manifest.modules.find(
+      (module) => module.provenance?.fixtureID === idOrAlias
+    )
+    ?? null;
+}
+
 export function profileModules(manifest, profileName = "full") {
   const profile = manifest.profiles?.[profileName];
   if (!profile) return null;
