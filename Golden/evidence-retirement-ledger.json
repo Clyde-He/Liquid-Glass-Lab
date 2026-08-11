@@ -75,7 +75,7 @@
       "build": "26A5388g",
       "role": "control",
       "claims": ["same-session-recursive-stability"],
-      "consumers": ["tools/compare.test.mjs", "tools/unify.mjs"],
+      "consumers": ["tools/compare.test.mjs"],
       "replacementModules": ["core.static-tree"],
       "coverageDelta": "pending-repeat-row-equivalence",
       "proposedDisposition": "coverage-replaced",

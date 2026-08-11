@@ -70,8 +70,8 @@ The current macOS 27 directory contains 12 registered standalone fixtures. The c
 
 The current macOS 26 directory contains nine registered standalone fixtures plus the direct canonical four-file unified archive:
 
-- `unified/static-scalar.json`: 408 rows, including the 336-cell core plus size, transposed-size, corner-radius, and real-key slices;
-- `unified/static-tree.json`: 357 rows, including 21 same-session repeats;
+- `unified/static-scalar.json`: 744 rows, including the 672-cell Light/Dark core plus size, transposed-size, corner-radius, and real-key slices;
+- `unified/static-tree.json`: 378 rows, including the 336-cell core, 21 same-session repeats, and 21 appearance-slice rows;
 - `unified/dynamic.json`: 104 runs / 936 samples across Material, participation, appearance, backdrop, Tint, direction, and `shortSide` 48/200/400;
 - `unified/meta.json`: canonical provenance, hashes, slice counts, and the exact macOS build.
 

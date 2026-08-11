@@ -356,7 +356,11 @@
       },
       "capturedAt": "2026-07-30T18:55:40Z",
       "axes": {
-        "colors": 16,
+        "sourceColors": {
+          "inUnitDomain": 3,
+          "displayP3Anchors": 3,
+          "displayP3AlphaVariants": 10
+        },
         "appearance": [
           "Light",
           "Dark"
@@ -370,9 +374,14 @@
           true
         ]
       },
+      "environment": {
+        "displaySignature": "Studio Display @2.0x",
+        "atlasSchemaVersion": 2
+      },
       "notes": [
-        "Certifies that every matrix read immediately after CATransaction.flush() is bit-identical to its settled readback.",
-        "All 128 rows retain paired Main-On proof and pass the certified-domain gate."
+        "All 128 matrices read immediately after CATransaction.flush() are bit-identical to settled readback and retain paired Main-On proof.",
+        "The 104 rows outside the extended-sRGB unit cube include two fixed P3 RGB values at five alpha values each.",
+        "Across the P3 alpha sweep, only coefficient 18 changes and it equals the requested alpha exactly."
       ],
       "role": "canonical"
     },
