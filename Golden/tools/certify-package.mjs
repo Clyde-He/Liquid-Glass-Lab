@@ -8,7 +8,9 @@ import { archiveInventory, gitState, repositoryRoot } from "./lib/bootstrap.mjs"
 import { goldenDirectory } from "./lib/golden.mjs";
 import { validateCatalogFile, packageResourceProblems } from "./lib/catalog-certification.mjs";
 import { sha256, validateFullDirectory } from "./lib/profile.mjs";
-import { readDispositions, verifyArchiveSet } from "./lib/verify-engine.mjs";
+import {
+  readDispositions, releaseVerificationProblems, verifyArchiveSet,
+} from "./lib/verify-engine.mjs";
 
 const args = process.argv.slice(2);
 const osName = option("--os");
@@ -33,9 +35,10 @@ const major = Number(match[1]);
 const golden = path.join(goldenDirectory, osName);
 const catalog = path.join(repositoryRoot, `LiquidGlassLab/GlassMaterial/Catalog/glass-macos-${major}.json`);
 const scratch = await mkdtemp(path.join(os.tmpdir(), "glass-package-certification-"));
+const swiftScratch = path.join(scratch, "swiftpm");
 const gates = [];
 
-function run(name, commandName, commandArgs, environment = {}) {
+function run(name, commandName, commandArgs, { environment = {}, expectedTest = null } = {}) {
   const started = Date.now();
   const result = spawnSync(commandName, commandArgs, {
     cwd: repositoryRoot, encoding: "utf8", maxBuffer: 128 * 1024 * 1024,
@@ -47,14 +50,18 @@ function run(name, commandName, commandArgs, environment = {}) {
     },
   });
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  const executedExpectedTest = expectedTest === null || output.split("\n").some((line) =>
+    line.includes(expectedTest) && line.includes("passed"));
   const gate = {
-    name, passed: !result.error && result.status === 0, exitStatus: result.status,
+    name, passed: !result.error && result.status === 0 && executedExpectedTest,
+    exitStatus: result.status, expectedTest, executedExpectedTest,
     durationMilliseconds: Date.now() - started, outputSha256: sha256(Buffer.from(output)),
     outputTail: output.trim().split("\n").slice(-20),
   };
   gates.push(gate);
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${name} failed:\n${gate.outputTail.join("\n")}`);
+  if (!executedExpectedTest) throw new Error(`${name} did not execute and pass ${expectedTest}`);
   return result.stdout;
 }
 
@@ -68,8 +75,9 @@ try {
   const verification = await verifyArchiveSet({
     archives: [{ name: osName, directory: golden }], dispositions,
   });
-  if (!verification.ok || verification.undispositionedSkips.length) {
-    throw new Error("selected Golden failed verification or has undispositioned skips");
+  const verificationProblems = releaseVerificationProblems(verification);
+  if (verificationProblems.length) {
+    throw new Error(`selected Golden is not release-ready: ${verificationProblems.join("; ")}`);
   }
   gates.push({ name: "structured Golden verification", passed: true,
     tally: verification.tally, dispositionedSkips: verification.outcomes.filter(({ disposition }) => disposition).length });
@@ -78,16 +86,20 @@ try {
   if (catalogResult.problems.length) throw new Error(catalogResult.problems.join("; "));
   gates.push({ name: "catalog JSON contract", passed: true });
 
-  const dump = JSON.parse(run("Swift Package resource isolation", "swift", ["package", "dump-package"]));
+  const dump = JSON.parse(run("Swift Package resource isolation", "swift",
+    ["package", "--scratch-path", swiftScratch, "dump-package"]));
   const resourceProblems = packageResourceProblems(dump);
   if (resourceProblems.length) throw new Error(resourceProblems.join("; "));
 
-  run("generic bundled Catalog test", "swift", ["test", "--filter",
-    "CatalogTests/testEveryBundledCatalogIsStructurallyCertified"]);
-  run("selected-major Golden-backed Tint test", "swift", ["test", "--filter",
-    "TintMatrixSynthesizerTests/testSelectedMajorGoldenBackedTintCertification"],
-  { CERTIFY_OS_MAJOR: String(major) });
-  run("full Swift Package tests", "swift", ["test"]);
+  run("generic bundled Catalog test", "swift", ["test", "--scratch-path", swiftScratch,
+    "--filter", "CatalogTests/testEveryBundledCatalogIsStructurallyCertified"],
+  { expectedTest: "testEveryBundledCatalogIsStructurallyCertified" });
+  run("selected-major Golden-backed Tint test", "swift", ["test", "--scratch-path", swiftScratch,
+    "--filter", "TintMatrixSynthesizerTests/testSelectedMajorGoldenBackedTintCertification"], {
+    environment: { CERTIFY_OS_MAJOR: String(major) },
+    expectedTest: "testSelectedMajorGoldenBackedTintCertification",
+  });
+  run("full Swift Package tests", "swift", ["test", "--scratch-path", swiftScratch]);
 
   const after = gitState();
   if (JSON.stringify(before) !== JSON.stringify(after)) {

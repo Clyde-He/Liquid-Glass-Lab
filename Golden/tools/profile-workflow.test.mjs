@@ -5,13 +5,18 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  archiveInventory, assertReportStillCurrent, gitState, inventoryDigest, pathsOverlap,
-  resolveBootstrapContext,
+  archiveInventory, assertReportStillCurrent, BOOTSTRAP_GATE_NAMES, gitState,
+  inventoryDigest, pathsOverlap, resolveBootstrapContext,
 } from "./lib/bootstrap.mjs";
 import { catalogDocumentProblems, packageResourceProblems } from "./lib/catalog-certification.mjs";
 import { goldenDirectory } from "./lib/golden.mjs";
-import { PROFILE_DEFINITION_VERSION, safeModulePath, validateFullDirectory } from "./lib/profile.mjs";
-import { readDispositions, verifyArchiveSet } from "./lib/verify-engine.mjs";
+import {
+  PROFILE_DEFINITION_VERSION, moduleAdmissionProblems, safeModulePath,
+  semanticAdmissionProblems, validateFullDirectory,
+} from "./lib/profile.mjs";
+import {
+  applyVerificationDispositions, readDispositions, releaseVerificationProblems, verifyArchiveSet,
+} from "./lib/verify-engine.mjs";
 
 test("accepted archives satisfy the shared exact Full admission contract", async () => {
   for (const name of ["macOS-26", "macOS-27"]) {
@@ -31,42 +36,103 @@ test("module paths and bootstrap paths reject traversal and overlap", () => {
 
 test("bootstrap rejects case-mismatched staging and an existing canonical target", async () => {
   const root = await mkdtemp("/private/tmp/golden-bootstrap-path-test-");
-  const mismatched = path.join(root, "macos-99.full-staging");
-  await mkdir(mismatched);
-  await writeFile(path.join(mismatched, "manifest.json"), JSON.stringify({ platform: { version: "99.0" } }));
-  await assert.rejects(resolveBootstrapContext({ candidatePath: mismatched }), /must be named macOS-99/);
+  try {
+    const mismatched = path.join(root, "macos-99.full-staging");
+    await mkdir(mismatched);
+    await writeFile(path.join(mismatched, "manifest.json"), JSON.stringify({ platform: { version: "99.0" } }));
+    await assert.rejects(resolveBootstrapContext({ candidatePath: mismatched }), /must be named macOS-99/);
 
-  const collision = path.join(root, "macOS-27.full-staging");
-  await mkdir(collision);
-  await writeFile(path.join(collision, "manifest.json"), JSON.stringify({ platform: { version: "27.0" } }));
-  await assert.rejects(resolveBootstrapContext({ candidatePath: collision }), /canonical target already exists/);
+    const collision = path.join(root, "macOS-27.full-staging");
+    await mkdir(collision);
+    await writeFile(path.join(collision, "manifest.json"), JSON.stringify({ platform: { version: "27.0" } }));
+    await assert.rejects(resolveBootstrapContext({ candidatePath: collision }), /canonical target already exists/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("shared module admission rejects coherent-looking incomplete evidence", async () => {
+  const dynamic = JSON.parse(await readFile(path.join(goldenDirectory, "macOS-27/unified/dynamic.json")));
+  const missingAxis = structuredClone(dynamic);
+  delete missingAxis.runs[0].cell.direction;
+  assert.match(moduleAdmissionProblems("core.dynamic", missingAxis).join("; "), /invalid cell/);
+  const wrongShortSide = structuredClone(dynamic);
+  wrongShortSide.runs[0].cell.shortSide = 999;
+  assert.match(moduleAdmissionProblems("core.dynamic", wrongShortSide).join("; "), /inconsistent shortSide/);
+  const rejectedRun = structuredClone(dynamic);
+  rejectedRun.runs[0].accepted = false;
+  assert.match(moduleAdmissionProblems("core.dynamic", rejectedRun).join("; "), /not accepted/);
+
+  const sweep = JSON.parse(await readFile(path.join(goldenDirectory, "macOS-27/tint-parameterization-sweep.json")));
+  const emptySweep = { ...sweep, rows: [] };
+  assert.match(moduleAdmissionProblems("tint.parameterization.sweep", emptySweep).join("; "), /expected 1360 rows/);
+  const duplicateSweep = structuredClone(sweep);
+  duplicateSweep.rows.at(-1).colorID = duplicateSweep.rows[0].colorID;
+  duplicateSweep.rows.at(-1).cell = structuredClone(duplicateSweep.rows[0].cell);
+  assert.match(moduleAdmissionProblems("tint.parameterization.sweep", duplicateSweep).join("; "), /duplicate row identity/);
+
+  const sync = JSON.parse(await readFile(path.join(goldenDirectory, "macOS-27/tint-sync-resolution.json")));
+  assert.match(moduleAdmissionProblems("tint.sync-resolution", { ...sync, rows: [] }).join("; "), /expected 128 rows/);
+});
+
+test("Semantic admission binds exact roles while modeling macOS 26 unavailability", async () => {
+  const semantic = JSON.parse(await readFile(path.join(goldenDirectory, "macOS-27/semantic-usage-trees.json")));
+  assert.deepEqual(semanticAdmissionProblems(semantic), []);
+  const arbitrary = structuredClone(semantic);
+  arbitrary.entries[0].roleTag = 99;
+  arbitrary.entries[0].snapshot = {};
+  assert.notDeepEqual(semanticAdmissionProblems(arbitrary), []);
+  const unavailable = structuredClone(semantic);
+  unavailable.operatingSystem = unavailable.operatingSystem.replace("Version 27.0", "Version 26.0");
+  unavailable.entries[0].isAvailable = false;
+  unavailable.entries[0].snapshot = null;
+  assert.deepEqual(semanticAdmissionProblems(unavailable), []);
+  unavailable.operatingSystem = unavailable.operatingSystem.replace("Version 26.0", "Version 27.0");
+  assert.notDeepEqual(semanticAdmissionProblems(unavailable), []);
 });
 
 test("archive inventory rejects symlinks and special indirection", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "golden-inventory-test-"));
-  await writeFile(path.join(root, "file.json"), "{}\n");
-  await symlink(path.join(root, "file.json"), path.join(root, "link.json"));
-  await assert.rejects(archiveInventory(root), /symlinks are forbidden/);
+  try {
+    await writeFile(path.join(root, "file.json"), "{}\n");
+    await symlink(path.join(root, "file.json"), path.join(root, "link.json"));
+    await assert.rejects(archiveInventory(root), /symlinks are forbidden/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("acceptance report detects candidate byte TOCTOU", async () => {
   const candidate = await mkdtemp(path.join(os.tmpdir(), "golden-report-test-"));
-  await writeFile(path.join(candidate, "manifest.json"), "{}\n");
-  const files = await archiveInventory(candidate);
-  const report = {
-    schemaVersion: 1, workflow: "bootstrap-new-major",
-    candidate: { name: "macOS-99", path: candidate, files,
-      inventorySha256: inventoryDigest(files) },
-    target: path.join(goldenDirectory, "macOS-99"),
-    baseline: { waived: true, reason: "test fixture" },
-    profileDefinitionVersion: PROFILE_DEFINITION_VERSION,
-    git: gitState(), gates: { reviewed: true },
-  };
-  const context = { name: "macOS-99", candidate, target: report.target,
-    baseline: null, waiver: "test fixture" };
-  await assertReportStillCurrent(report, context);
-  await writeFile(path.join(candidate, "manifest.json"), "{\"changed\":true}\n");
-  await assert.rejects(assertReportStillCurrent(report, context), /candidate bytes changed/);
+  try {
+    await writeFile(path.join(candidate, "manifest.json"), "{}\n");
+    const files = await archiveInventory(candidate);
+    const report = {
+      schemaVersion: 1, workflow: "bootstrap-new-major",
+      candidate: { name: "macOS-99", path: candidate, files,
+        manifestSha256: files.find(({ file }) => file === "manifest.json").sha256,
+        inventorySha256: inventoryDigest(files) },
+      target: path.join(goldenDirectory, "macOS-99"),
+      baseline: { waived: true, reason: "test fixture" },
+      profileDefinitionVersion: PROFILE_DEFINITION_VERSION,
+      git: gitState(), comparisons: [],
+      verification: { schemaVersion: 1, ok: true, undispositionedSkips: [], staleDispositions: [] },
+      gates: Object.fromEntries(BOOTSTRAP_GATE_NAMES.map((name) => [name, true])),
+    };
+    const context = { name: "macOS-99", candidate, target: report.target,
+      baseline: null, waiver: "test fixture" };
+    await assertReportStillCurrent(report, context);
+    const incompleteReport = structuredClone(report);
+    delete incompleteReport.gates.structuredVerification;
+    await assert.rejects(assertReportStillCurrent(incompleteReport, context), /exact successful bootstrap gate set/);
+    const fakeVerification = structuredClone(report);
+    fakeVerification.verification = { schemaVersion: 1, ok: true };
+    await assert.rejects(assertReportStillCurrent(fakeVerification, context), /release-ready verification/);
+    await writeFile(path.join(candidate, "manifest.json"), "{\"changed\":true}\n");
+    await assert.rejects(assertReportStillCurrent(report, context), /transaction bytes do not match/);
+  } finally {
+    await rm(candidate, { recursive: true, force: true });
+  }
 });
 
 test("structured verifier applies only exact reviewed skip dispositions", async () => {
@@ -77,7 +143,41 @@ test("structured verifier applies only exact reviewed skip dispositions", async 
   assert.equal(report.ok, true);
   assert.equal(report.tally.skipped, 2);
   assert.equal(report.undispositionedSkips.length, 0);
+  assert.equal(report.staleDispositions.length, 0);
   assert.equal(report.outcomes.filter(({ disposition }) => disposition).length, 2);
+});
+
+test("cross-version dispositions bind exact scope, learning, and reason", async () => {
+  const outcomes = [
+    { osDirectory: "macOS-26 ↔ macOS-27", id: "cross-learning", reason: "missing axis", status: "skipped" },
+    { osDirectory: "macOS-27", id: "passing-learning", status: "passed" },
+  ];
+  const exact = {
+    os: "macOS-26 ↔ macOS-27", learning: "cross-learning", reason: "missing axis",
+    reviewedBy: "test", reviewedAt: "2026-08-11",
+  };
+  const relevantButStale = {
+    os: "macOS-27", learning: "old-learning", reason: "old reason",
+    reviewedBy: "test", reviewedAt: "2026-08-11",
+  };
+  const irrelevant = {
+    os: "macOS-99", learning: "future-learning", reason: "future reason",
+    reviewedBy: "test", reviewedAt: "2026-08-11",
+  };
+  const state = applyVerificationDispositions(outcomes, [exact, relevantButStale, irrelevant]);
+  assert.equal(state.undispositionedSkips.length, 0);
+  assert.deepEqual(state.staleDispositions, [relevantButStale]);
+  assert.equal(outcomes[0].disposition, exact);
+  assert.match(releaseVerificationProblems({ ok: true, ...state }).join("; "), /1 reviewed dispositions are stale/);
+
+  const root = await mkdtemp(path.join(os.tmpdir(), "golden-disposition-test-"));
+  const file = path.join(root, "dispositions.json");
+  try {
+    await writeFile(file, `${JSON.stringify({ schemaVersion: 1, dispositions: [exact] })}\n`);
+    assert.deepEqual(await readDispositions(file), [exact]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("catalog and package resource contracts are exact", async () => {
@@ -99,8 +199,14 @@ test("atomic new-major install uses the Darwin no-replace primitive", async () =
   assert.match(source, /renameatx_np/);
   assert.match(source, /RENAME_EXCL/);
   const bootstrap = await readFile(path.join(goldenDirectory, "tools/bootstrap-new-major.mjs"), "utf8");
+  const capture = await readFile(path.join(goldenDirectory, "tools/capture-profile.mjs"), "utf8");
+  const certifier = await readFile(path.join(goldenDirectory, "tools/certify-package.mjs"), "utf8");
   assert.match(bootstrap, /source staging was preserved/);
+  assert.match(bootstrap, /assertReviewedInventory\(transaction/);
   assert.doesNotMatch(bootstrap, /replaceItemAt/);
+  assert.match(capture, /releaseVerificationProblems\(verification\)/);
+  assert.match(certifier, /--scratch-path/);
+  assert.match(certifier, /executedExpectedTest/);
 
   const root = await mkdtemp(path.join(os.tmpdir(), "golden-atomic-create-test-"));
   const first = path.join(root, "first");

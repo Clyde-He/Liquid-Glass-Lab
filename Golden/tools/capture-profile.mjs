@@ -11,6 +11,9 @@ import {
   PROFILE_DEFINITION_VERSION, payloadModule, platformFrom, profileForMajor,
   validateFullDirectory,
 } from "./lib/profile.mjs";
+import {
+  readDispositions, releaseVerificationProblems, verifyArchiveSet,
+} from "./lib/verify-engine.mjs";
 const TINT_CHECKPOINT_FILES = FULL.slice(1, 4).map(([, , file]) => file);
 const TINT_CHECKPOINT_FLAGS = new Set(FULL.slice(1, 4).map(([, flag]) => flag));
 const toolDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -263,6 +266,15 @@ async function promote(staging, accepted) {
   await writeFile(`${staging}.equivalence.json`, `${JSON.stringify({ equivalent, comparisons }, null, 2)}\n`);
   if (!equivalent && !process.argv.includes("--accept-drift")) {
     throw new Error(`Full value equivalence failed; inspect ${staging}.equivalence.json and rerun with --accept-drift after approval`);
+  }
+  const osDirectory = `macOS-${Number.parseInt(staged.platform.version, 10)}`;
+  const verification = await verifyArchiveSet({
+    archives: [{ name: osDirectory, directory: staging }],
+    dispositions: await readDispositions(),
+  });
+  const verificationProblems = releaseVerificationProblems(verification);
+  if (verificationProblems.length) {
+    throw new Error(`promotion verification failed: ${verificationProblems.join("; ")}`);
   }
   staged.status = "accepted";
   await writeFile(stagedPath, `${JSON.stringify(staged, null, 2)}\n`);

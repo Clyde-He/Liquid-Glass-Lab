@@ -4,9 +4,15 @@ import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { goldenDirectory } from "./golden.mjs";
 import { PROFILE_DEFINITION_VERSION, sha256, validateFullDirectory } from "./profile.mjs";
-import { readDispositions, verifyArchiveSet } from "./verify-engine.mjs";
+import {
+  readDispositions, releaseVerificationProblems, verifyArchiveSet,
+} from "./verify-engine.mjs";
 
 export const repositoryRoot = path.dirname(goldenDirectory);
+export const BOOTSTRAP_GATE_NAMES = [
+  "fullAdmission", "exactProfile", "directCapture", "structuredVerification",
+  "noUndispositionedSkips", "noStaleDispositions", "canonicalTargetAbsent",
+];
 
 function command(commandName, args) {
   const result = spawnSync(commandName, args, {
@@ -50,6 +56,27 @@ export function inventoryDigest(files) {
   return createHash("sha256").update(JSON.stringify(files)).digest("hex");
 }
 
+export async function assertReviewedInventory(root, reviewed) {
+  const inventory = await archiveInventory(root);
+  if (inventoryDigest(inventory) !== reviewed.inventorySha256
+      || JSON.stringify(inventory) !== JSON.stringify(reviewed.files)) {
+    throw new Error("copied transaction bytes do not match the reviewed candidate");
+  }
+  const manifestSha256 = inventory.find(({ file }) => file === "manifest.json")?.sha256;
+  if (!reviewed.manifestSha256 || manifestSha256 !== reviewed.manifestSha256) {
+    throw new Error("reviewed candidate manifest hash is missing or inconsistent");
+  }
+  return inventory;
+}
+
+export async function assertReviewedPayloadInventory(root, reviewed) {
+  const payloads = (await archiveInventory(root)).filter(({ file }) => file !== "manifest.json");
+  const reviewedPayloads = reviewed.files.filter(({ file }) => file !== "manifest.json");
+  if (JSON.stringify(payloads) !== JSON.stringify(reviewedPayloads)) {
+    throw new Error("transaction payload bytes changed after review");
+  }
+}
+
 export function gitState() {
   const revision = command("git", ["rev-parse", "HEAD"]);
   const trackedDiff = command("git", ["diff", "--binary", "HEAD", "--"]);
@@ -70,28 +97,13 @@ async function acceptedDirectories() {
   return accepted.sort((lhs, rhs) => lhs.major - rhs.major);
 }
 
-function directCaptureProblems(manifest, major) {
+function newMajorBuildProblems(manifest) {
   const problems = [];
-  if (manifest.status !== "staged") problems.push("candidate manifest.status must be staged");
-  if (manifest.platform?.product !== "macOS"
-      || Number.parseInt(manifest.platform?.version, 10) !== major) {
-    problems.push(`candidate platform must be macOS major ${major}`);
-  }
   const required = new Set(manifest.profiles?.full?.required ?? []);
   const modules = (manifest.modules ?? []).filter(({ id }) => required.has(id));
   const builds = new Set();
   for (const module of modules) {
-    if (module.platform?.product !== "macOS"
-        || Number.parseInt(module.platform?.version, 10) !== major) {
-      problems.push(`${module.id}: platform does not match macOS-${major}`);
-    }
-    if (module.platform?.architecture !== manifest.platform?.architecture) {
-      problems.push(`${module.id}: architecture disagrees with manifest`);
-    }
     builds.add(module.platform?.build);
-    if (module.provenance?.kind !== "direct-capture") {
-      problems.push(`${module.id}: Full modules must be direct captures`);
-    }
   }
   if (builds.size !== 1 || builds.has(undefined) || builds.has("unknown")) {
     problems.push(`Full modules must carry one concrete build; got ${[...builds].join(", ")}`);
@@ -132,7 +144,7 @@ export async function resolveBootstrapContext({ candidatePath, baselinePath = nu
     if (error?.code !== "ENOENT") throw error;
   }
   const full = await validateFullDirectory(candidate, { expectedStatus: "staged" });
-  const problems = [...full.problems, ...directCaptureProblems(manifest, major)];
+  const problems = [...full.problems, ...newMajorBuildProblems(manifest)];
   if (problems.length) throw new Error(`candidate failed Full admission:\n${problems.join("\n")}`);
 
   const accepted = await acceptedDirectories();
@@ -186,8 +198,9 @@ export async function buildBootstrapReport(context) {
   const verification = await verifyArchiveSet({
     archives, includeCrossVersion: Boolean(context.baseline), dispositions,
   });
-  if (!verification.ok || verification.undispositionedSkips.length) {
-    throw new Error("candidate verification failed or introduced undispositioned skips");
+  const verificationProblems = releaseVerificationProblems(verification);
+  if (verificationProblems.length) {
+    throw new Error(`candidate verification is not release-ready: ${verificationProblems.join("; ")}`);
   }
   const inventory = await archiveInventory(context.candidate);
   const baselineInventory = context.baseline
@@ -233,6 +246,7 @@ export async function buildBootstrapReport(context) {
     gates: {
       fullAdmission: true, exactProfile: true, directCapture: true,
       structuredVerification: true, noUndispositionedSkips: true,
+      noStaleDispositions: true,
       canonicalTargetAbsent: true,
     },
   };
@@ -246,14 +260,17 @@ export async function assertReportStillCurrent(report, context) {
       || report.target !== context.target || report.profileDefinitionVersion !== PROFILE_DEFINITION_VERSION) {
     throw new Error("review report does not describe this candidate and target");
   }
-  if (Object.values(report.gates ?? {}).some((value) => value !== true)) {
-    throw new Error("review report contains a failed gate");
+  if (JSON.stringify(Object.keys(report.gates ?? {}).sort())
+      !== JSON.stringify([...BOOTSTRAP_GATE_NAMES].sort())
+      || BOOTSTRAP_GATE_NAMES.some((name) => report.gates[name] !== true)) {
+    throw new Error("review report does not contain the exact successful bootstrap gate set");
   }
-  const inventory = await archiveInventory(context.candidate);
-  if (inventoryDigest(inventory) !== report.candidate.inventorySha256
-      || JSON.stringify(inventory) !== JSON.stringify(report.candidate.files)) {
-    throw new Error("candidate bytes changed after review");
+  if (report.verification?.schemaVersion !== 1
+      || releaseVerificationProblems(report.verification).length
+      || !Array.isArray(report.comparisons)) {
+    throw new Error("review report has no valid release-ready verification or comparisons");
   }
+  await assertReviewedInventory(context.candidate, report.candidate);
   if (context.baseline) {
     if (report.baseline?.name !== context.baseline.name
         || report.baseline?.path !== context.baseline.directory) {
@@ -262,6 +279,10 @@ export async function assertReportStillCurrent(report, context) {
     const baselineInventory = await archiveInventory(context.baseline.directory);
     if (inventoryDigest(baselineInventory) !== report.baseline.inventorySha256) {
       throw new Error("baseline bytes changed after review");
+    }
+    const baselineManifest = baselineInventory.find(({ file }) => file === "manifest.json")?.sha256;
+    if (!report.baseline.manifestSha256 || baselineManifest !== report.baseline.manifestSha256) {
+      throw new Error("review report baseline manifest hash is missing or inconsistent");
     }
   } else if (!report.baseline?.waived || report.baseline.reason !== context.waiver) {
     throw new Error("review report baseline waiver does not match");

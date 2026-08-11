@@ -49,7 +49,9 @@ export function packageResourceProblems(packageDescription) {
   if (JSON.stringify(resourcePaths) !== JSON.stringify(["Catalog"])) {
     problems.push(`AdjustableGlass resources must be exactly Catalog; got ${resourcePaths.join(", ")}`);
   }
-  if (JSON.stringify(packageDescription).includes("Golden")) {
+  const allResourcePaths = (packageDescription.targets ?? [])
+    .flatMap(({ resources = [] }) => resources.map(({ path }) => path));
+  if (allResourcePaths.some((resourcePath) => resourcePath.split(/[\\/]/).includes("Golden"))) {
     problems.push("Swift Package manifest output references Golden");
   }
   return problems;

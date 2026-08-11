@@ -143,7 +143,7 @@ node Golden/tools/certify-package.mjs \
   --report /private/tmp/macOS-27-package-certification.json
 ```
 
-Certification requires an accepted exact Full profile, structured Golden verification with no undispositioned skip, the exact per-major Catalog contract, Swift decoding/topology tests, a selected-major Golden-backed Tint synthesis test, and the full Swift Package test suite. `swift package dump-package` must show `Catalog` as the only product resource; `Golden` remains repository-only research evidence.
+Certification requires an accepted exact Full profile, structured Golden verification with no undispositioned skip or stale reviewed disposition, the exact per-major Catalog contract, Swift decoding/topology tests, a selected-major Golden-backed Tint synthesis test, and the full Swift Package test suite. SwiftPM builds in an isolated temporary scratch directory, and `swift package dump-package` must show `Catalog` as the only product resource; `Golden` remains repository-only research evidence.
 
 ### Two kinds of learning
 
@@ -157,7 +157,7 @@ A learning may report only three outcomes, and **a claim nothing checked must ne
 - **skip, section missing** — this OS has not captured what the learning reads;
 - **skip, unverifiable** — the section exists but the axis the claim needs was never swept. The learning calls `expect.unverifiable(reason)` and the reason says what capture would settle it.
 
-Committed exceptions live in `verification-dispositions.json` and bind OS directory, learning ID, and exact reason. The ordinary verifier still reports them as skips; bootstrap and Package certification reject any new skip that has no matching reviewed disposition.
+Committed exceptions live in `verification-dispositions.json` and bind an exact OS directory or cross-version pair, learning ID, and reason. The ordinary verifier still reports them as skips; bootstrap, same-major promotion, and Package certification reject every unmatched skip and every reviewed disposition that has become stale for the selected verification scope.
 
 The third outcome exists because the earlier suite used an `ok(true, "not present here")` escape hatch, allowing a claim to sit green while verifying nothing. The two current macOS 26 skips are explicitly dispositioned because that OS has no gated blur endpoint and therefore no tap-only hump; macOS 27 supplies those observations and runs both claims normally.
 

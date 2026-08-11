@@ -16,6 +16,8 @@ function buildOf(document) {
 async function checkIntegrity(name, directory) {
   const manifest = await readManifestAt(directory);
   const problems = [];
+  const declaredName = `macOS-${Number.parseInt(manifest.platform?.version, 10)}`;
+  if (name !== declaredName) problems.push(`archive name ${name} disagrees with manifest major ${declaredName}`);
   const registered = new Set((manifest.modules ?? []).map((module) => module.file));
 
   for (const entry of manifest.fixtures ?? []) {
@@ -52,7 +54,6 @@ async function checkIntegrity(name, directory) {
   async function scan(relative = "") {
     for (const entry of await readdir(path.join(directory, relative), { withFileTypes: true })) {
       const file = path.posix.join(relative, entry.name);
-      if (entry.isDirectory() && entry.name.startsWith(".unified.staging-")) continue;
       if (entry.isDirectory()) await scan(file);
       else if (entry.name.endsWith(".json") && file !== "manifest.json"
           && !registered.has(file)) problems.push(`${file}: on disk but unregistered`);
@@ -172,7 +173,8 @@ export async function readDispositions(file = path.join(goldenDirectory, "verifi
   const keys = new Set();
   for (const entry of document.dispositions) {
     const key = `${entry.os}\0${entry.learning}`;
-    if (!/^macOS-[0-9]+$/.test(entry.os ?? "") || typeof entry.learning !== "string"
+    if (!/^macOS-[0-9]+(?: ↔ macOS-[0-9]+)?$/.test(entry.os ?? "")
+        || typeof entry.learning !== "string"
         || !entry.learning || typeof entry.reason !== "string" || !entry.reason
         || typeof entry.reviewedBy !== "string" || !entry.reviewedBy
         || !/^\d{4}-\d{2}-\d{2}$/.test(entry.reviewedAt ?? "")) {
@@ -184,7 +186,7 @@ export async function readDispositions(file = path.join(goldenDirectory, "verifi
   return document.dispositions;
 }
 
-function applyDispositions(outcomes, dispositions) {
+export function applyVerificationDispositions(outcomes, dispositions) {
   const used = new Set();
   const skipped = outcomes.filter(({ status }) => status === "skipped");
   for (const outcome of skipped) {
@@ -197,8 +199,25 @@ function applyDispositions(outcomes, dispositions) {
   }
   return {
     undispositionedSkips: skipped.filter(({ disposition }) => !disposition),
-    staleDispositions: dispositions.filter((_, index) => !used.has(index)),
+    staleDispositions: dispositions.filter((entry, index) =>
+      outcomes.some(({ osDirectory }) => osDirectory === entry.os) && !used.has(index)),
   };
+}
+
+export function releaseVerificationProblems(report) {
+  const problems = [];
+  if (report?.ok !== true) problems.push("integrity or learning failures are present");
+  if (!Array.isArray(report?.undispositionedSkips)) {
+    problems.push("undispositioned skip results are missing");
+  } else if (report.undispositionedSkips.length) {
+    problems.push(`${report.undispositionedSkips.length} skips have no exact reviewed disposition`);
+  }
+  if (!Array.isArray(report?.staleDispositions)) {
+    problems.push("stale disposition results are missing");
+  } else if (report.staleDispositions.length) {
+    problems.push(`${report.staleDispositions.length} reviewed dispositions are stale`);
+  }
+  return problems;
 }
 
 /**
@@ -257,7 +276,7 @@ export async function verifyArchiveSet({ archives, includeCrossVersion = false, 
   }
 
   const allOutcomes = [...outcomes, ...crossOutcomes];
-  const dispositionState = applyDispositions(allOutcomes, dispositions);
+  const dispositionState = applyVerificationDispositions(allOutcomes, dispositions);
   const tally = {
     passed: allOutcomes.filter(({ status }) => status === "passed").length,
     failed: allOutcomes.filter(({ status }) => status === "failed").length,

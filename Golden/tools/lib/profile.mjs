@@ -52,6 +52,35 @@ export const CORE_SHAPES = {
   },
 };
 
+const TINT_SHAPES = {
+  "tint.parameterization.sweep": {
+    rows: 1360,
+    identitySha256: "ab7196efef390b9ec3af3e77e00610b9540662f362496db63c1bb703ab62b2ea",
+    planColors: 170,
+    planSha256: "3278cafefe287cbd2ee3a94240ffec60fe037cf715683f192ff480e02361ffa4",
+  },
+  "tint.parameterization.focused-2b": {
+    rows: 1048,
+    identitySha256: "ccb99e5883485885c65c84dc358ce060565d3b19e3969b28264eaf15585819dc",
+    planColors: 131,
+    planSha256: "ac6e97d031972ab90148699f3928533e87cb6738800f02889eb010da5be31869",
+  },
+  "tint.parameterization.hue-2c": {
+    rows: 1088,
+    identitySha256: "5945d260822d1b9519fdc76b73cd3024cf6b1d3610262d8da0f9efd0d7db4b1a",
+    planColors: 136,
+    planSha256: "329194f932162d4da46965d10bf1765a56b1ce65f96a5c48dc6c4f5062c7c1da",
+  },
+  "tint.sync-resolution": {
+    rows: 128,
+    identitySha256: "ee8eb7e5fc096e869937bbae570b07c23571ae6a9a96d246107841a2cf2c7680",
+  },
+  "tint.wide-gamut": {
+    rows: 408,
+    identitySha256: "69075507d18dd9b254b8bfe7415b90ba759d75b862e6cf98be092d540e1f2659",
+  },
+};
+
 const CORE_CELL_FIELDS = [
   "variant", "subvariant", "main", "key", "subdued", "appearance",
   "backdrop", "tint", "width", "height", "cornerRadius", "host", "direction",
@@ -108,8 +137,14 @@ function coreAdmissionProblems(id, payload) {
     const identity = cellIdentity(item);
     if (identities.has(identity)) problems.push(`${id}: duplicate identity at ${index}`);
     identities.add(identity);
-    if (!item.cell || Object.values(item.cell).some((value) => typeof value === "number" && !Number.isFinite(value))) {
+    if (item.accepted !== true) problems.push(`${id}: row ${index} was not accepted by the capture driver`);
+    if (!item.cell || [...CORE_CELL_FIELDS, "shortSide"].some((field) =>
+      !Object.hasOwn(item.cell ?? {}, field))
+        || Object.values(item.cell).some((value) => typeof value === "number" && !Number.isFinite(value))) {
       problems.push(`${id}: invalid cell at ${index}`);
+    } else if (!Number.isFinite(item.cell.width) || !Number.isFinite(item.cell.height)
+        || item.cell.shortSide !== Math.min(item.cell.width, item.cell.height)) {
+      problems.push(`${id}: cell ${index} has an inconsistent shortSide`);
     }
     if (id === "core.dynamic") {
       if (!Number.isFinite(item.maximumAttachedAnimationDuration)) {
@@ -119,9 +154,23 @@ function coreAdmissionProblems(id, payload) {
         problems.push(`${id}: run ${index} must contain ${shape.samplesPerRun} samples`);
       } else if (item.samples.some((sample) => !Number.isFinite(sample.requestedProgress)
           || !Number.isFinite(sample.elapsed)
-          || (sample.progress != null && !Number.isFinite(sample.progress)))) {
+          || (sample.progress != null && !Number.isFinite(sample.progress))
+          || !Array.isArray(sample.effects) || !Array.isArray(sample.filters)
+          || !Array.isArray(sample.layerLines) || sample.layerLines.length === 0)) {
         problems.push(`${id}: run ${index} has non-finite timing or progress`);
       }
+    }
+    if (id === "core.static-scalar"
+        && ["inputs", "passes", "geometry", "colors", "points", "strings", "highlight"]
+          .some((field) => !item[field] || typeof item[field] !== "object")) {
+      problems.push(`${id}: row ${index} is missing captured scalar payload fields`);
+    }
+    if (id === "core.static-tree"
+        && (!item.layers || typeof item.layers !== "object"
+          || !item.passes || typeof item.passes !== "object"
+          || typeof item.topologySignature !== "string" || item.topologySignature.length !== 64
+          || typeof item.valueSignature !== "string" || item.valueSignature.length !== 64)) {
+      problems.push(`${id}: row ${index} is missing captured tree payload fields`);
     }
   }
   if (Object.keys(slices).length !== Object.keys(shape.slices).length
@@ -135,26 +184,85 @@ function coreAdmissionProblems(id, payload) {
   return problems;
 }
 
+function matrixIsFinite(matrix) {
+  return Array.isArray(matrix) && matrix.length === 20 && matrix.every(Number.isFinite);
+}
+
+function tintAdmissionProblems(id, payload) {
+  const shape = TINT_SHAPES[id];
+  const problems = tintDocumentGateProblems(payload, id);
+  if (!shape) return problems;
+  if (!Array.isArray(payload.rows) || payload.rows.length !== shape.rows) {
+    return [...problems, `${id}: expected ${shape.rows} rows, got ${payload.rows?.length ?? "none"}`];
+  }
+  const identities = new Set();
+  for (const [index, row] of payload.rows.entries()) {
+    const cell = row.cell ?? {};
+    const identity = JSON.stringify([
+      row.colorID, cell.isLightAppearance, cell.isClear, cell.hasMainParticipation,
+    ]);
+    if (identities.has(identity)) problems.push(`${id}: duplicate row identity at ${index}`);
+    identities.add(identity);
+    if (typeof row.colorID !== "string"
+        || ![cell.isLightAppearance, cell.isClear, cell.hasMainParticipation]
+          .every((value) => typeof value === "boolean")) {
+      problems.push(`${id}: invalid row identity at ${index}`);
+    }
+    if (id.startsWith("tint.parameterization.")) {
+      if (!matrixIsFinite(row.matrix)) problems.push(`${id}: row ${index} has no finite 4x5 matrix`);
+    } else if (!matrixIsFinite(row.flushMatrix) || !matrixIsFinite(row.settledMatrix)
+        || row.passed !== true || row.pairedProofAtFlush !== true
+        || row.pairedProofWhenSettled !== true || !Number.isFinite(row.maximumDifference)) {
+      problems.push(`${id}: row ${index} failed paired matrix proof admission`);
+    }
+  }
+  const identitySha256 = sha256(Buffer.from(JSON.stringify([...identities].sort())));
+  if (identitySha256 !== shape.identitySha256) {
+    problems.push(`${id}: captured rows do not match the registered Tint coordinate set`);
+  }
+  if (shape.planColors !== undefined) {
+    const colors = payload.plan?.colors;
+    const planSha256 = Array.isArray(colors)
+      ? sha256(Buffer.from(JSON.stringify(colors.map((color) => JSON.stringify(color)).sort()))) : null;
+    if (colors?.length !== shape.planColors || planSha256 !== shape.planSha256) {
+      problems.push(`${id}: capture plan does not match the registered Tint color set`);
+    }
+  }
+  return problems;
+}
+
+function semanticSnapshotIsComplete(snapshot) {
+  return snapshot && Array.isArray(snapshot.layerLines) && snapshot.layerLines.length > 0
+    && Array.isArray(snapshot.filters) && Array.isArray(snapshot.effects)
+    && snapshot.filters.length + snapshot.effects.length > 0;
+}
+
 export function semanticAdmissionProblems(payload) {
   const context = payload.context ?? {};
   const canonicalContext = context.hostType === "Panel"
     && context.glassWidth === 480 && context.glassHeight === 200
     && context.cornerRadius === 16 && context.windowMargin === 40;
   const entries = payload.entries;
+  const osMajor = Number.parseInt(platformFrom(payload.operatingSystem ?? "").version, 10);
   const identities = new Set((Array.isArray(entries) ? entries : []).map((entry) =>
     JSON.stringify([entry.roleTag, entry.requestedMain])));
+  const expectedIdentities = new Set(Array.from({ length: 24 }, (_, roleTag) =>
+    [false, true].map((requestedMain) => JSON.stringify([roleTag, requestedMain]))).flat());
   const invalidEntry = !Array.isArray(entries) || entries.length !== 48
-    || identities.size !== 48
+    || identities.size !== 48 || [...expectedIdentities].some((identity) => !identities.has(identity))
+    || !Number.isInteger(osMajor)
     || entries.some((entry) => entry.actualKey !== false
       || entry.actualMain !== entry.requestedMain
-      || entry.isAvailable !== true || entry.snapshot == null);
+      || (entry.isAvailable === true && !semanticSnapshotIsComplete(entry.snapshot))
+      || (entry.isAvailable === false && (osMajor >= 27 || entry.snapshot != null))
+      || typeof entry.isAvailable !== "boolean");
   return canonicalContext && !invalidEntry
     ? [] : ["semantic.usage-trees failed canonical context or completeness gates"];
 }
 
 export function moduleAdmissionProblems(id, payload) {
   if (id.startsWith("core.")) return coreAdmissionProblems(id, payload);
-  if (id.startsWith("tint.")) return tintDocumentGateProblems(payload, id);
+  if (id.startsWith("tint.")) return tintAdmissionProblems(id, payload);
   if (id === "semantic.usage-trees") return semanticAdmissionProblems(payload);
   return [];
 }
@@ -206,6 +314,10 @@ export async function validateFullDirectory(root, { expectedStatus = null } = {}
     problems.push(`manifest.status must be ${expectedStatus}`);
   }
   const osMajor = Number.parseInt(manifest.platform?.version, 10);
+  if (manifest.platform?.product !== "macOS" || !manifest.platform?.build
+      || !manifest.platform?.architecture) {
+    problems.push("manifest platform must declare macOS product, build, and architecture");
+  }
   if (!/^[0-9]+(?:\.[0-9]+)*$/.test(manifest.platform?.version ?? "")) {
     problems.push("manifest platform version must be numeric dotted form");
   }
@@ -231,6 +343,14 @@ export async function validateFullDirectory(root, { expectedStatus = null } = {}
       if (JSON.stringify(module.coverageClaims) !== JSON.stringify(CLAIMS[module.id])) {
         problems.push(`${module.id}: coverage claims do not match the registered Full contract`);
       }
+      if (module.role !== "canonical" || module.provenance?.kind !== "direct-capture") {
+        problems.push(`${module.id}: Full modules must be canonical direct captures`);
+      }
+      if (module.platform?.product !== manifest.platform?.product
+          || Number.parseInt(module.platform?.version, 10) !== osMajor
+          || module.platform?.architecture !== manifest.platform?.architecture) {
+        problems.push(`${module.id}: platform product, major, or architecture disagrees with manifest`);
+      }
     }
   }
   for (const id of expected.required) {
@@ -250,6 +370,10 @@ export async function validateFullDirectory(root, { expectedStatus = null } = {}
       if (sha256(bytes) !== module.integrity?.sha256) problems.push(`${module.file}: sha256 mismatch`);
       const payload = JSON.parse(bytes.toString("utf8"));
       documents.set(module.id, payload);
+      const payloadSchemaVersion = payload.formatVersion ?? payload.schemaVersion ?? 1;
+      if (module.payloadSchemaVersion !== payloadSchemaVersion) {
+        problems.push(`${module.file}: payload schema version disagrees with manifest`);
+      }
       problems.push(...moduleAdmissionProblems(module.id, payload));
     } catch (error) {
       problems.push(`${module.file}: ${error instanceof SyntaxError ? "not valid JSON" : error.message}`);

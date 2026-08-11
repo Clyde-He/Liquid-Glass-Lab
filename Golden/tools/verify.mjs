@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 import { goldenDirectory, osDirectories } from "./lib/golden.mjs";
 import { readDispositions, verifyArchiveSet } from "./lib/verify-engine.mjs";
@@ -26,8 +26,12 @@ function usage(message) {
 }
 
 if ((candidate && !candidateName) || (!candidate && candidateName) || (candidate && onlyOS)) usage();
+const candidateInput = candidate ? path.resolve(candidate) : null;
+if (candidateInput && (await lstat(candidateInput)).isSymbolicLink()) {
+  throw new Error("candidate directory must not be a symlink");
+}
 const archives = candidate
-  ? [{ name: candidateName, directory: await realpath(path.resolve(candidate)) }]
+  ? [{ name: candidateName, directory: await realpath(candidateInput) }]
   : (onlyOS ? [onlyOS] : await osDirectories()).map((name) => ({
     name, directory: path.join(goldenDirectory, name),
   }));

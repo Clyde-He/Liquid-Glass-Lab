@@ -5,8 +5,10 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  assertReportStillCurrent, buildBootstrapReport, repositoryRoot, resolveBootstrapContext,
+  assertReportStillCurrent, assertReviewedInventory, assertReviewedPayloadInventory,
+  buildBootstrapReport, gitState, repositoryRoot, resolveBootstrapContext,
 } from "./lib/bootstrap.mjs";
+import { readDispositions, releaseVerificationProblems, verifyArchiveSet } from "./lib/verify-engine.mjs";
 import { sha256, validateFullDirectory } from "./lib/profile.mjs";
 
 const args = process.argv.slice(2);
@@ -45,6 +47,9 @@ if (!accept) {
   process.stdout.write(bytes);
 } else {
   const reviewFile = path.resolve(repositoryRoot, reportPath);
+  if (reviewFile.startsWith(`${context.candidate}${path.sep}`)) {
+    throw new Error("review report must be outside the candidate directory");
+  }
   const reviewBytes = await readFile(reviewFile);
   const report = JSON.parse(reviewBytes);
   await assertReportStillCurrent(report, context);
@@ -54,6 +59,18 @@ if (!accept) {
   const transaction = path.join(transactionRoot, context.name);
   try {
     await cp(context.candidate, transaction, { recursive: true, force: false, errorOnExist: true });
+    await assertReviewedInventory(transaction, report.candidate);
+    const verification = await verifyArchiveSet({
+      archives: context.baseline
+        ? [context.baseline, { name: context.name, directory: transaction }]
+        : [{ name: context.name, directory: transaction }],
+      includeCrossVersion: Boolean(context.baseline),
+      dispositions: await readDispositions(),
+    });
+    const verificationProblems = releaseVerificationProblems(verification);
+    if (verificationProblems.length) {
+      throw new Error(`copied transaction is not release-ready: ${verificationProblems.join("; ")}`);
+    }
     const manifestPath = path.join(transaction, "manifest.json");
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     manifest.status = "accepted";
@@ -68,6 +85,10 @@ if (!accept) {
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     const checked = await validateFullDirectory(transaction, { expectedStatus: "accepted" });
     if (checked.problems.length) throw new Error(`accepted transaction invalid: ${checked.problems.join("; ")}`);
+    await assertReviewedPayloadInventory(transaction, report.candidate);
+    if (JSON.stringify(gitState()) !== JSON.stringify(report.git)) {
+      throw new Error("tooling or git revision changed before atomic installation");
+    }
     const helper = path.join(path.dirname(fileURLToPath(import.meta.url)), "atomic-create.swift");
     const result = spawnSync("swift", [helper, transaction, context.target], {
       cwd: repositoryRoot, encoding: "utf8",
