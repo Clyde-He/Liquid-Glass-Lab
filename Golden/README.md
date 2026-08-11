@@ -250,11 +250,11 @@ Overrides = disabled
 
 Host and Window Margin are recorded as provenance, but they are not swept: controlled probes ruled out Host as a direct Recipe selector, and Margin only changes clipping room. The canonical matrix keeps small, normal, and oversize/capped Height representatives. The separate formula analysis owns the dense Height sweep as well as Width and Corner Radius controls and fitted formulas, avoiding a sixfold Size multiplier on every routine OS capture.
 
-The retired Recipe Matrix exporter wrote only a complete active-session matrix: inactive capture paused and retried its current context, and requested/actual Main acceptance was validated before replacement. Its product and representative-size claims now belong to `core.static-scalar`.
+The retired Recipe Matrix exporter wrote only a complete active-session matrix: inactive capture paused and retried its current context, and requested/actual Main acceptance was validated before replacement. `core.static-scalar` replaces its Recipe product claim; the old all-variant 24/600-height claim is retired because direct capture intentionally uses Variants 1 and 2 for the size slice while retained formula analysis owns dense size behavior.
 
-## Recursive Pass Audit exporter
+## Retired Recursive Pass Audit
 
-The Playground's `Export Recursive Pass Audit` keeps structural completeness separate from the compact Recipe baseline:
+The former `Export Recursive Pass Audit` kept structural completeness separate from the compact Recipe baseline:
 
 ```text
 Main × Subdued × 21 Variants × 4 Subvariants = 336 entries
@@ -271,9 +271,9 @@ Overrides = disabled
 
 Every snapshot walks sublayers and masks, then records direct filters, background filters, compositing filters, and object-backed effects. Stable structural paths key the JSON objects. Filter `inputKeys` and effect `CA_attributes` keep capability separate from resolved `value`, `nil`, and `unreadable` states. SHA-256 topology and value signatures make it cheap to identify changed cells before reading precise nested diffs.
 
-This fixture is diagnostic rather than automatically accepted. A first capture should be repeated on the same build and in the same display session to establish which layer fields and values are stable before it is added to an OS manifest. The macOS 26 and macOS 27 fixtures have completed that review and are listed in their manifests.
+The two canonical standalone fixtures are retired in favor of `core.static-tree`. The old 336-cell repeat claim is also retired; the direct archive keeps a 21-cell same-session repeat sentinel and verifies it against the Core rows.
 
-The accepted macOS 27 capture and its immediate repeat contain the same 336 rows, eight topology signatures, 60 value signatures, layer payloads, pass inventories, and nonvolatile property values; only the top-level `capturedAt` timestamp differs. An earlier capture around a display-context transition kept the same topology and pass inventory but changed three resolved fields across 268 rows: `CASDFOutputEffect.maximum` plus the `DLCAFilter` `glassBackground` inputs `inputKeyFillHighlightEffectOffset` and `inputKeyFillHighlightHeight`. That capture is retained as provenance rather than promoted to canonical.
+An earlier capture around a display-context transition is retained because it preserves a claim absent from the direct archive: topology and pass inventory stay stable while display-sensitive resolved values move. Tests compare that control with `core.static-tree` and require the known highlight-offset delta to remain visible.
 
 ## Semantic Usage exporter
 

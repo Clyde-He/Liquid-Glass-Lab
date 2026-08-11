@@ -145,9 +145,9 @@ Two OS directories: **8 files, ≈ 28 MB**, alongside 16 registered standalone f
 
 Deletion requires migrated consumers, v1/v2 resolution equivalence, recorded integrity, preserved learning results, and an approved claim disposition in [`evidence-retirement-ledger.json`](evidence-retirement-ledger.json).
 
-- `recipe-matrix.json` → retired; replaced by `static-scalar` core plus the size slice
+- `recipe-matrix.json` → Recipe product coverage replaced by `static-scalar`; former all-variant representative-height claim explicitly retired
 - `recursive-pass-audit.json` → retired; replaced by `static-tree` core
-- `recursive-pass-audit-stability-repeat.json` → retired; replaced by `static-tree` repeat rows
+- `recursive-pass-audit-stability-repeat.json` → former 336-cell repeat claim retired; `static-tree` keeps a 21-cell repeat sentinel
 - `recursive-pass-audit-display-context-a.json` → retained as reduced/control evidence until an explicit replacement preserves the display-context contrast claim
 - `materialize-environment-matrix.json`, `materialize-geometry-sweep.json` → `dynamic`
 - `formula-analysis.json` → retained until an equivalent reproducible generator and validation gate exist
