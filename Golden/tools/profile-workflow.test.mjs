@@ -5,14 +5,15 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  archiveInventory, assertReportStillCurrent, BOOTSTRAP_GATE_NAMES, gitState,
-  inventoryDigest, pathsOverlap, resolveBootstrapContext,
+  archiveInventory, assertReportStillCurrent, assertReviewedComparisonEvidence,
+  BOOTSTRAP_GATE_NAMES, bootstrapComparisonEvidence, gitState, inventoryDigest,
+  pathsOverlap, resolveBootstrapContext,
 } from "./lib/bootstrap.mjs";
 import { catalogDocumentProblems, packageResourceProblems } from "./lib/catalog-certification.mjs";
-import { goldenDirectory } from "./lib/golden.mjs";
+import { acceptedArchivesReplacing, goldenDirectory } from "./lib/golden.mjs";
 import {
-  PROFILE_DEFINITION_VERSION, moduleAdmissionProblems, safeModulePath,
-  semanticAdmissionProblems, validateFullDirectory,
+  PAYLOAD_SCHEMA_VERSIONS, PROFILE_DEFINITION_VERSION, moduleAdmissionProblems,
+  safeModulePath, semanticAdmissionProblems, validateFullDirectory,
 } from "./lib/profile.mjs";
 import {
   applyVerificationDispositions, readDispositions, releaseVerificationProblems, verifyArchiveSet,
@@ -77,18 +78,38 @@ test("shared module admission rejects coherent-looking incomplete evidence", asy
 
 test("Semantic admission binds exact roles while modeling macOS 26 unavailability", async () => {
   const semantic = JSON.parse(await readFile(path.join(goldenDirectory, "macOS-27/semantic-usage-trees.json")));
-  assert.deepEqual(semanticAdmissionProblems(semantic), []);
+  assert.deepEqual(semanticAdmissionProblems(semantic, { osMajor: 27 }), []);
   const arbitrary = structuredClone(semantic);
   arbitrary.entries[0].roleTag = 99;
   arbitrary.entries[0].snapshot = {};
-  assert.notDeepEqual(semanticAdmissionProblems(arbitrary), []);
+  assert.notDeepEqual(semanticAdmissionProblems(arbitrary, { osMajor: 27 }), []);
   const unavailable = structuredClone(semantic);
   unavailable.operatingSystem = unavailable.operatingSystem.replace("Version 27.0", "Version 26.0");
   unavailable.entries[0].isAvailable = false;
   unavailable.entries[0].snapshot = null;
-  assert.deepEqual(semanticAdmissionProblems(unavailable), []);
-  unavailable.operatingSystem = unavailable.operatingSystem.replace("Version 26.0", "Version 27.0");
-  assert.notDeepEqual(semanticAdmissionProblems(unavailable), []);
+  assert.deepEqual(semanticAdmissionProblems(unavailable, { osMajor: 26 }), []);
+  assert.notDeepEqual(semanticAdmissionProblems(unavailable, { osMajor: 27 }), []);
+
+  const manifest = JSON.parse(await readFile(path.join(goldenDirectory, "macOS-27/manifest.json")));
+  const module = manifest.modules.find(({ id }) => id === "semantic.usage-trees");
+  const metadataProblems = moduleAdmissionProblems("semantic.usage-trees", unavailable, {
+    osMajor: 27, expectedPlatform: module.platform,
+    expectedSchemaVersion: PAYLOAD_SCHEMA_VERSIONS["semantic.usage-trees"],
+  });
+  assert.match(metadataProblems.join("; "), /embedded operating system disagrees/);
+  assert.match(moduleAdmissionProblems("semantic.usage-trees", {
+    ...semantic, formatVersion: 1, schemaVersion: 1,
+  }, {
+    osMajor: 27, expectedPlatform: module.platform,
+    expectedSchemaVersion: PAYLOAD_SCHEMA_VERSIONS["semantic.usage-trees"],
+  }).join("; "), /payload schema must be 2/);
+});
+
+test("same-major verification substitutes staging into the complete accepted archive set", async () => {
+  const staging = "/private/tmp/macOS-27.full-staging";
+  const archives = await acceptedArchivesReplacing({ name: "macOS-27", directory: staging });
+  assert.deepEqual(archives.map(({ name }) => name), ["macOS-26", "macOS-27"]);
+  assert.equal(archives.find(({ name }) => name === "macOS-27").directory, staging);
 });
 
 test("archive inventory rejects symlinks and special indirection", async () => {
@@ -115,7 +136,7 @@ test("acceptance report detects candidate byte TOCTOU", async () => {
       target: path.join(goldenDirectory, "macOS-99"),
       baseline: { waived: true, reason: "test fixture" },
       profileDefinitionVersion: PROFILE_DEFINITION_VERSION,
-      git: gitState(), comparisons: [],
+      git: gitState(), comparisons: [], dynamicCoverage: null,
       verification: { schemaVersion: 1, ok: true, undispositionedSkips: [], staleDispositions: [] },
       gates: Object.fromEntries(BOOTSTRAP_GATE_NAMES.map((name) => [name, true])),
     };
@@ -128,11 +149,34 @@ test("acceptance report detects candidate byte TOCTOU", async () => {
     const fakeVerification = structuredClone(report);
     fakeVerification.verification = { schemaVersion: 1, ok: true };
     await assert.rejects(assertReportStillCurrent(fakeVerification, context), /release-ready verification/);
+    const missingComparisonEvidence = structuredClone(report);
+    delete missingComparisonEvidence.dynamicCoverage;
+    await assert.rejects(assertReportStillCurrent(missingComparisonEvidence, context), /comparisons or Dynamic coverage/);
     await writeFile(path.join(candidate, "manifest.json"), "{\"changed\":true}\n");
     await assert.rejects(assertReportStillCurrent(report, context), /transaction bytes do not match/);
   } finally {
     await rm(candidate, { recursive: true, force: true });
   }
+});
+
+test("baseline review evidence binds the exact comparison set and Dynamic coverage", async () => {
+  const candidate = path.join(goldenDirectory, "macOS-27");
+  const baseline = path.join(goldenDirectory, "macOS-26");
+  const context = {
+    candidate,
+    manifest: JSON.parse(await readFile(path.join(candidate, "manifest.json"), "utf8")),
+    baseline: { name: "macOS-26", directory: baseline, major: 26 },
+  };
+  const evidence = await bootstrapComparisonEvidence(context);
+  assert.equal(evidence.comparisons.length, 9);
+  assert.deepEqual(evidence.dynamicCoverage, {
+    baselineRuns: 104, candidateRuns: 104, sharedRuns: 104, missingRuns: 0, addedRuns: 0,
+  });
+  await assertReviewedComparisonEvidence(evidence, context);
+  await assert.rejects(
+    assertReviewedComparisonEvidence({ comparisons: [], dynamicCoverage: evidence.dynamicCoverage }, context),
+    /comparisons or Dynamic coverage/
+  );
 });
 
 test("structured verifier applies only exact reviewed skip dispositions", async () => {
@@ -149,11 +193,11 @@ test("structured verifier applies only exact reviewed skip dispositions", async 
 
 test("cross-version dispositions bind exact scope, learning, and reason", async () => {
   const outcomes = [
-    { osDirectory: "macOS-26 ↔ macOS-27", id: "cross-learning", reason: "missing axis", status: "skipped" },
+    { osDirectory: "macOS-26 ↔ macOS-27 ↔ macOS-28", id: "cross-learning", reason: "missing axis", status: "skipped" },
     { osDirectory: "macOS-27", id: "passing-learning", status: "passed" },
   ];
   const exact = {
-    os: "macOS-26 ↔ macOS-27", learning: "cross-learning", reason: "missing axis",
+    os: "macOS-26 ↔ macOS-27 ↔ macOS-28", learning: "cross-learning", reason: "missing axis",
     reviewedBy: "test", reviewedAt: "2026-08-11",
   };
   const relevantButStale = {
@@ -203,8 +247,11 @@ test("atomic new-major install uses the Darwin no-replace primitive", async () =
   const certifier = await readFile(path.join(goldenDirectory, "tools/certify-package.mjs"), "utf8");
   assert.match(bootstrap, /source staging was preserved/);
   assert.match(bootstrap, /assertReviewedInventory\(transaction/);
+  assert.match(bootstrap, /assertReviewedComparisonEvidence\(report, context, transaction\)/);
   assert.doesNotMatch(bootstrap, /replaceItemAt/);
   assert.match(capture, /releaseVerificationProblems\(verification\)/);
+  assert.match(capture, /acceptedArchivesReplacing/);
+  assert.match(capture, /includeCrossVersion: archives\.length > 1/);
   assert.match(certifier, /--scratch-path/);
   assert.match(certifier, /executedExpectedTest/);
 

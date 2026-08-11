@@ -173,7 +173,7 @@ export async function readDispositions(file = path.join(goldenDirectory, "verifi
   const keys = new Set();
   for (const entry of document.dispositions) {
     const key = `${entry.os}\0${entry.learning}`;
-    if (!/^macOS-[0-9]+(?: ↔ macOS-[0-9]+)?$/.test(entry.os ?? "")
+    if (!/^macOS-[0-9]+(?: ↔ macOS-[0-9]+)*$/.test(entry.os ?? "")
         || typeof entry.learning !== "string"
         || !entry.learning || typeof entry.reason !== "string" || !entry.reason
         || typeof entry.reviewedBy !== "string" || !entry.reviewedBy

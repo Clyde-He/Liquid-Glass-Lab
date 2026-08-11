@@ -34,6 +34,18 @@ export const CLAIMS = {
   "external.window-context": ["window-context-invariance"],
 };
 
+export const PAYLOAD_SCHEMA_VERSIONS = {
+  "core.static-scalar": 1,
+  "core.static-tree": 1,
+  "core.dynamic": 1,
+  "tint.parameterization.sweep": 1,
+  "tint.parameterization.focused-2b": 1,
+  "tint.parameterization.hue-2c": 1,
+  "tint.sync-resolution": 1,
+  "tint.wide-gamut": 1,
+  "semantic.usage-trees": 2,
+};
+
 export const CORE_SHAPES = {
   "core.static-scalar": {
     collection: "rows", section: "static-scalar", total: 744,
@@ -237,13 +249,14 @@ function semanticSnapshotIsComplete(snapshot) {
     && snapshot.filters.length + snapshot.effects.length > 0;
 }
 
-export function semanticAdmissionProblems(payload) {
+export function semanticAdmissionProblems(payload, { osMajor: authoritativeOSMajor = null } = {}) {
   const context = payload.context ?? {};
   const canonicalContext = context.hostType === "Panel"
     && context.glassWidth === 480 && context.glassHeight === 200
     && context.cornerRadius === 16 && context.windowMargin === 40;
   const entries = payload.entries;
-  const osMajor = Number.parseInt(platformFrom(payload.operatingSystem ?? "").version, 10);
+  const payloadOSMajor = Number.parseInt(platformFrom(payload.operatingSystem ?? "").version, 10);
+  const osMajor = authoritativeOSMajor ?? payloadOSMajor;
   const identities = new Set((Array.isArray(entries) ? entries : []).map((entry) =>
     JSON.stringify([entry.roleTag, entry.requestedMain])));
   const expectedIdentities = new Set(Array.from({ length: 24 }, (_, roleTag) =>
@@ -260,23 +273,44 @@ export function semanticAdmissionProblems(payload) {
     ? [] : ["semantic.usage-trees failed canonical context or completeness gates"];
 }
 
-export function moduleAdmissionProblems(id, payload) {
-  if (id.startsWith("core.")) return coreAdmissionProblems(id, payload);
-  if (id.startsWith("tint.")) return tintAdmissionProblems(id, payload);
-  if (id === "semantic.usage-trees") return semanticAdmissionProblems(payload);
-  return [];
+export function moduleAdmissionProblems(id, payload, options = {}) {
+  const problems = [];
+  const payloadSchemaVersion = payload.formatVersion ?? payload.schemaVersion ?? 1;
+  if (options.expectedSchemaVersion !== undefined
+      && payloadSchemaVersion !== options.expectedSchemaVersion) {
+    problems.push(`${id}: payload schema must be ${options.expectedSchemaVersion}`);
+  }
+  if (options.expectedPlatform) {
+    const embedded = platformFrom(payload.operatingSystem ?? "", options.expectedPlatform.architecture);
+    if (embedded.product !== options.expectedPlatform.product
+        || embedded.version !== options.expectedPlatform.version
+        || embedded.build !== options.expectedPlatform.build) {
+      problems.push(`${id}: embedded operating system disagrees with module platform`);
+    }
+  }
+  if (id.startsWith("core.")) problems.push(...coreAdmissionProblems(id, payload));
+  else if (id.startsWith("tint.")) problems.push(...tintAdmissionProblems(id, payload));
+  else if (id === "semantic.usage-trees") {
+    problems.push(...semanticAdmissionProblems(payload, { osMajor: options.osMajor }));
+  }
+  return problems;
 }
 
 export async function payloadModule(root, id, file) {
   const bytes = await readFile(path.join(root, file));
   const payload = JSON.parse(bytes);
-  const problems = moduleAdmissionProblems(id, payload);
+  const platform = platformFrom(payload.operatingSystem ?? "");
+  const problems = moduleAdmissionProblems(id, payload, {
+    osMajor: Number.parseInt(platform.version, 10),
+    expectedPlatform: platform,
+    expectedSchemaVersion: PAYLOAD_SCHEMA_VERSIONS[id],
+  });
   if (problems.length) throw new Error(`${id} failed admission: ${problems.join("; ")}`);
   const capturedAt = payload.capturedAt ?? payload.generatedAt ?? null;
   return {
     id, file, payloadSchemaVersion: payload.formatVersion ?? payload.schemaVersion ?? 1,
     planVersion: PROFILE_DEFINITION_VERSION,
-    platform: platformFrom(payload.operatingSystem ?? ""), capturedAt,
+    platform, capturedAt,
     capture: { environment: payload.environment ?? payload.context ?? null, sessionID: payload.sessionID ?? null },
     provenance: { kind: "direct-capture" }, coverageClaims: CLAIMS[id],
     integrity: { sha256: sha256(bytes), bytes: bytes.length }, role: "canonical",
@@ -322,6 +356,7 @@ export async function validateFullDirectory(root, { expectedStatus = null } = {}
     problems.push("manifest platform version must be numeric dotted form");
   }
   const expected = profileForMajor(osMajor);
+  const declaredBuilds = new Set(manifest.profiles?.full?.builds ?? []);
   for (const field of ["required", "optional", "unsupported"]) {
     if (JSON.stringify(manifest.profiles?.full?.[field] ?? []) !== JSON.stringify(expected[field])) {
       problems.push(`full.${field} does not match profile definition v${PROFILE_DEFINITION_VERSION}`);
@@ -347,9 +382,13 @@ export async function validateFullDirectory(root, { expectedStatus = null } = {}
         problems.push(`${module.id}: Full modules must be canonical direct captures`);
       }
       if (module.platform?.product !== manifest.platform?.product
-          || Number.parseInt(module.platform?.version, 10) !== osMajor
-          || module.platform?.architecture !== manifest.platform?.architecture) {
-        problems.push(`${module.id}: platform product, major, or architecture disagrees with manifest`);
+          || module.platform?.version !== manifest.platform?.version
+          || module.platform?.architecture !== manifest.platform?.architecture
+          || !declaredBuilds.has(module.platform?.build)) {
+        problems.push(`${module.id}: platform product, version, build, or architecture disagrees with Full metadata`);
+      }
+      if (module.payloadSchemaVersion !== PAYLOAD_SCHEMA_VERSIONS[module.id]) {
+        problems.push(`${module.id}: payload schema version does not match the registered Full profile`);
       }
     }
   }
@@ -374,7 +413,11 @@ export async function validateFullDirectory(root, { expectedStatus = null } = {}
       if (module.payloadSchemaVersion !== payloadSchemaVersion) {
         problems.push(`${module.file}: payload schema version disagrees with manifest`);
       }
-      problems.push(...moduleAdmissionProblems(module.id, payload));
+      problems.push(...moduleAdmissionProblems(module.id, payload, directIDs.has(module.id) ? {
+        osMajor,
+        expectedPlatform: module.platform,
+        expectedSchemaVersion: PAYLOAD_SCHEMA_VERSIONS[module.id],
+      } : {}));
     } catch (error) {
       problems.push(`${module.file}: ${error instanceof SyntaxError ? "not valid JSON" : error.message}`);
     }

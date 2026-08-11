@@ -6,6 +6,7 @@ import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promis
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { validateManifestV2 } from "./lib/manifest.mjs";
+import { acceptedArchivesReplacing } from "./lib/golden.mjs";
 import {
   CLAIMS, FULL_DRIVERS as FULL, FULL_MODULE_IDS as REQUIRED,
   PROFILE_DEFINITION_VERSION, payloadModule, platformFrom, profileForMajor,
@@ -268,8 +269,10 @@ async function promote(staging, accepted) {
     throw new Error(`Full value equivalence failed; inspect ${staging}.equivalence.json and rerun with --accept-drift after approval`);
   }
   const osDirectory = `macOS-${Number.parseInt(staged.platform.version, 10)}`;
+  const archives = await acceptedArchivesReplacing({ name: osDirectory, directory: staging });
   const verification = await verifyArchiveSet({
-    archives: [{ name: osDirectory, directory: staging }],
+    archives,
+    includeCrossVersion: archives.length > 1,
     dispositions: await readDispositions(),
   });
   const verificationProblems = releaseVerificationProblems(verification);

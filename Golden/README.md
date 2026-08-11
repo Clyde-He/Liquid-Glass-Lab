@@ -131,7 +131,7 @@ node Golden/tools/bootstrap-new-major.mjs \
   --accept
 ```
 
-Preview is the default. The report binds the manifest and complete file inventory, shared profile version, comparisons, verifier outcomes, git revision, and tooling diff. Acceptance rechecks those bindings, creates `Golden/macOS-N` through a no-replace atomic rename, and preserves the original staging directory. If no lower accepted baseline exists, an explicit `--waive-baseline "reason"` is required. Refreshing an already accepted major continues to use `capture-profile.mjs full --accepted Golden/macOS-N --promote`; bootstrap never replaces an existing major.
+Preview is the default. The report binds the manifest and complete file inventory, shared profile version, comparisons, Dynamic coverage, verifier outcomes, git revision, and tooling diff. Acceptance regenerates comparison evidence and structured verification from the copied transaction before creating `Golden/macOS-N` through a no-replace atomic rename, and preserves the original staging directory. If no lower accepted baseline exists, an explicit `--waive-baseline "reason"` is required. Refreshing an already accepted major continues to use `capture-profile.mjs full --accepted Golden/macOS-N --promote`; promotion substitutes staging into the complete accepted archive set and reruns both per-version and cross-version learnings before replacement. Bootstrap never replaces an existing major.
 
 ### 3. Package certification against Golden
 

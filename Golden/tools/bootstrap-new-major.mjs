@@ -5,8 +5,9 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  assertReportStillCurrent, assertReviewedInventory, assertReviewedPayloadInventory,
-  buildBootstrapReport, gitState, repositoryRoot, resolveBootstrapContext,
+  assertReportStillCurrent, assertReviewedComparisonEvidence, assertReviewedInventory,
+  assertReviewedPayloadInventory, buildBootstrapReport, gitState, repositoryRoot,
+  resolveBootstrapContext,
 } from "./lib/bootstrap.mjs";
 import { readDispositions, releaseVerificationProblems, verifyArchiveSet } from "./lib/verify-engine.mjs";
 import { sha256, validateFullDirectory } from "./lib/profile.mjs";
@@ -60,6 +61,7 @@ if (!accept) {
   try {
     await cp(context.candidate, transaction, { recursive: true, force: false, errorOnExist: true });
     await assertReviewedInventory(transaction, report.candidate);
+    await assertReviewedComparisonEvidence(report, context, transaction);
     const verification = await verifyArchiveSet({
       archives: context.baseline
         ? [context.baseline, { name: context.name, directory: transaction }]

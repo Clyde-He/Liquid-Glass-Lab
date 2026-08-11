@@ -28,9 +28,25 @@ export const SECTIONS = ["static-scalar", "static-tree", "dynamic"];
 export async function osDirectories() {
   const entries = await readdir(goldenDirectory, { withFileTypes: true });
   return entries
-    .filter((entry) => entry.isDirectory() && /^macOS-/.test(entry.name))
+    .filter((entry) => entry.isDirectory() && /^macOS-[0-9]+$/.test(entry.name))
     .map((entry) => entry.name)
-    .sort();
+    .sort((lhs, rhs) => Number(lhs.slice(6)) - Number(rhs.slice(6)));
+}
+
+/** Canonical accepted archives, with one same-major staging replacement when requested. */
+export async function acceptedArchivesReplacing(replacement = null) {
+  const archives = [];
+  for (const name of await osDirectories()) {
+    const directory = path.join(goldenDirectory, name);
+    const manifest = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8"));
+    if (manifest.status === "accepted") archives.push({ name, directory });
+  }
+  if (replacement) {
+    const index = archives.findIndex(({ name }) => name === replacement.name);
+    if (index < 0) throw new Error(`no accepted archive to replace for ${replacement.name}`);
+    archives[index] = replacement;
+  }
+  return archives;
 }
 
 export async function readManifest(osDirectory) {

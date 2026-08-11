@@ -172,10 +172,13 @@ export async function resolveBootstrapContext({ candidatePath, baselinePath = nu
   return { candidate, manifest, major, name, target, baseline, waiver };
 }
 
-function compareModule(baseline, candidate, module, extra = []) {
+function compareModule(baseline, candidate, module, extra = [], logicalCandidate = candidate) {
   const output = command("node", [path.join(goldenDirectory, "tools/compare.mjs"),
     baseline, candidate, `--module=${module}`, "--limit=20", ...extra]);
-  return JSON.parse(output);
+  const report = JSON.parse(output);
+  report.summary.baseline = baseline;
+  report.summary.candidate = logicalCandidate;
+  return report;
 }
 
 function dynamicCoverage(baselineDocuments, candidateDocuments) {
@@ -188,6 +191,42 @@ function dynamicCoverage(baselineDocuments, candidateDocuments) {
     missingRuns: [...before].filter((item) => !after.has(item)).length,
     addedRuns: [...after].filter((item) => !before.has(item)).length,
   };
+}
+
+export async function bootstrapComparisonEvidence(context, candidateDirectory = context.candidate) {
+  const comparisons = [];
+  let dynamic = null;
+  if (context.baseline) {
+    const candidateResult = await validateFullDirectory(candidateDirectory);
+    const baselineResult = await validateFullDirectory(context.baseline.directory);
+    const common = context.manifest.profiles.full.required.filter((id) =>
+      id !== "core.dynamic" && baselineResult.documents.has(id));
+    for (const module of common) {
+      if (module === "core.static-tree") {
+        for (const slice of ["core", "repeat", "appearance"]) {
+          comparisons.push({ module, slice, result: compareModule(
+            context.baseline.directory, candidateDirectory, module,
+            [`--baseline-slice=${slice}`, `--candidate-slice=${slice}`], context.candidate
+          ) });
+        }
+      } else {
+        comparisons.push({ module, result: compareModule(
+          context.baseline.directory, candidateDirectory, module, [], context.candidate
+        ) });
+      }
+    }
+    dynamic = dynamicCoverage(baselineResult.documents, candidateResult.documents);
+  }
+  return { comparisons, dynamicCoverage: dynamic };
+}
+
+export async function assertReviewedComparisonEvidence(report, context, candidateDirectory = context.candidate) {
+  const expected = await bootstrapComparisonEvidence(context, candidateDirectory);
+  if (!Object.hasOwn(report, "dynamicCoverage")
+      || JSON.stringify(report.comparisons) !== JSON.stringify(expected.comparisons)
+      || JSON.stringify(report.dynamicCoverage ?? null) !== JSON.stringify(expected.dynamicCoverage)) {
+    throw new Error("review report comparisons or Dynamic coverage do not match the candidate");
+  }
 }
 
 export async function buildBootstrapReport(context) {
@@ -205,29 +244,7 @@ export async function buildBootstrapReport(context) {
   const inventory = await archiveInventory(context.candidate);
   const baselineInventory = context.baseline
     ? await archiveInventory(context.baseline.directory) : null;
-  const comparisons = [];
-  let dynamic = null;
-  if (context.baseline) {
-    const candidateResult = await validateFullDirectory(context.candidate);
-    const baselineResult = await validateFullDirectory(context.baseline.directory);
-    const common = context.manifest.profiles.full.required.filter((id) =>
-      id !== "core.dynamic" && baselineResult.documents.has(id));
-    for (const module of common) {
-      if (module === "core.static-tree") {
-        for (const slice of ["core", "repeat", "appearance"]) {
-          comparisons.push({ module, slice, result: compareModule(
-            context.baseline.directory, context.candidate, module,
-            [`--baseline-slice=${slice}`, `--candidate-slice=${slice}`]
-          ) });
-        }
-      } else {
-        comparisons.push({ module, result: compareModule(
-          context.baseline.directory, context.candidate, module
-        ) });
-      }
-    }
-    dynamic = dynamicCoverage(baselineResult.documents, candidateResult.documents);
-  }
+  const evidence = await bootstrapComparisonEvidence(context);
   return {
     schemaVersion: 1, workflow: "bootstrap-new-major", generatedAt: new Date().toISOString(),
     candidate: { name: context.name, path: context.candidate,
@@ -242,7 +259,7 @@ export async function buildBootstrapReport(context) {
       }
       : { waived: true, reason: context.waiver },
     profileDefinitionVersion: PROFILE_DEFINITION_VERSION,
-    git: gitState(), verification, comparisons, dynamicCoverage: dynamic,
+    git: gitState(), verification, ...evidence,
     gates: {
       fullAdmission: true, exactProfile: true, directCapture: true,
       structuredVerification: true, noUndispositionedSkips: true,
@@ -271,6 +288,7 @@ export async function assertReportStillCurrent(report, context) {
     throw new Error("review report has no valid release-ready verification or comparisons");
   }
   await assertReviewedInventory(context.candidate, report.candidate);
+  await assertReviewedComparisonEvidence(report, context);
   if (context.baseline) {
     if (report.baseline?.name !== context.baseline.name
         || report.baseline?.path !== context.baseline.directory) {
