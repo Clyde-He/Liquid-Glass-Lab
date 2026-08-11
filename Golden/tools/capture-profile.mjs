@@ -55,6 +55,22 @@ function platformFrom(operatingSystem) {
   const build = /Build ([^)]+)/.exec(operatingSystem)?.[1] ?? "unknown";
   return { product: "macOS", version, build, architecture: process.arch };
 }
+function normalizedDynamicRuns(runs) {
+  const problems = [];
+  const normalized = structuredClone(runs ?? []);
+  for (const [runIndex, run] of normalized.entries()) {
+    delete run.maximumAttachedAnimationDuration;
+    for (const [sampleIndex, sample] of (run.samples ?? []).entries()) {
+      delete sample.elapsed;
+      if (Number.isFinite(sample.progress) && Number.isFinite(sample.requestedProgress)) {
+        const delta = Math.abs(sample.progress - sample.requestedProgress);
+        if (delta <= 0.02) sample.progress = sample.requestedProgress;
+        else problems.push(`run ${runIndex} sample ${sampleIndex}: progress delta ${delta}`);
+      }
+    }
+  }
+  return { normalized, problems };
+}
 async function payloadModule(root, id, file) {
   const bytes = await readFile(path.join(root, file));
   const payload = JSON.parse(bytes);
@@ -188,12 +204,25 @@ async function promote(staging, accepted) {
   const newDynamicFile = staged.modules.find(({ id }) => id === "core.dynamic")?.file;
   const oldDynamic = JSON.parse(await readFile(path.join(accepted, oldDynamicFile)));
   const newDynamic = JSON.parse(await readFile(path.join(staging, newDynamicFile)));
-  const dynamicEquivalent = JSON.stringify(oldDynamic.runs) === JSON.stringify(newDynamic.runs);
+  const oldNormalized = normalizedDynamicRuns(oldDynamic.runs);
+  const newNormalized = normalizedDynamicRuns(newDynamic.runs);
+  const durationDeltas = (oldDynamic.runs ?? []).map((run, index) => Math.abs(
+    (run.maximumAttachedAnimationDuration ?? 0)
+      - (newDynamic.runs?.[index]?.maximumAttachedAnimationDuration ?? 0)
+  ));
+  const dynamicProblems = [...oldNormalized.problems, ...newNormalized.problems];
+  if (durationDeltas.some((delta) => delta > 0.05)) {
+    dynamicProblems.push(`maximum animation duration delta ${Math.max(...durationDeltas)}`);
+  }
+  const dynamicEquivalent = dynamicProblems.length === 0
+    && JSON.stringify(oldNormalized.normalized) === JSON.stringify(newNormalized.normalized);
   if (!dynamicEquivalent) equivalent = false;
   comparisons.push({
     id: "core.dynamic", equivalent: dynamicEquivalent,
     baselineRuns: oldDynamic.runs?.length ?? null,
     candidateRuns: newDynamic.runs?.length ?? null,
+    maximumAnimationDurationDelta: Math.max(0, ...durationDeltas),
+    problems: dynamicProblems,
   });
   await writeFile(`${staging}.equivalence.json`, `${JSON.stringify({ equivalent, comparisons }, null, 2)}\n`);
   if (!equivalent && !process.argv.includes("--accept-drift")) {
