@@ -92,6 +92,26 @@ test("Tint modules compare structure without treating coefficients as invariants
   assert.equal(report.summary.coefficientValuesCompared, false);
 });
 
+test("registered Tint file aliases retain structural gates", () => {
+  const result = spawnSync(process.execPath, [
+    compareScript, macOS26Directory, macOS27Directory,
+    "--fixture=tint-sync-resolution.json", "--limit=1",
+  ], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.summary.tintMode, "structural");
+  assert.equal(report.summary.invalidMatrices, 0);
+});
+
+test("unsupported dynamic comparison fails with a targeted error", () => {
+  const result = spawnSync(process.execPath, [
+    compareScript, macOS26Directory, macOS27Directory,
+    "--module=core.dynamic",
+  ], { encoding: "utf8" });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /core\.dynamic comparison is not implemented/);
+});
+
 test("semantic Recursive comparison ignores structural IDs for a stable repeat", () => {
   const result = runComparison(macOS27, macOS27Repeat);
   assert.equal(result.summary.recursiveMode, "semantic");

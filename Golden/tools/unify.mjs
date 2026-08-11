@@ -206,6 +206,12 @@ function declaredAxes(cells) {
 export async function unify(osDirectory, { dryRun = false } = {}) {
   const base = path.join(goldenDirectory, osDirectory);
   const manifest = await readManifestAt(base);
+  if (!dryRun && manifest.sourceProtocolVersion === 2) {
+    throw new Error(
+      "manifest v2 archives may only use unify.mjs --dry-run; "
+      + "registered writes require transactional promotion"
+    );
+  }
   const load = async (id) => {
     try {
       return await loadModuleDocument(base, id);

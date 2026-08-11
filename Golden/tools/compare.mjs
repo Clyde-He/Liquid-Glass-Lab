@@ -37,14 +37,14 @@ const comparisonLabel = baselineModule === candidateModule
 const tolerance = Number(option("tolerance", "1e-6"));
 const differenceLimit = Number(option("limit", "100"));
 const includeVolatile = process.argv.slice(2).includes("--include-volatile");
-const isPassAudit = ["legacy.recursive-pass-audit", "recursive-pass-audit", "recursive-pass-audit.json"]
+let isPassAudit = ["legacy.recursive-pass-audit", "recursive-pass-audit", "recursive-pass-audit.json"]
   .includes(baselineModule) || ["legacy.recursive-pass-audit", "recursive-pass-audit", "recursive-pass-audit.json"]
   .includes(candidateModule) || baselineModule === "core.static-tree" || candidateModule === "core.static-tree";
 const recursiveMode = option("recursive-mode", "semantic");
 const tintMode = option("tint-mode", "structural");
 const baselineSlice = option("baseline-slice", "core");
 const candidateSlice = option("candidate-slice", "core");
-const isTintModule = baselineModule.startsWith("tint.")
+let isTintModule = baselineModule.startsWith("tint.")
   || candidateModule.startsWith("tint.");
 
 // Values proven to change between active captures on the same OS build due to
@@ -60,13 +60,6 @@ if (!Number.isFinite(tolerance) || tolerance < 0) {
 if (!Number.isInteger(differenceLimit) || differenceLimit < 1) {
   throw new Error(`Invalid difference limit: ${differenceLimit}`);
 }
-if (isPassAudit && !new Set(["semantic", "raw"]).has(recursiveMode)) {
-  throw new Error(`Invalid Recursive comparison mode: ${recursiveMode}`);
-}
-if (isTintModule && !new Set(["structural", "values"]).has(tintMode)) {
-  throw new Error(`Invalid Tint comparison mode: ${tintMode}`);
-}
-
 function readJSON(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
@@ -103,7 +96,11 @@ function identity(row, document) {
       `s=${scalar(cell.subvariant)}`,
     ];
     if (document.section !== "static-tree") {
-      identity.push(`key=${scalar(cell.key)}`, `appearance=${scalar(cell.appearance)}`);
+      identity.push(
+        `key=${scalar(cell.key)}`, `appearance=${scalar(cell.appearance)}`,
+        `backdrop=${scalar(cell.backdrop)}`, `tint=${scalar(cell.tint)}`,
+        `host=${scalar(cell.host)}`, `direction=${scalar(cell.direction)}`
+      );
     }
     return identity.join("|");
   }
@@ -240,24 +237,39 @@ const topologySignature = (row) =>
   row.snapshot?.topologySignature ?? row.topologySignature;
 const valueSignature = (row) => row.snapshot?.valueSignature ?? row.valueSignature;
 
-function compareTintStructurally(baselineRows, candidateRows, missingRows, addedRows) {
+function compareTintStructurally(
+  baselineRows, candidateRows, missingRows, addedRows,
+  baselineDocument, candidateDocument
+) {
   const invalid = [];
   const classificationChanges = [];
-  const matrixOf = (row) => row.matrix ?? row.flushMatrix ?? row.settledMatrix ?? null;
+  const matricesOf = (row) => row.flushMatrix || row.settledMatrix
+    ? [row.flushMatrix, row.settledMatrix] : [row.matrix];
+  for (const [label, document] of [["baseline", baselineDocument], ["candidate", candidateDocument]]) {
+    if (document.passed === false) invalid.push({ side: label, documentGate: "passed=false" });
+  }
   for (const [label, rows] of [["baseline", baselineRows], ["candidate", candidateRows]]) {
     for (const [key, row] of rows) {
-      const matrix = matrixOf(row);
-      if (!Array.isArray(matrix) || matrix.length !== 20 || !matrix.every(Number.isFinite)) {
-        invalid.push({ side: label, row: key, matrixLength: matrix?.length ?? null });
+      for (const [index, matrix] of matricesOf(row).entries()) {
+        if (!Array.isArray(matrix) || matrix.length !== 20 || !matrix.every(Number.isFinite)) {
+          invalid.push({ side: label, row: key, matrix: index, matrixLength: matrix?.length ?? null });
+        }
+      }
+      if (row.passed === false || row.pairedProofAtFlush === false
+          || row.pairedProofWhenSettled === false) {
+        invalid.push({ side: label, row: key, proofGate: false });
       }
     }
   }
   for (const key of [...baselineRows.keys()].filter((item) => candidateRows.has(item)).sort()) {
     const before = baselineRows.get(key);
     const after = candidateRows.get(key);
-    const fields = ["structure", "isInCertifiedDomain", "passed"];
+    const fields = [
+      "structure", "isInCertifiedDomain", "passed", "sourceColor",
+      "pairedProofAtFlush", "pairedProofWhenSettled", "maximumDifference",
+    ];
     for (const field of fields) {
-      if ((before[field] ?? null) !== (after[field] ?? null)) {
+      if (JSON.stringify(before[field] ?? null) !== JSON.stringify(after[field] ?? null)) {
         classificationChanges.push({ row: key, field, before: before[field] ?? null, after: after[field] ?? null });
       }
     }
@@ -723,15 +735,34 @@ function comparePassAuditsSemantically(
 
 async function comparisonPath(directory, requested) {
   try {
-    return (await resolveModulePath(directory, requested)).file;
+    const resolved = await resolveModulePath(directory, requested);
+    return { file: resolved.file, module: resolved.module, fallback: false };
   } catch (error) {
-    if (fixtureAlias) return path.join(directory, fixtureAlias);
+    if (fixtureAlias && error.code === "ENOENT") {
+      console.error(`warning: no manifest; comparing scratch fixture ${fixtureAlias}`);
+      return { file: path.join(directory, fixtureAlias), module: null, fallback: true };
+    }
     throw error;
   }
 }
 
-const baselinePath = await comparisonPath(baselineDirectory, baselineModule);
-const candidatePath = await comparisonPath(candidateDirectory, candidateModule);
+const baselineResolved = await comparisonPath(baselineDirectory, baselineModule);
+const candidateResolved = await comparisonPath(candidateDirectory, candidateModule);
+const baselinePath = baselineResolved.file;
+const candidatePath = candidateResolved.file;
+const resolvedIDs = [baselineResolved.module?.id, candidateResolved.module?.id].filter(Boolean);
+isPassAudit ||= resolvedIDs.includes("legacy.recursive-pass-audit")
+  || resolvedIDs.includes("core.static-tree");
+isTintModule ||= resolvedIDs.some((id) => id.startsWith("tint."));
+if (resolvedIDs.includes("core.dynamic")) {
+  throw new Error("core.dynamic comparison is not implemented; use Golden learnings for dynamic gates");
+}
+if (isPassAudit && !new Set(["semantic", "raw"]).has(recursiveMode)) {
+  throw new Error(`Invalid Recursive comparison mode: ${recursiveMode}`);
+}
+if (isTintModule && !new Set(["structural", "values"]).has(tintMode)) {
+  throw new Error(`Invalid Tint comparison mode: ${tintMode}`);
+}
 const baselineDocument = readJSON(baselinePath);
 const candidateDocument = readJSON(candidatePath);
 const baselineRows = indexRows(
@@ -746,7 +777,8 @@ const addedRows = [...candidateRows.keys()].filter((key) => !baselineRows.has(ke
 
 if (isTintModule && tintMode === "structural") {
   console.log(JSON.stringify(compareTintStructurally(
-    baselineRows, candidateRows, missingRows, addedRows
+    baselineRows, candidateRows, missingRows, addedRows,
+    baselineDocument, candidateDocument
   ), null, 2));
   process.exit(0);
 }

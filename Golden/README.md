@@ -43,8 +43,9 @@ The sections committed under **both** `macOS-26/` and `macOS-27/` are now direct
 
 ```sh
 node Golden/tools/unify.mjs <os-directory> --dry-run
-node Golden/tools/unify.mjs <os-directory>
 ```
+
+On a protocol-v2 archive, `unify.mjs` is intentionally dry-run only: writing sections without atomically updating their authoritative module registrations would invalidate the archive. Registered transactional writes are owned by the promotion workflow.
 
 Nothing in the archive is transcoded today. Unified sections are committed so a fresh clone can verify without a build step. The exporter writes the compact contract without the presentation tree, structured layer dictionaries, or animation branch, none of which any accepted learning reads.
 

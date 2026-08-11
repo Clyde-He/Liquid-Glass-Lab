@@ -73,7 +73,11 @@ export async function loadUnified(osDirectory) {
     const module = manifest.modules.find((entry) => entry.id === `core.${name}`);
     try {
       const document = normalizeUnifiedDocument(JSON.parse(
-        await readFile(path.join(directory, `${name}.json`), "utf8")
+        await readFile(
+          module ? path.join(goldenDirectory, osDirectory, module.file)
+            : path.join(directory, `${name}.json`),
+          "utf8"
+        )
       ));
       sections[name] = { ...document, archiveRole: module?.role ?? null };
     } catch {
