@@ -254,8 +254,9 @@ test("allows Float-to-Number noise in stored residual metadata", () => {
   );
 });
 
-test("rejects a row whose stored classification does not match its matrix", () => {
+test("recomputes classification from measured matrices", () => {
   const document = makeDocument();
   document.rows[0].matrix[0] += 0.01;
-  assert.throws(() => analyzeTintParameterization(document), /recomputed/);
+  const result = analyzeTintParameterization(document);
+  assert.equal(result.unclassifiedRowCount, 1);
 });

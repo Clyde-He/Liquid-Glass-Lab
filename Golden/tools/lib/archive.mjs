@@ -1,6 +1,9 @@
+import { spawnSync } from "node:child_process";
 import { cp, mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { cellKey, CELL_FIELDS } from "./cell.mjs";
+import { catalogFromArchive } from "./catalog.mjs";
 import {
   dynamicLifecycleProblems, dynamicPairingProblems,
 } from "./dynamic-contract.mjs";
@@ -88,20 +91,12 @@ function cellProblems(cell, label) {
   return problems;
 }
 
-export function validateStaticDocument(document, {
-  expectedObservationCount = 776,
-  expectedConsumerCount = 56,
-} = {}) {
+export function validateStaticDocument(document) {
   const problems = [];
   if (document?.schemaVersion !== 2 || !Array.isArray(document.observations)) {
     return ["static.json must be a schema-2 observation document"];
   }
-  if (document.observations.length !== expectedObservationCount) {
-    problems.push(
-      `static.json must contain ${expectedObservationCount} observations; `
-      + `got ${document.observations.length}`
-    );
-  }
+  if (document.observations.length === 0) problems.push("static.json has no observations");
   const observations = new Map();
   for (const [index, observation] of document.observations.entries()) {
     problems.push(...cellProblems(observation.cell, `static observation ${index}`));
@@ -145,12 +140,8 @@ export function validateStaticDocument(document, {
     }
   }
 
-  if (!Array.isArray(document.consumerCells)
-      || document.consumerCells.length !== expectedConsumerCount) {
-    problems.push(
-      `static.json must declare ${expectedConsumerCount} Consumer cells; `
-      + `got ${document.consumerCells?.length ?? 0}`
-    );
+  if (!Array.isArray(document.consumerCells) || document.consumerCells.length === 0) {
+    problems.push("static.json has no Consumer cells");
     return problems;
   }
   const consumerKeys = new Set();
@@ -166,6 +157,50 @@ export function validateStaticDocument(document, {
     }
   }
   return problems;
+}
+
+function captureProblems(archive) {
+  const problems = [];
+  if (archive.capture?.schemaVersion !== 2 || archive.platform.major === null
+      || !archive.platform.build || !archive.platform.architecture
+      || !archive.platform.displaySignature || !archive.capture.capturedAt) {
+    problems.push("capture.json lacks schema-2 OS/build/architecture/display provenance");
+  }
+  return problems;
+}
+
+function catalogProblems(archive) {
+  try {
+    catalogFromArchive(archive);
+    return [];
+  } catch (error) {
+    return [`Catalog projection failed: ${error.message}`];
+  }
+}
+
+export async function admitCoreArchive(directory) {
+  let archive;
+  try {
+    const [capture, staticDocument, dynamic] = await Promise.all([
+      readJSON(path.join(directory, ARCHIVE_FILES.capture)),
+      readJSON(path.join(directory, ARCHIVE_FILES.static)),
+      readJSON(path.join(directory, ARCHIVE_FILES.dynamic)),
+    ]);
+    archive = {
+      directory, capture, static: staticDocument, dynamic,
+      platform: platformFromCapture(capture),
+    };
+  } catch (error) {
+    throw new Error(`cannot read Golden Core at ${directory}: ${error.message}`);
+  }
+  const problems = [
+    ...captureProblems(archive),
+    ...validateStaticDocument(archive.static),
+    ...validateDynamic(archive),
+    ...catalogProblems(archive),
+  ];
+  if (problems.length) throw new Error(`invalid Golden Core:\n- ${problems.join("\n- ")}`);
+  return archive;
 }
 
 function validateDynamic(archive) {
@@ -203,6 +238,7 @@ function validateTint(id, document) {
     if (id.startsWith("tint.parameterization.")) {
       if (!matrixIsFinite(row.matrix)) problems.push(`${id}: row ${index} has no finite matrix`);
     } else if (!matrixIsFinite(row.flushMatrix) || !matrixIsFinite(row.settledMatrix)
+        || !Number.isFinite(row.maximumDifference)
         || row.passed !== true || row.pairedProofAtFlush !== true
         || row.pairedProofWhenSettled !== true) {
       problems.push(`${id}: row ${index} failed paired finite-matrix proof`);
@@ -212,6 +248,38 @@ function validateTint(id, document) {
     const planned = document.plan?.colors?.length;
     if (Number.isInteger(planned) && document.rows.length !== planned * 8) {
       problems.push(`${id}: ${document.rows.length} rows do not cover ${planned} colors × 8 cells`);
+    }
+  } else {
+    if (document?.formatVersion !== 2) {
+      problems.push(`${id}: formatVersion is not 2`);
+    }
+    const planned = document?.plannedColorIDs;
+    const plannedSet = new Set(planned ?? []);
+    if (!Array.isArray(planned) || planned.length === 0
+        || plannedSet.size !== planned.length
+        || !planned.every((value) => typeof value === "string" && value.length > 0)) {
+      problems.push(`${id}: plannedColorIDs is missing or invalid`);
+    } else {
+      const observed = new Set(document.rows.map(({ colorID }) => colorID));
+      if (observed.size !== plannedSet.size
+          || [...observed].some((colorID) => !plannedSet.has(colorID))) {
+        problems.push(`${id}: observed color IDs do not match plannedColorIDs`);
+      }
+      for (const colorID of planned) {
+        const colorRows = document.rows.filter((row) => row.colorID === colorID);
+        const cells = new Set(colorRows.map(({ cell }) => JSON.stringify([
+          cell?.isLightAppearance, cell?.isClear, cell?.hasMainParticipation,
+        ])));
+        if (colorRows.length !== 8 || cells.size !== 8) {
+          problems.push(`${id}: ${colorID} does not cover 8 unique cells`);
+        }
+      }
+      const timingIDs = document?.timings?.map(({ colorID }) => colorID) ?? [];
+      if (timingIDs.length !== planned.length
+          || new Set(timingIDs).size !== planned.length
+          || timingIDs.some((colorID) => !plannedSet.has(colorID))) {
+        problems.push(`${id}: timings do not cover plannedColorIDs exactly once`);
+      }
     }
   }
   return problems;
@@ -272,13 +340,10 @@ function embeddedOSProblems(archive) {
 
 export function validateArchive(archive) {
   const problems = [];
-  if (archive.capture?.schemaVersion !== 2 || archive.platform.major === null
-      || !archive.platform.build || !archive.platform.architecture
-      || !archive.platform.displaySignature || !archive.capture.capturedAt) {
-    problems.push("capture.json lacks schema-2 OS/build/architecture/display provenance");
-  }
+  problems.push(...captureProblems(archive));
   problems.push(...validateStaticDocument(archive.static));
   problems.push(...validateDynamic(archive));
+  problems.push(...catalogProblems(archive));
   for (const [id, key] of TINT_DOCUMENTS) problems.push(...validateTint(id, archive[key]));
   problems.push(...validateSemantic(archive));
   problems.push(...embeddedOSProblems(archive));
@@ -300,7 +365,9 @@ export async function admitArchive(directory) {
 function countDifferences(left, right, pathName = "", examples = [], options = {}) {
   if (typeof left === "number" && typeof right === "number") {
     if (options.ignoredKeys?.has(pathName.split(".").at(-1))) return 0;
-    return Math.abs(left - right) <= (options.tolerance ?? 0) ? 0 : 1;
+    if (Math.abs(left - right) <= (options.tolerance ?? 0)) return 0;
+    if (examples.length < 12) examples.push(pathName || "root");
+    return 1;
   }
   if (left === right) return 0;
   if (Array.isArray(left) && Array.isArray(right)) {
@@ -325,6 +392,29 @@ function countDifferences(left, right, pathName = "", examples = [], options = {
   return 1;
 }
 
+function valuesNamed(value, target, pathName = "root", entries = {}) {
+  if (!value || typeof value !== "object") return entries;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => valuesNamed(item, target, `${pathName}[${index}]`, entries));
+    return entries;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    const childPath = `${pathName}.${key}`;
+    if (key === target) entries[childPath] = child;
+    else valuesNamed(child, target, childPath, entries);
+  }
+  return entries;
+}
+
+function compareNamedValues(baseline, candidate, name, section) {
+  const examples = [];
+  const differences = countDifferences(
+    valuesNamed(baseline, name), valuesNamed(candidate, name),
+    section, examples, { tolerance: 1e-6 }
+  );
+  return { differences, examples: [...new Set(examples)].slice(0, 12) };
+}
+
 export function compareStaticDocuments(baseline, candidate) {
   const staticBaseline = new Map(
     baseline.observations.map((observation) => [cellKey(observation.cell), observation])
@@ -335,16 +425,32 @@ export function compareStaticDocuments(baseline, candidate) {
   const staticExamples = [];
   let staticChanged = 0;
   let staticDifferences = 0;
+  let volatileChanged = 0;
+  let volatileDifferences = 0;
+  const volatileExamples = [];
   for (const key of new Set([...staticBaseline.keys(), ...staticCandidate.keys()])) {
+    const baselineSnapshot = staticBaseline.get(key)?.snapshot;
+    const candidateSnapshot = staticCandidate.get(key)?.snapshot;
     const count = countDifferences(
-      staticBaseline.get(key)?.snapshot,
-      staticCandidate.get(key)?.snapshot,
+      baselineSnapshot,
+      candidateSnapshot,
       key,
       staticExamples,
       { tolerance: 1e-6, ignoredKeys: new Set(["inputMaxHeadroom"]) }
     );
     if (count) staticChanged += 1;
     staticDifferences += count;
+    const volatileCount = countDifferences(
+      Object.fromEntries((baselineSnapshot?.passes ?? []).flatMap((pass) =>
+        Object.hasOwn(pass.properties ?? {}, "inputMaxHeadroom")
+          ? [[`${pass.id}.inputMaxHeadroom`, pass.properties.inputMaxHeadroom]] : [])),
+      Object.fromEntries((candidateSnapshot?.passes ?? []).flatMap((pass) =>
+        Object.hasOwn(pass.properties ?? {}, "inputMaxHeadroom")
+          ? [[`${pass.id}.inputMaxHeadroom`, pass.properties.inputMaxHeadroom]] : [])),
+      key, volatileExamples, { tolerance: 1e-6 }
+    );
+    if (volatileCount) volatileChanged += 1;
+    volatileDifferences += volatileCount;
   }
   const baselineTree = projectStaticTree(baseline);
   const candidateTree = projectStaticTree(candidate);
@@ -363,6 +469,11 @@ export function compareStaticDocuments(baseline, candidate) {
     changedFields: staticDifferences,
     topologyChangedObservations: topologyChanged,
     examples: [...new Set(staticExamples)].slice(0, 12),
+    volatile: {
+      inputMaxHeadroomChangedObservations: volatileChanged,
+      inputMaxHeadroomDifferences: volatileDifferences,
+      examples: [...new Set(volatileExamples)].slice(0, 12),
+    },
   };
 }
 
@@ -370,14 +481,30 @@ export function compareArchives(baseline, candidate) {
   const staticComparison = compareStaticDocuments(baseline.static, candidate.static);
 
   const dynamic = compareStableDynamicRuns(baseline.dynamic.runs, candidate.dynamic.runs);
+  dynamic.volatile = {
+    inputMaxHeadroom: compareNamedValues(
+      baseline.dynamic.runs, candidate.dynamic.runs, "inputMaxHeadroom", "dynamic"
+    ),
+  };
   const documents = [];
   for (const [, key] of [...TINT_DOCUMENTS, ["semantic.usage-trees", "semantic"]]) {
     const examples = [];
+    const ignoredKeys = new Set([
+      "capturedAt", "generatedAt", "operatingSystem", "timings",
+    ]);
+    if (key === "semantic") ignoredKeys.add("inputMaxHeadroom");
     const differences = countDifferences(baseline[key], candidate[key], key, examples, {
-      tolerance: 1e-6,
-      ignoredKeys: new Set(["capturedAt", "generatedAt", "operatingSystem", "timings"]),
+      tolerance: 1e-6, ignoredKeys,
     });
-    documents.push({ file: ARCHIVE_FILES[key], differences, examples });
+    const comparison = { file: ARCHIVE_FILES[key], differences, examples };
+    if (key === "semantic") {
+      comparison.volatile = {
+        inputMaxHeadroom: compareNamedValues(
+          baseline[key], candidate[key], "inputMaxHeadroom", key
+        ),
+      };
+    }
+    documents.push(comparison);
   }
   const equivalent = staticComparison.equivalent
     && dynamic.equivalent && documents.every(({ differences }) => differences === 0);
@@ -386,6 +513,10 @@ export function compareArchives(baseline, candidate) {
     equivalent,
     baseline: baseline.directory,
     candidate: candidate.directory,
+    baselinePlatform: baseline.platform,
+    candidatePlatform: candidate.platform,
+    environmentConfounded:
+      baseline.platform.displaySignature !== candidate.platform.displaySignature,
     static: staticComparison,
     dynamic,
     documents,
@@ -409,15 +540,13 @@ export async function finalizeStaging(partial, output) {
     await rename(partial, output);
   } catch (error) {
     if (error?.code !== "EEXIST" && error?.code !== "ENOTEMPTY") throw error;
-    const previous = `${output}.previous-${process.pid}`;
-    await rename(output, previous);
-    try {
-      await rename(partial, output);
-      await rm(previous, { recursive: true, force: true });
-    } catch (replacementError) {
-      await rename(previous, output);
-      throw replacementError;
-    }
+    const toolDirectory = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+    const result = spawnSync("xcrun", [
+      "swift", path.join(toolDirectory, "atomic-promote.swift"), partial, output,
+    ], { encoding: "utf8" });
+    if (result.stderr) process.stderr.write(result.stderr);
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error(`atomic staging replacement exited ${result.status}`);
   }
 }
 

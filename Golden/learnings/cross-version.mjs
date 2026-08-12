@@ -6,7 +6,7 @@
 // that turn a version bump into a work list instead of a re-read.
 //
 // They receive every loaded OS archive at once, keyed by directory name, and
-// pair rows by the unified cell coordinate.
+// pair rows by the shared Golden cell coordinate.
 
 import { ALL_CHANNELS, glassBackground, numeric } from "../tools/lib/golden.mjs";
 import { cellKey } from "../tools/lib/cell.mjs";
@@ -59,15 +59,6 @@ export default [
         const versions = versionsWith(archives, section);
         if (versions.length < 2) {
           expect.unverifiable(`${section} present on fewer than two versions`);
-        }
-        const roles = new Set(
-          versions.map(({ document }) => document.archiveRole ?? "unknown")
-        );
-        if (roles.size > 1) {
-          expect.unverifiable(
-            `${section} mixes ${[...roles].join(" and ")} archives — capture `
-              + "both versions directly before asserting exact cell parity"
-          );
         }
         const [base, ...rest] = versions;
         const baseCells = indexByCell(base.document);

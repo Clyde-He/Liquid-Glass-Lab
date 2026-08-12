@@ -32,7 +32,9 @@ function color(property) {
 
 function point(property) {
   const value = resolved(property);
-  return value?.type === "point" ? value.point : null;
+  if (value?.type === "point") return value.point;
+  if (value?.type === "size") return value.size;
+  return null;
 }
 
 function auditDescription(value) {
@@ -267,8 +269,10 @@ export function projectStyleSample(snapshot) {
     if (!owner) return null;
     const values = {};
     for (const key of RIM_VALUE_KEYS) {
+      if (!Object.hasOwn(pass.properties, key)) continue;
       const value = number(pass.properties[key]);
-      if (value !== null) values[key] = value;
+      if (!Number.isFinite(value)) return null;
+      values[key] = value;
     }
     const fillColor = consumerColor(pass.properties.fillColor);
     const keyColor = consumerColor(pass.properties.keyColor);

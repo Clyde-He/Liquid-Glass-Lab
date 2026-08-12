@@ -145,13 +145,13 @@ export default [
       const diverging = sizes.filter(
         (size) => (perSize.get(size)?.size ?? 0) > 0
       );
-      if (agreeing.length > 0 && diverging.length > 0) {
-        expect.ok(
-          Math.max(...diverging) < Math.min(...agreeing),
-          "divergence is confined to the small end",
-          `diverges at ${diverging.join(",")}, agrees at ${agreeing.join(",")}`
-        );
-      }
+      expect.requireSamples(agreeing.length, 1, "sizes whose endpoints agree");
+      expect.requireSamples(diverging.length, 1, "sizes whose endpoints diverge");
+      expect.ok(
+        Math.max(...diverging) < Math.min(...agreeing),
+        "divergence is confined to the small end",
+        `diverges at ${diverging.join(",")}, agrees at ${agreeing.join(",")}`
+      );
     },
   },
 ];

@@ -2,7 +2,7 @@
 //  GlassLabGoldenSchema.swift
 //  LiquidGlassLab
 //
-//  The unified Golden archive schema, written directly by the exporter.
+//  The Golden archive schema, written directly by the exporter.
 //
 //  Every row of every section is addressed by the same `GoldenCell`, which is
 //  what makes cross-version and cross-section comparison a key match instead of

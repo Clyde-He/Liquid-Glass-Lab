@@ -15,7 +15,7 @@ For the Liquid Glass Lab window controller, UI state, Live Inspector, Overrides,
 
 ## Version scope
 
-The public API begins at macOS 26, but private recipes, class names, inventories, and ranges must not be treated as version-stable. Sections without an explicit macOS 26 label describe the macOS 27 beta baseline. Historical macOS 26.6 Recipe Matrix and fixed-geometry Recursive Pass Audit captures informed this document, as did the matching macOS 27 audit on the fixture-level build above. Those standalone fixtures are now retired; direct Core modules retain the supported cross-version and recursive-product coverage, while the deliberately retired claims are recorded in the evidence retirement ledger. Preliminary pass-family parity is recorded below, while value-level semantic classification remains open.
+The public API begins at macOS 26, but private recipes, class names, inventories, and ranges must not be treated as version-stable. Sections without an explicit macOS 26 label describe the macOS 27 beta baseline. Historical macOS 26.6 Recipe Matrix and fixed-geometry Recursive Pass Audit captures informed this document, as did the matching macOS 27 audit on the fixture-level build above. Those standalone fixtures are retired; fresh Golden archives derive scalar, recursive, and cross-version views from typed Resolved Snapshots. Preliminary pass-family parity is recorded below, while value-level semantic classification remains open.
 
 Unknown Objective-C KVC keys raise `NSUnknownKeyException` before Swift can catch them. Consumers must discover and guard private capabilities rather than assuming that a later or earlier build exposes the same object graph. The Playground's concrete fail-closed policy is documented separately.
 

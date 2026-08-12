@@ -1,12 +1,15 @@
 import { cellKey } from "./cell.mjs";
 import { projectStyleSample } from "./snapshot-projections.mjs";
 
-export const CATALOG_SHORT_SIDES = [48, 64, 96, 128, 160, 200, 320];
-
 function catalogCell(cell) {
   if (!["Light", "Dark"].includes(cell?.appearance)
       || ![1, 2].includes(cell?.variant)
-      || typeof cell?.main !== "boolean") return null;
+      || typeof cell?.main !== "boolean"
+      || cell.subvariant !== null || cell.key !== false || cell.subdued !== false
+      || cell.backdrop !== "Light" || cell.tint !== "None"
+      || cell.width !== 480 || cell.height !== cell.shortSide
+      || cell.cornerRadius !== 16 || cell.host !== "Panel" || cell.direction !== null
+      || !Number.isFinite(cell.shortSide)) return null;
   return {
     isLightAppearance: cell.appearance === "Light",
     isClear: cell.variant === 2,
@@ -48,7 +51,8 @@ export function catalogFromSamples(capture, platform, entries) {
   const groups = new Map();
   for (const { cell, sample } of entries) {
     const projectedCell = catalogCell(cell);
-    if (!projectedCell || !supported(sample)) {
+    if (!projectedCell || !supported(sample)
+        || Math.abs(sample.shortSide - cell.shortSide) >= 0.001) {
       throw new Error(`Consumer cell ${cellKey(cell)} is not a complete supported projection`);
     }
     const key = catalogCellKey(projectedCell);
@@ -61,11 +65,16 @@ export function catalogFromSamples(capture, platform, entries) {
     return lhs < rhs ? -1 : lhs > rhs ? 1 : 0;
   });
   if (ordered.length !== 8) throw new Error(`Catalog needs 8 cells; got ${ordered.length}`);
+  let shortSides = null;
   for (const group of ordered) {
     group.samples.sort((left, right) => left.shortSide - right.shortSide);
     const sides = group.samples.map(({ shortSide }) => shortSide);
-    if (JSON.stringify(sides) !== JSON.stringify(CATALOG_SHORT_SIDES)) {
-      throw new Error(`Catalog cell ${catalogCellKey(group.cell)} has sizes ${sides.join(", ")}`);
+    if (sides.length === 0 || new Set(sides).size !== sides.length) {
+      throw new Error(`Catalog cell ${catalogCellKey(group.cell)} has duplicate or empty sizes`);
+    }
+    if (shortSides === null) shortSides = sides;
+    else if (JSON.stringify(sides) !== JSON.stringify(shortSides)) {
+      throw new Error(`Catalog cells do not share one short-side grid: ${sides.join(", ")}`);
     }
   }
   for (const on of ordered.filter(({ cell }) => cell.hasMainParticipation)) {

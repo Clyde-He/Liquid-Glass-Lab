@@ -64,6 +64,7 @@ struct GlassLabTintSyncResolutionDocument: Codable, Sendable {
     var capturedAt: String
     var operatingSystem: String
     var environment: GlassLabTintParameterizationSweepDocument.Environment
+    var plannedColorIDs: [String]
     var rows: [GlassLabTintSyncResolutionRow]
     var timings: [GlassLabTintSyncTiming]
     var passed: Bool
@@ -281,11 +282,25 @@ extension GlassLabView {
         )
         let rows = try await session.run(colors: colors)
         let timings = session.timings
+        let plannedColorIDs = colors.map(\.id)
+        let plannedIDs = Set(plannedColorIDs)
+        let observedIDs = Set(rows.map(\.colorID))
+        let timingIDs = timings.map(\.colorID)
+        let hasCompleteCoverage = plannedIDs.count == plannedColorIDs.count
+            && observedIDs == plannedIDs
+            && rows.count == plannedColorIDs.count * 8
+            && plannedColorIDs.allSatisfy { id in
+                let colorRows = rows.filter { $0.colorID == id }
+                return colorRows.count == 8
+                    && Set(colorRows.map(\.cell)).count == 8
+            }
+            && timingIDs.count == plannedColorIDs.count
+            && Set(timingIDs) == plannedIDs
         let current = GlassMaterialStyleAtlas.Environment.current(
             for: hostWindow.screen
         )
         return GlassLabTintSyncResolutionDocument(
-            formatVersion: 1,
+            formatVersion: 2,
             capturedAt: ISO8601DateFormatter().string(from: Date()),
             operatingSystem: ProcessInfo.processInfo
                 .operatingSystemVersionString,
@@ -297,9 +312,10 @@ extension GlassLabView {
                 atlasSchemaVersion: GlassMaterialStyleAtlas
                     .currentSchemaVersion
             ),
+            plannedColorIDs: plannedColorIDs,
             rows: rows,
             timings: timings,
-            passed: rows.allSatisfy(\.passed)
+            passed: hasCompleteCoverage && rows.allSatisfy(\.passed)
         )
     }
 }

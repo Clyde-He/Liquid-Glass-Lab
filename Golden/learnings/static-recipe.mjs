@@ -101,8 +101,8 @@ export default [
         groups.get(key).push(row);
       }
       // The claim needs two rows that share a short side while differing in
-      // width or height. The sweep is 480 × {24, 200, 600}, so every short side
-      // occurs exactly once and no such pair exists.
+      // width or height. The plan includes an explicit transposed pair for
+      // that comparison.
       const testable = [...groups.values()].filter((members) => {
         const shapes = new Set(
           members.map((row) => `${row.cell.width}x${row.cell.height}`)
@@ -112,8 +112,7 @@ export default [
       if (testable.length === 0) {
         expect.unverifiable(
           "no two rows share a short side with different width/height — the "
-          + "sweep varies height at a fixed width 480. One transposed size pair "
-          + "(200×480 beside 480×200) would make this decidable"
+          + "declared transposed comparison is missing"
         );
       }
       const differing = [];

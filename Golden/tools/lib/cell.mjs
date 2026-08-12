@@ -1,4 +1,4 @@
-// The unified cell coordinate.
+// The Golden cell coordinate.
 //
 // Every archived row — static Recipe, static recursive tree, or one run of a
 // Materialize transition — is addressed by the same object. That is the whole

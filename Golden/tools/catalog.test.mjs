@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  CATALOG_SHORT_SIDES, catalogBytes, catalogFromSamples, verifiesMainOn,
+  catalogBytes, catalogFromSamples, verifiesMainOn,
 } from "./lib/catalog.mjs";
+
+const CATALOG_SHORT_SIDES = [48, 64, 96, 128, 160, 200, 320];
 
 function sample(shortSide, main) {
   return {
@@ -58,4 +60,22 @@ test("Catalog rejects a mislabeled Main-On payload", () => {
   assert.throws(() => catalogFromSamples({
     operatingSystem: "Version 27.0 (Build 26A5406e)", displaySignature: "Display",
   }, { major: 27 }, candidate), /Main-Off witness/);
+});
+
+test("Catalog rejects Consumer evidence captured outside canonical axes", () => {
+  const candidate = entries();
+  candidate[0].cell.key = true;
+  assert.throws(() => catalogFromSamples({
+    operatingSystem: "Version 27.0 (Build 26A5406e)", displaySignature: "Display",
+  }, { major: 27 }, candidate), /not a complete supported projection/);
+});
+
+test("Catalog derives one shared short-side grid from all eight cells", () => {
+  const candidate = entries();
+  candidate.splice(candidate.findIndex(({ cell }) =>
+    cell.appearance === "Dark" && cell.variant === 1 && !cell.main
+      && cell.shortSide === 320), 1);
+  assert.throws(() => catalogFromSamples({
+    operatingSystem: "Version 27.0 (Build 26A5406e)", displaySignature: "Display",
+  }, { major: 27 }, candidate), /do not share one short-side grid/);
 });

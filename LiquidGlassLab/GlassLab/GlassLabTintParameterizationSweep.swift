@@ -1274,10 +1274,7 @@ extension GlassLabView {
                 expectedColor: expectedColor,
                 cell: row.cell.atlasCell
             )
-            guard tintSweepStructuresMatch(
-                stored: row.structure,
-                measured: result.structure
-            ) else {
+            guard row.structure == result.structure else {
                 throw GlassLabTintSweepError.invalidExistingDocument(
                     "\(row.colorID) · \(row.cell.label) structure changed"
                 )
@@ -1329,10 +1326,7 @@ extension GlassLabView {
                     expectedColor: color,
                     cell: row.cell.atlasCell
                 )
-                guard tintSweepStructuresMatch(
-                    stored: row.structure,
-                    measured: result.structure
-                ) else {
+                guard row.structure == result.structure else {
                     throw GlassLabTintSweepError.invalidExistingDocument(
                         "\(row.colorID) · \(row.cell.label) structure changed"
                     )
@@ -1355,17 +1349,6 @@ extension GlassLabView {
                 }
             }
         )
-    }
-
-    private static func tintSweepStructuresMatch(
-        stored: GlassLabTintMatrixStructure,
-        measured: GlassLabTintMatrixStructure
-    ) -> Bool {
-        stored == measured
-            || (
-                stored == .unclassified
-                    && measured == .achromaticChannelAffine
-            )
     }
 
     private static func writeTintSweepCheckpoint(

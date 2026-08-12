@@ -83,6 +83,42 @@ enum GlassLabTuning {
         applyOverrides(from: state, to: glass)
     }
 
+    /// Confirms the private recipe setters actually took effect. A missing
+    /// getter cannot verify the coordinate and therefore rejects the occurrence.
+    static func resolvedRecipeMatches(
+        variant: Int,
+        subvariant: String?,
+        subdued: Bool,
+        on glass: NSGlassEffectView
+    ) -> Bool {
+        let object = glass as NSObject
+        guard object.responds(to: NSSelectorFromString("_variant")),
+              let actualVariant = object.value(forKey: "_variant") as? NSNumber,
+              actualVariant.intValue == variant,
+              object.responds(to: NSSelectorFromString("_subvariant")),
+              (object.value(forKey: "_subvariant") as? String) == subvariant,
+              object.responds(to: NSSelectorFromString("_subduedState")),
+              let actualSubdued = object.value(forKey: "_subduedState") as? NSNumber,
+              actualSubdued.boolValue == subdued,
+              object.responds(to: NSSelectorFromString("_adaptiveAppearance")),
+              let actualAdaptive = object.value(
+                  forKey: "_adaptiveAppearance"
+              ) as? NSNumber,
+              actualAdaptive.intValue == 2,
+              object.responds(to: NSSelectorFromString("_scrimState")),
+              let actualScrim = object.value(forKey: "_scrimState") as? NSNumber,
+              !actualScrim.boolValue,
+              object.responds(to: NSSelectorFromString("_tintOpacityReduced")),
+              let actualReducedTint = object.value(
+                  forKey: "_tintOpacityReduced"
+              ) as? NSNumber,
+              !actualReducedTint.boolValue,
+              glass.tintColor == nil else {
+            return false
+        }
+        return true
+    }
+
     @MainActor
     static func supportsReducedTintOpacitySetter(
         on glass: NSGlassEffectView
@@ -3062,9 +3098,11 @@ enum GlassLabTuning {
             }) else { return nil }
             var values: [String: Double] = [:]
             for key in rimValueKeys {
-                if let value = resolvedNumber(pass.properties[key]) {
-                    values[key] = value
+                guard let property = pass.properties[key] else { continue }
+                guard let value = resolvedNumber(property), value.isFinite else {
+                    return nil
                 }
+                values[key] = value
             }
             var rimColors: [String: GlassMaterialColorValue] = [:]
             for key in ["fillColor", "keyColor"] {
@@ -3131,8 +3169,12 @@ enum GlassLabTuning {
     private static func resolvedPoint(
         _ property: GoldenResolvedProperty?
     ) -> CGPoint? {
-        guard case let .point(value)? = property?.value else { return nil }
-        return CGPoint(x: value.x, y: value.y)
+        switch property?.value {
+        case let .point(value), let .size(value):
+            CGPoint(x: value.x, y: value.y)
+        default:
+            nil
+        }
     }
 
     private static func resolvedAuditDescription(

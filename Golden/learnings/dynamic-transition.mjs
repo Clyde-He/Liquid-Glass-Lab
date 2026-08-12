@@ -154,7 +154,7 @@ export default [
 
       const differing = [];
       for (const members of repeated) {
-        const sources = members.map((run) => run.source ?? run.slice);
+        const sources = members.map((run) => run.slice);
         expect.ok(
           sources.every(Boolean) && new Set(sources).size === members.length,
           "repeats come from distinct sweeps",

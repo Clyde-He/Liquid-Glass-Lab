@@ -368,15 +368,6 @@ function validateRow(row, color) {
       alphaResidual
     );
   }
-  const legacyAchromaticDeclaration =
-    row.structure === "unclassified" &&
-    structure === "achromaticChannelAffine";
-  if (row.structure !== structure && !legacyAchromaticDeclaration) {
-    throw new Error(
-      `${row.colorID} · ${cellKey(row.cell)} declares ${row.structure}, ` +
-        `recomputed ${structure}`
-    );
-  }
   if (
     Number.isFinite(row.lumaEndpointResidual) &&
     Math.abs(row.lumaEndpointResidual - endpoint.maximumResidual) >

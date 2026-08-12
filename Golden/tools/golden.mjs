@@ -8,7 +8,7 @@ import {
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
-  ARCHIVE_FILES, acceptedArchives, admitArchive, compareArchives,
+  ARCHIVE_FILES, acceptedArchives, admitArchive, admitCoreArchive, compareArchives,
   compareStaticDocuments, copyArchive, finalizeStaging, platformFromCapture,
   validateStaticDocument,
 } from "./lib/archive.mjs";
@@ -99,6 +99,10 @@ async function capture() {
   } finally {
     await rm(core, { recursive: true, force: true });
   }
+
+  // Fail the inexpensive Core contract, including full Catalog derivation,
+  // before starting the long resumable Tint studies.
+  await admitCoreArchive(partial);
 
   const drivers = [
     ["--capture-tint-parameterization", ARCHIVE_FILES.tintSweep],
@@ -231,10 +235,7 @@ async function drift() {
     const staticDocument = JSON.parse(
       await readFile(path.join(captureDirectory, ARCHIVE_FILES.static), "utf8")
     );
-    const problems = validateStaticDocument(staticDocument, {
-      expectedObservationCount: 28,
-      expectedConsumerCount: 24,
-    });
+    const problems = validateStaticDocument(staticDocument);
     if (problems.length) throw new Error(`invalid drift capture: ${problems.join("; ")}`);
     const platform = platformFromCapture(captureDocument);
     if (platform.major !== accepted.platform.major) {

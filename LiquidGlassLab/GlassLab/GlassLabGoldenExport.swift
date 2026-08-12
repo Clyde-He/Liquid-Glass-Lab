@@ -19,6 +19,7 @@ enum GlassLabGoldenExportError: LocalizedError {
     case contextRejected(context: String, detail: String)
     case emptySection(String)
     case duplicateRow(section: String, cell: String)
+    case invalidPlan(String)
     case unprojectableCatalog(cell: String)
     case promotionFailed(String)
 
@@ -31,6 +32,8 @@ enum GlassLabGoldenExportError: LocalizedError {
         case let .duplicateRow(section, cell):
             "Section \(section) produced an unintended duplicate at \(cell). "
                 + "This section does not permit repeated cells."
+        case let .invalidPlan(detail):
+            "Golden capture plan is invalid: \(detail)"
         case let .unprojectableCatalog(cell):
             "Static context \(cell) is required by Consumer but cannot project "
                 + "a complete supported style sample."
@@ -66,7 +69,7 @@ extension GlassLabView {
             }
             do {
                 let meta = try await captureGoldenArchive(
-                    into: base.appendingPathComponent("unified", isDirectory: true)
+                    into: base.appendingPathComponent("golden-capture", isDirectory: true)
                 )
                 state.reportOutput = Self.goldenReport(meta)
             } catch is CancellationError {
@@ -130,7 +133,12 @@ extension GlassLabView {
     // MARK: - Driver
 
     func captureGoldenArchive(into directory: URL) async throws -> GoldenCaptureSummary {
-        try await captureGolden(
+        guard GlassLabGoldenPlan.fullPlanIsApproved() else {
+            throw GlassLabGoldenExportError.invalidPlan(
+                "Full must remain 776 unique observations with 56 Consumer anchors"
+            )
+        }
+        return try await captureGolden(
             into: directory,
             staticContexts: GlassLabGoldenPlan.staticContexts(),
             capturesDynamic: true
@@ -140,7 +148,12 @@ extension GlassLabView {
     func captureGoldenDriftArchive(
         into directory: URL
     ) async throws -> GoldenCaptureSummary {
-        try await captureGolden(
+        guard GlassLabGoldenPlan.driftPlanIsApproved() else {
+            throw GlassLabGoldenExportError.invalidPlan(
+                "drift must remain 28 unique Full-plan sentinels with 24 Consumer anchors"
+            )
+        }
+        return try await captureGolden(
             into: directory,
             staticContexts: GlassLabGoldenPlan.driftContexts(),
             capturesDynamic: false
@@ -176,7 +189,7 @@ extension GlassLabView {
             options: [
                 .userInitiated, .idleSystemSleepDisabled, .idleDisplaySleepDisabled,
             ],
-            reason: "Capturing the unified Golden archive"
+            reason: "Capturing the Golden archive"
         )
         defer {
             ProcessInfo.processInfo.endActivity(activity)
@@ -218,6 +231,15 @@ extension GlassLabView {
         state.isTestWindowKey = false
         let capturedAt = ISO8601DateFormatter().string(from: Date())
         let operatingSystem = ProcessInfo.processInfo.operatingSystemVersionString
+        let captureEnvironment = GlassMaterialStyleAtlas.Environment.current(
+            for: state.testWindow.liveWindow?.screen
+        )
+        guard captureEnvironment.displaySignature != "unknown" else {
+            throw GlassLabGoldenExportError.contextRejected(
+                context: "Core",
+                detail: "the capture window has no identifiable display"
+            )
+        }
 
         // Scoped to Static, and deliberately not held across the
         // dynamic one. The flag stops the Recipe host and live readout from
@@ -230,7 +252,23 @@ extension GlassLabView {
             contexts: staticContexts
         )
         state.isCapturingRecipeMatrix = false
+        guard GlassMaterialStyleAtlas.Environment.current(
+            for: state.testWindow.liveWindow?.screen
+        ).displaySignature == captureEnvironment.displaySignature else {
+            throw GlassLabGoldenExportError.contextRejected(
+                context: "Static",
+                detail: "the capture window moved to another display"
+            )
+        }
         let dynamic = capturesDynamic ? try await captureDynamicSection() : nil
+        guard GlassMaterialStyleAtlas.Environment.current(
+            for: state.testWindow.liveWindow?.screen
+        ).displaySignature == captureEnvironment.displaySignature else {
+            throw GlassLabGoldenExportError.contextRejected(
+                context: "Dynamic",
+                detail: "the capture window moved to another display"
+            )
+        }
 
         #if arch(arm64)
         let architecture = "arm64"
@@ -243,9 +281,7 @@ extension GlassLabView {
             schemaVersion: goldenSchemaVersion,
             operatingSystem: operatingSystem,
             architecture: architecture,
-            displaySignature: GlassMaterialStyleAtlas.Environment.current(
-                for: state.testWindow.liveWindow?.screen
-            ).displaySignature,
+            displaySignature: captureEnvironment.displaySignature,
             capturedAt: capturedAt
         )
 
@@ -301,7 +337,7 @@ extension GlassLabView {
                   state.testWindow.isActuallyKey == context.key,
                   context.appearance.matchesName(
                       state.testWindow.effectiveAppearanceName ?? ""
-                  ) else {
+                  ), staticContextMatches(context, glass: glass) else {
                 continue
             }
             do {
@@ -314,7 +350,7 @@ extension GlassLabView {
                 guard actualMain == context.main, actualKey == context.key,
                       context.appearance.matchesName(
                           state.testWindow.effectiveAppearanceName ?? ""
-                      ) else {
+                      ), staticContextMatches(context, glass: glass) else {
                     continue
                 }
                 return snapshot
@@ -332,6 +368,23 @@ extension GlassLabView {
                 + "matched main=\(context.main), key=\(context.key), and "
                 + "appearance=\(context.appearance.rawValue)"
         )
+    }
+
+    private func staticContextMatches(
+        _ context: GlassLabGoldenPlan.StaticContext,
+        glass: NSGlassEffectView
+    ) -> Bool {
+        let expectedPanel = context.host == .panel
+        return (glass.window is NSPanel) == expectedPanel
+            && abs(Double(glass.bounds.width) - context.width) < 0.001
+            && abs(Double(glass.bounds.height) - context.height) < 0.001
+            && abs(Double(glass.cornerRadius) - context.cornerRadius) < 0.001
+            && GlassLabTuning.resolvedRecipeMatches(
+                variant: context.variant,
+                subvariant: context.subvariant,
+                subdued: context.subdued,
+                on: glass
+            )
     }
 
     // MARK: - Static

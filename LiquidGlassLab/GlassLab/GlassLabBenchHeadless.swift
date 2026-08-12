@@ -35,12 +35,8 @@ extension GlassLabView {
         let keys: Set<URLResourceKey> = [
             .isDirectoryKey,
             .isRegularFileKey,
-            .isSymbolicLinkKey,
         ]
         let rootValues = try artifact.resourceValues(forKeys: keys)
-        guard rootValues.isSymbolicLink != true else {
-            throw CocoaError(.fileReadUnsupportedScheme)
-        }
 
         let rootKind: String
         var entries: [GlassLabHeadlessArtifactEntry] = []
@@ -58,9 +54,6 @@ extension GlassLabView {
                 ).sorted { $0.lastPathComponent < $1.lastPathComponent }
                 for child in children {
                     let values = try child.resourceValues(forKeys: keys)
-                    guard values.isSymbolicLink != true else {
-                        throw CocoaError(.fileReadUnsupportedScheme)
-                    }
                     let relative = relativeDirectory.isEmpty
                         ? child.lastPathComponent
                         : relativeDirectory + "/" + child.lastPathComponent

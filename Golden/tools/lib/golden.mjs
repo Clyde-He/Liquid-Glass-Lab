@@ -181,7 +181,7 @@ export const numeric = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-/** Inputs are `{key: value}` maps in the unified archive. */
+/** Inputs are `{key: value}` maps in the Golden archive. */
 export const filterNamed = (sample, name) =>
   sample?.filters?.find((filter) => filter.name === name) ?? null;
 
@@ -211,9 +211,9 @@ export function endpointSample(run) {
 export const endpointInputs = (run) =>
   glassBackground(endpointSample(run))?.inputs ?? null;
 
-/** Supports both transcoded legacy runs and direct-capture runs. */
+/** Tint color components recorded directly on a Dynamic run. */
 export const tintComponents = (run) =>
-  run?.tintComponents ?? run?.tint?.components ?? null;
+  run?.tintComponents ?? null;
 
 // MARK: - The measured curve, mirrored from LiquidGlassLab/GlassMaterial
 

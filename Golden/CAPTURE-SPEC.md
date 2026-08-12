@@ -26,7 +26,7 @@ product overlap      -24
 union                776
 ```
 
-The product grid is appearance `{Light, Dark}` × material `{Regular, Clear}` × participation `{Main Off, Main On}` × short side `{48, 64, 96, 128, 160, 200, 320}`. Every coordinate uses the canonical Panel host, Light backdrop, no Tint, and sufficient window padding. The stored condition records every controlled axis and the observed `shortSide`.
+The product grid is appearance `{Light, Dark}` × material `{Regular, Clear}` × participation `{Main Off, Main On}` × short side `{48, 64, 96, 128, 160, 200, 320}`. Every coordinate uses the canonical Panel host, Light backdrop, no Tint, and fixed 120-point window padding. The stored condition records every controlled axis and the observed `shortSide`.
 
 Intentional stability is proven inside each occurrence by strict Snapshot settling, so the former 21-row second sweep is gone. A repeated observation is allowed only when the plan explicitly declares a distinct occurrence.
 
@@ -80,7 +80,7 @@ The admission contract is direct and small:
 
 - required fixed files are readable JSON;
 - capture provenance is complete and agrees across documents;
-- Static has exactly 776 unique complete Snapshots and 56 projectable Consumer coordinates;
+- Swift refuses to start unless its plan has exactly 776 unique coordinates and 56 Consumer coordinates; Static admission then requires unique complete Snapshots whose Consumer subset forms eight canonical projectable groups on one shared size grid;
 - Dynamic lifecycle and pairing pass;
 - Tint coverage and matrices pass;
 - Semantic meets the per-major plan;

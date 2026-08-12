@@ -15,14 +15,18 @@ import AppKit
 import Foundation
 
 enum GlassLabGoldenPlan {
+    static let approvedStaticObservationCount = 776
+    static let approvedConsumerCount = 56
+    static let approvedDriftObservationCount = 28
+    static let approvedDriftConsumerCount = 24
     /// The reference geometry every core row is captured at.
     static let referenceWidth: Double = 480
     static let referenceHeight: Double = 200
     static let referenceCornerRadius: Double = 16
     static let staticAppearance = GlassLabTestAppearance.light
     static let staticBackdrop = GlassLabBackdropMode.light
-    /// One canonical physical context serves research and Consumer projection.
-    /// 120 comfortably contains the largest currently resolved backdrop margin.
+    /// One canonical model-tree context serves research and Consumer projection.
+    /// Window padding affects visible pixels, not the resolved values captured here.
     static let staticWindowPadding: Double = 120
 
     // MARK: - Static plan
@@ -273,6 +277,28 @@ enum GlassLabGoldenPlan {
         staticContexts().filter(\.requiresCatalog)
     }
 
+    /// These are small reviewed shape pins, colocated with the one coordinate
+    /// authority. They catch an accidental plan edit before an hours-long run;
+    /// readers validate emitted observations structurally rather than copying
+    /// the numbers or coordinate tables.
+    static func fullPlanIsApproved() -> Bool {
+        let contexts = staticContexts()
+        let consumers = contexts.filter(\.requiresCatalog)
+        let consumerGroups = Dictionary(grouping: consumers) {
+            "\($0.appearance.rawValue)|\($0.variant)|\($0.main)"
+        }
+        return contexts.count == approvedStaticObservationCount
+            && Set(contexts.map(\.cell.identity)).count == contexts.count
+            && consumers.count == approvedConsumerCount
+            && Set(consumers.map(\.cell.identity)).count == consumers.count
+            && consumerGroups.count == 8
+            && consumerGroups.values.allSatisfy { group in
+                group.count == catalogShortSides.count
+                    && Set(group.map { min($0.width, $0.height) })
+                        == Set(catalogShortSides)
+            }
+    }
+
     /// Fixed quick signal, captured by the same walker as Full. Twenty-four
     /// product anchors cover both appearances, variants, and participation at
     /// 48/200/320 points; Variant 4 and 6 add adaptive/alternate topology.
@@ -290,6 +316,16 @@ enum GlassLabGoldenPlan {
                 && !$0.key
         }
         return product + research
+    }
+
+    static func driftPlanIsApproved() -> Bool {
+        let full = Set(staticContexts().map(\.cell.identity))
+        let contexts = driftContexts()
+        let consumers = contexts.filter(\.requiresCatalog)
+        return contexts.count == approvedDriftObservationCount
+            && Set(contexts.map(\.cell.identity)).count == contexts.count
+            && consumers.count == approvedDriftConsumerCount
+            && contexts.allSatisfy { full.contains($0.cell.identity) }
     }
 
     // MARK: - Dynamic plan

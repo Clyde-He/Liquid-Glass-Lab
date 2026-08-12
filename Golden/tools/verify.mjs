@@ -2,7 +2,9 @@
 
 import path from "node:path";
 import { goldenDirectory, osDirectories } from "./lib/golden.mjs";
-import { readDispositions, verifyArchiveSet } from "./lib/verify-engine.mjs";
+import {
+  readDispositions, releaseVerificationProblems, verifyArchiveSet,
+} from "./lib/verify-engine.mjs";
 
 const args = process.argv.slice(2);
 const verbose = args.includes("--verbose");
@@ -57,7 +59,7 @@ if (json) {
   console.log("\nLearnings");
   for (const archive of archives) {
     const platform = report.integrity.find(({ name }) => name === archive.name)?.platform ?? {};
-    console.log(`\n  ${archive.name} (${platform.version ?? "?"} / ${platform.build ?? "?"} unified)`);
+    console.log(`\n  ${archive.name} (${platform.version ?? "?"} / ${platform.build ?? "?"})`);
     for (const outcome of report.outcomes.filter(({ osDirectory }) => osDirectory === archive.name)) {
       const mark = outcome.status === "passed" ? green("✓")
         : outcome.status === "failed" ? red("✗") : yellow("–");
@@ -77,4 +79,4 @@ if (json) {
   console.log(`\n${report.tally.passed} passed, ${report.tally.failed} failed, ${report.tally.skipped} skipped`);
 }
 
-if (!report.ok) process.exitCode = 1;
+if (releaseVerificationProblems(report).length) process.exitCode = 1;

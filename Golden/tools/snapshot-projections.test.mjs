@@ -20,7 +20,7 @@ const color = (red, green, blue, alpha) => ({
     extendedSRGB: { red, green, blue, alpha },
   },
 });
-const point = (x, y) => ({ type: "point", point: { x, y } });
+const size = (x, y) => ({ type: "size", size: { x, y } });
 const matrix = () => ({
   type: "matrix",
   matrix: { objCType: "{CAColorMatrix=ffffffffffffffffffff}", coefficients: Array(20).fill(1) },
@@ -79,7 +79,7 @@ function snapshot() {
           inputFaceOpacity: property(number(1)),
           inputBackdropAware: property(boolean(true)),
           inputFaceColorMatrixFillColor: property(color(1, 0.5, 0.25, 0.75)),
-          inputShadowOffset: property(point(0, 8)),
+          inputShadowOffset: property(size(0, 8)),
           inputOptional: property(null, "nil"),
         },
       },
@@ -133,6 +133,7 @@ test("Consumer projection is complete, typed, and rejects unreadable critical va
   assert.equal(sample.matrices.length, 2);
   assert.equal(sample.rims.length, 1);
   assert.equal(sample.marginWidth, 70);
+  assert.deepEqual(sample.points.inputShadowOffset, [0, 8]);
   assert.deepEqual(sample.colors.inputFaceColorMatrixFillColor, {
     red: 1, green: 0.5, blue: 0.25, alpha: 0.75,
   });
@@ -144,4 +145,9 @@ test("Consumer projection is complete, typed, and rejects unreadable critical va
 
   source.passes[0].properties.inputFaceOpacity = property(null, "unreadable");
   assert.equal(projectStyleSample(source), null);
+
+  const brokenRim = snapshot();
+  brokenRim.passes.find(({ id }) => id === "rim").properties.curvature =
+    property(null, "unreadable");
+  assert.equal(projectStyleSample(brokenRim), null);
 });
