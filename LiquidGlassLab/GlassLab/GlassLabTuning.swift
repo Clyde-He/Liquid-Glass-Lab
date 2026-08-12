@@ -1706,6 +1706,14 @@ enum GlassLabTuning {
         let objectIdentityBySlot: [String: ObjectIdentifier]
     }
 
+    /// The production resolved-tree read. Persisted evidence keeps only the
+    /// typed snapshot; process-local identities remain available to the live
+    /// inspector without leaking pointer values into Golden.
+    struct LiveResolvedTreeCapture {
+        let snapshot: GoldenResolvedSnapshot
+        let objectIdentityBySlot: [String: ObjectIdentifier]
+    }
+
     /// One readback from the deliberately narrow glassForeground Aberration
     /// probe. Model and presentation values stay separate so a successful KVC
     /// write cannot be mistaken for a rendered mutation. Object identity is
@@ -2508,68 +2516,121 @@ enum GlassLabTuning {
     static func captureLivePassAudit(
         from glass: NSGlassEffectView
     ) -> LivePassAuditCapture? {
-        guard let root = glass.layer else { return nil }
-        return captureLivePassAudit(from: root)
+        guard let capture = captureLiveResolvedTree(from: glass) else {
+            return nil
+        }
+        return LivePassAuditCapture(
+            snapshot: passAuditProjection(of: capture.snapshot),
+            objectIdentityBySlot: capture.objectIdentityBySlot
+        )
     }
 
     @MainActor
     private static func captureLivePassAudit(
         from root: CALayer
     ) -> LivePassAuditCapture {
-        var layers: [String: PassAuditLayerRecord] = [:]
-        var passes: [String: PassAuditPassRecord] = [:]
+        let capture = captureLiveResolvedTree(from: root, shortSide: 0)
+        return LivePassAuditCapture(
+            snapshot: passAuditProjection(of: capture.snapshot),
+            objectIdentityBySlot: capture.objectIdentityBySlot
+        )
+    }
+
+    /// Captures the single complete settled representation used by Golden.
+    /// Scalar analysis, recursive audit, and Consumer replay are projections
+    /// over this value; none performs another physical tree observation.
+    @MainActor
+    static func captureResolvedTreeSnapshot(
+        from glass: NSGlassEffectView
+    ) -> GoldenResolvedSnapshot? {
+        captureLiveResolvedTree(from: glass)?.snapshot
+    }
+
+    @MainActor
+    static func captureLiveResolvedTree(
+        from glass: NSGlassEffectView
+    ) -> LiveResolvedTreeCapture? {
+        guard let root = glass.layer else { return nil }
+        return captureLiveResolvedTree(
+            from: root,
+            shortSide: Double(min(glass.bounds.width, glass.bounds.height))
+        )
+    }
+
+    @MainActor
+    private static func captureLiveResolvedTree(
+        from root: CALayer,
+        shortSide: Double
+    ) -> LiveResolvedTreeCapture {
+        var layers: [GoldenResolvedLayer] = []
+        var passes: [GoldenResolvedPass] = []
         var objectIdentityBySlot: [String: ObjectIdentifier] = [:]
         var visited: Set<ObjectIdentifier> = []
+        var passOrder = 0
 
         func visit(_ layer: CALayer, path: String) {
             guard visited.insert(ObjectIdentifier(layer)).inserted else { return }
             let layerClass = String(describing: type(of: layer))
-            layers[path] = PassAuditLayerRecord(
+            var properties: [String: GoldenResolvedProperty] = [:]
+            if layerClass == "CABackdropLayer",
+               layer.responds(to: NSSelectorFromString("marginWidth")) {
+                properties["marginWidth"] = resolvedProperty(
+                    readable: true,
+                    value: valueIfResponds(forKey: "marginWidth", on: layer),
+                    attributes: [:]
+                )
+            }
+            layers.append(GoldenResolvedLayer(
                 path: path,
                 layerClass: layerClass,
                 name: layer.name,
-                frame: PassAuditRect(layer.frame),
-                bounds: PassAuditRect(layer.bounds),
+                frame: GoldenResolvedRect(layer.frame),
+                bounds: GoldenResolvedRect(layer.bounds),
                 opacity: Double(layer.opacity),
                 isHidden: layer.isHidden,
                 masksToBounds: layer.masksToBounds,
                 cornerRadius: Double(layer.cornerRadius),
-                hasMask: layer.mask != nil
-            )
+                hasMask: layer.mask != nil,
+                properties: properties
+            ))
 
-            capturePassObjects(
+            captureResolvedPasses(
                 (layer.filters ?? []).compactMap { $0 as? NSObject },
                 location: "filters",
                 layerPath: path,
                 layerClass: layerClass,
-                into: &passes,
+                passOrder: &passOrder,
+                passes: &passes,
                 objectIdentityBySlot: &objectIdentityBySlot
             )
-            capturePassObjects(
+            captureResolvedPasses(
                 (layer.backgroundFilters ?? []).compactMap { $0 as? NSObject },
                 location: "backgroundFilters",
                 layerPath: path,
                 layerClass: layerClass,
-                into: &passes,
+                passOrder: &passOrder,
+                passes: &passes,
                 objectIdentityBySlot: &objectIdentityBySlot
             )
             if let compositingFilter = layer.compositingFilter as? NSObject {
-                capturePassObjects(
+                captureResolvedPasses(
                     [compositingFilter],
                     location: "compositingFilter",
                     layerPath: path,
                     layerClass: layerClass,
-                    into: &passes,
+                    passOrder: &passOrder,
+                    passes: &passes,
                     objectIdentityBySlot: &objectIdentityBySlot
                 )
             }
             if let effect = effectObject(on: layer) {
-                capturePassObjects(
+                captureResolvedPasses(
                     [effect],
                     location: "effect",
                     layerPath: path,
                     layerClass: layerClass,
-                    into: &passes,
+                    passOrder: &passOrder,
+                    passes: &passes,
                     objectIdentityBySlot: &objectIdentityBySlot
                 )
             }
@@ -2586,8 +2647,12 @@ enum GlassLabTuning {
 
         let rootClass = String(describing: type(of: root))
         visit(root, path: "root:\(rootClass)")
-        return LivePassAuditCapture(
-            snapshot: makePassAuditSnapshot(layers: layers, passes: passes),
+        return LiveResolvedTreeCapture(
+            snapshot: GoldenResolvedSnapshot(
+                shortSide: shortSide,
+                layers: layers,
+                passes: passes
+            ),
             objectIdentityBySlot: objectIdentityBySlot
         )
     }
@@ -2661,12 +2726,13 @@ enum GlassLabTuning {
         return lines.joined(separator: "\n")
     }
 
-    private static func capturePassObjects(
+    private static func captureResolvedPasses(
         _ objects: [NSObject],
         location: String,
         layerPath: String,
         layerClass: String,
-        into passes: inout [String: PassAuditPassRecord],
+        passOrder: inout Int,
+        passes: inout [GoldenResolvedPass],
         objectIdentityBySlot: inout [String: ObjectIdentifier]
     ) {
         for (index, object) in objects.enumerated() {
@@ -2679,17 +2745,19 @@ enum GlassLabTuning {
             let slot = "\(layerPath)|\(location)[\(index)]"
             let id = "\(slot)|\(objectClass)|\(name ?? "-")"
             let properties = location == "effect"
-                ? captureEffectProperties(on: object)
-                : captureFilterProperties(on: object)
-            passes[id] = PassAuditPassRecord(
+                ? captureResolvedEffectProperties(on: object)
+                : captureResolvedFilterProperties(on: object)
+            passes.append(GoldenResolvedPass(
                 id: id,
+                order: passOrder,
                 layerPath: layerPath,
                 layerClass: layerClass,
                 location: "\(location)[\(index)]",
                 objectClass: objectClass,
                 name: name,
                 properties: properties
-            )
+            ))
+            passOrder += 1
             // Foundation value objects (most notably a compositing-filter
             // NSString) may be re-bridged on every getter call. Their pointer
             // identity does not describe a live Core Animation pass instance.
@@ -2699,9 +2767,9 @@ enum GlassLabTuning {
         }
     }
 
-    private static func captureFilterProperties(
+    private static func captureResolvedFilterProperties(
         on filter: NSObject
-    ) -> [String: PassAuditPropertyRecord] {
+    ) -> [String: GoldenResolvedProperty] {
         let selector = NSSelectorFromString("attributesForKeyPath:")
         return Dictionary(uniqueKeysWithValues: filterInputKeys(filter).sorted().map { key in
             let value = filter.value(forKey: key)
@@ -2715,23 +2783,18 @@ enum GlassLabTuning {
             }
             return (
                 key,
-                PassAuditPropertyRecord(
-                    state: value == nil ? "nil" : "value",
-                    value: value.map {
-                        key == "inputColorMatrix"
-                            ? colorMatrixDescription($0)
-                                ?? stableDescription($0)
-                            : stableDescription($0)
-                    },
+                resolvedProperty(
+                    readable: true,
+                    value: value,
                     attributes: attributes
                 )
             )
         })
     }
 
-    private static func captureEffectProperties(
+    private static func captureResolvedEffectProperties(
         on effect: NSObject
-    ) -> [String: PassAuditPropertyRecord] {
+    ) -> [String: GoldenResolvedProperty] {
         guard let table = objectFromClassMethod(
             on: type(of: effect),
             selectorName: "CA_attributes"
@@ -2744,13 +2807,385 @@ enum GlassLabTuning {
             let rawAttributes = table[key] as? [String: Any] ?? [:]
             return (
                 key,
-                PassAuditPropertyRecord(
-                    state: readable ? (value == nil ? "nil" : "value") : "unreadable",
-                    value: value.map { stableDescription($0) },
+                resolvedProperty(
+                    readable: readable,
+                    value: value,
                     attributes: stableMetadata(rawAttributes)
                 )
             )
         })
+    }
+
+    private static func resolvedProperty(
+        readable: Bool,
+        value: Any?,
+        attributes: [String: String]
+    ) -> GoldenResolvedProperty {
+        guard readable else {
+            return GoldenResolvedProperty(
+                state: .unreadable,
+                value: nil,
+                attributes: attributes
+            )
+        }
+        guard let value else {
+            return GoldenResolvedProperty(
+                state: .nilValue,
+                value: nil,
+                attributes: attributes
+            )
+        }
+        return GoldenResolvedProperty(
+            state: .value,
+            value: resolvedValue(value),
+            attributes: attributes
+        )
+    }
+
+    private static func resolvedValue(_ value: Any) -> GoldenResolvedValue {
+        let cfValue = value as CFTypeRef
+        if CFGetTypeID(cfValue) == CFBooleanGetTypeID() {
+            return .boolean((value as! NSNumber).boolValue)
+        }
+        if let number = value as? NSNumber {
+            return .number(number.doubleValue)
+        }
+        if let string = value as? String {
+            return .string(string)
+        }
+        if CFGetTypeID(cfValue) == CGColor.typeID {
+            let color = unsafeBitCast(cfValue, to: CGColor.self)
+            let converted = NSColor(cgColor: color)?.usingColorSpace(
+                .extendedSRGB
+            )
+            return .color(GoldenResolvedColor(
+                colorSpaceName: color.colorSpace?.name as String?,
+                model: colorSpaceModelName(color.colorSpace?.model),
+                components: (color.components ?? []).map(Double.init),
+                extendedSRGB: converted.map {
+                    GlassMaterialColorValue(
+                        red: Double($0.redComponent),
+                        green: Double($0.greenComponent),
+                        blue: Double($0.blueComponent),
+                        alpha: Double($0.alphaComponent)
+                    )
+                }
+            ))
+        }
+        if let matrix = colorMatrixPayload(value),
+           let coefficients = matrix.coefficients {
+            return .matrix(GoldenResolvedMatrix(
+                objCType: matrix.objCType,
+                coefficients: coefficients
+            ))
+        }
+        if let boxed = value as? NSValue {
+            let encoding = String(cString: boxed.objCType)
+            if encoding.hasPrefix("{CGPoint") {
+                return .point(GoldenResolvedPair(
+                    x: Double(boxed.pointValue.x),
+                    y: Double(boxed.pointValue.y)
+                ))
+            }
+            if encoding.hasPrefix("{CGSize") {
+                return .size(GoldenResolvedPair(
+                    x: Double(boxed.sizeValue.width),
+                    y: Double(boxed.sizeValue.height)
+                ))
+            }
+            if encoding.hasPrefix("{CGRect") {
+                return .rect(GoldenResolvedRect(boxed.rectValue))
+            }
+            return .opaque(type: String(describing: type(of: boxed)))
+        }
+        if let array = value as? [Any] {
+            var values: [GoldenResolvedValue] = []
+            for element in array {
+                values.append(resolvedValue(element))
+            }
+            return .array(values)
+        }
+        if let dictionary = value as? [String: Any] {
+            var values: [String: GoldenResolvedValue] = [:]
+            for (key, element) in dictionary {
+                values[key] = resolvedValue(element)
+            }
+            return .dictionary(values)
+        }
+        return .opaque(type: String(describing: type(of: value)))
+    }
+
+    /// Transitional projection for existing inspector and learning code. It is
+    /// intentionally pure: the recursive audit no longer walks the renderer.
+    static func passAuditProjection(
+        of snapshot: GoldenResolvedSnapshot
+    ) -> PassAuditSnapshot {
+        let layers = Dictionary(uniqueKeysWithValues: snapshot.layers.map { layer in
+            (
+                layer.path,
+                PassAuditLayerRecord(
+                    path: layer.path,
+                    layerClass: layer.layerClass,
+                    name: layer.name,
+                    frame: PassAuditRect(CGRect(
+                        x: layer.frame.x,
+                        y: layer.frame.y,
+                        width: layer.frame.width,
+                        height: layer.frame.height
+                    )),
+                    bounds: PassAuditRect(CGRect(
+                        x: layer.bounds.x,
+                        y: layer.bounds.y,
+                        width: layer.bounds.width,
+                        height: layer.bounds.height
+                    )),
+                    opacity: layer.opacity,
+                    isHidden: layer.isHidden,
+                    masksToBounds: layer.masksToBounds,
+                    cornerRadius: layer.cornerRadius,
+                    hasMask: layer.hasMask
+                )
+            )
+        })
+        var passes: [String: PassAuditPassRecord] = [:]
+        for pass in snapshot.passes {
+            var properties: [String: PassAuditPropertyRecord] = [:]
+            for (key, property) in pass.properties {
+                properties[key] = PassAuditPropertyRecord(
+                    state: property.state.rawValue,
+                    value: property.value.map {
+                        resolvedAuditDescription($0)
+                    },
+                    attributes: property.attributes
+                )
+            }
+            passes[pass.id] = PassAuditPassRecord(
+                id: pass.id,
+                layerPath: pass.layerPath,
+                layerClass: pass.layerClass,
+                location: pass.location,
+                objectClass: pass.objectClass,
+                name: pass.name,
+                properties: properties
+            )
+        }
+        return makePassAuditSnapshot(layers: layers, passes: passes)
+    }
+
+    /// Projects the narrow, validated Consumer payload from an accepted
+    /// resolved tree. Unknown research properties remain in Golden but never
+    /// become replayable by accident.
+    static func styleSampleProjection(
+        of snapshot: GoldenResolvedSnapshot
+    ) -> GlassMaterialStyleSample? {
+        guard let shader = snapshot.passes.first(where: {
+            $0.name == "glassBackground"
+        }) else { return nil }
+
+        var numeric: [String: Double] = [:]
+        var colors: [String: GlassMaterialColorValue] = [:]
+        var points: [String: CGPoint] = [:]
+        var nilKeys: Set<String> = []
+        for (key, property) in shader.properties {
+            switch property.state {
+            case .nilValue:
+                nilKeys.insert(key)
+            case .unreadable:
+                return nil
+            case .value:
+                if let number = resolvedNumber(property) {
+                    numeric[key] = number
+                } else if let color = resolvedColor(property)?.extendedSRGB {
+                    colors[key] = color
+                } else if let point = resolvedPoint(property) {
+                    points[key] = point
+                } else if case .string? = property.value {
+                    continue
+                } else {
+                    return nil
+                }
+            }
+        }
+        guard numeric["inputFaceOpacity"] ?? 0 >= 0.999 else { return nil }
+
+        let tintOwnerPaths = Set(snapshot.passes.compactMap { pass in
+            pass.objectClass == "CASDFGradientEffect" ? pass.layerPath : nil
+        })
+        let matrixPasses = snapshot.passes.filter {
+            $0.name == "vibrantColorMatrix"
+                && !tintOwnerPaths.contains($0.layerPath)
+        }.sorted { $0.order < $1.order }
+        var matrices: [GlassMaterialMatrixSample] = []
+        for pass in matrixPasses {
+            guard case let .matrix(matrix)? =
+                    pass.properties["inputColorMatrix"]?.value else {
+                return nil
+            }
+            var inputs: [String: Double] = [:]
+            var matrixNilKeys: Set<String> = []
+            for (key, property) in pass.properties
+            where key != "inputColorMatrix" {
+                switch property.state {
+                case .nilValue:
+                    matrixNilKeys.insert(key)
+                case .unreadable:
+                    return nil
+                case .value:
+                    guard let number = resolvedNumber(property) else {
+                        return nil
+                    }
+                    inputs[key] = number
+                }
+            }
+            matrices.append(GlassMaterialMatrixSample(
+                matrix: matrix.coefficients.map(Float.init),
+                inputs: inputs,
+                nilInputKeys: matrixNilKeys
+            ))
+        }
+
+        let rimValueKeys: Set<String> = [
+            "curvature", "diffuseAmountScale", "diffuseHeightScale",
+            "diffuseSpreadScale", "fillAmount", "fillAngle",
+            "fillColorAlpha", "fillHeight", "fillHeightOffset",
+            "fillHeightScale", "fillSpread", "fillSpreadOffset",
+            "fillSpreadScale", "global", "keyAmount", "keyAngle",
+            "keyColorAlpha", "keyHeight", "keyHeightOffset",
+            "keyHeightScale", "keySpread", "keySpreadOffset",
+            "keySpreadScale",
+        ]
+        var rims: [GlassMaterialRimSample] = []
+        for pass in snapshot.passes
+        where pass.objectClass == "CASDFKeyFillHighlightEffect" {
+            guard let layer = snapshot.layers.first(where: {
+                $0.path == pass.layerPath
+            }) else { return nil }
+            var values: [String: Double] = [:]
+            for key in rimValueKeys {
+                if let value = resolvedNumber(pass.properties[key]) {
+                    values[key] = value
+                }
+            }
+            var rimColors: [String: GlassMaterialColorValue] = [:]
+            for key in ["fillColor", "keyColor"] {
+                guard let color = resolvedColor(
+                    pass.properties[key]
+                )?.extendedSRGB else { return nil }
+                rimColors[key] = color
+            }
+            guard !values.isEmpty else { return nil }
+            rims.append(GlassMaterialRimSample(
+                layerOpacity: layer.opacity,
+                values: values,
+                colors: rimColors
+            ))
+        }
+
+        guard matrices.count == 2, rims.count == 1,
+              let marginWidth = snapshot.layers.first(where: {
+                  $0.layerClass == "CABackdropLayer"
+              }).flatMap({
+                  resolvedNumber($0.properties["marginWidth"])
+              }),
+              let output = snapshot.passes.first(where: {
+                  $0.objectClass == "CASDFOutputEffect"
+              }),
+              let outputMinimum = resolvedNumber(
+                  output.properties["minimum"]
+              ),
+              let outputMaximum = resolvedNumber(
+                  output.properties["maximum"]
+              ) else { return nil }
+
+        return GlassMaterialStyleSample(
+            shortSide: snapshot.shortSide,
+            numeric: numeric,
+            colors: colors,
+            points: points,
+            nilKeys: nilKeys,
+            marginWidth: marginWidth,
+            outputMinimum: outputMinimum,
+            outputMaximum: outputMaximum,
+            matrices: matrices,
+            rims: rims
+        )
+    }
+
+    private static func resolvedNumber(
+        _ property: GoldenResolvedProperty?
+    ) -> Double? {
+        switch property?.value {
+        case let .number(value): value
+        case let .boolean(value): value ? 1 : 0
+        default: nil
+        }
+    }
+
+    private static func resolvedColor(
+        _ property: GoldenResolvedProperty?
+    ) -> GoldenResolvedColor? {
+        guard case let .color(value)? = property?.value else { return nil }
+        return value
+    }
+
+    private static func resolvedPoint(
+        _ property: GoldenResolvedProperty?
+    ) -> CGPoint? {
+        guard case let .point(value)? = property?.value else { return nil }
+        return CGPoint(x: value.x, y: value.y)
+    }
+
+    private static func resolvedAuditDescription(
+        _ value: GoldenResolvedValue
+    ) -> String {
+        switch value {
+        case let .boolean(flag):
+            return flag ? "1" : "0"
+        case let .number(number):
+            return String(format: "%.17g", number)
+        case let .string(string):
+            return string
+        case let .color(color):
+            let components = color.components.map {
+                String(format: "%.6g", $0)
+            }.joined(separator: ",")
+            return "CGColor(\(color.model):[\(components)])"
+        case let .point(point):
+            return NSValue(point: CGPoint(x: point.x, y: point.y)).description
+        case let .size(size):
+            return NSValue(size: CGSize(
+                width: size.x,
+                height: size.y
+            )).description
+        case let .rect(rect):
+            return NSValue(rect: CGRect(
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height
+            )).description
+        case let .matrix(matrix):
+            let values = matrix.coefficients.map {
+                String(format: "%.9g", $0)
+            }.joined(separator: ",")
+            let floats = matrix.coefficients.map(Float.init)
+            let digest = floats.withUnsafeBytes { bytes in
+                sha256(Data(bytes))
+            }
+            return "ColorMatrix4x5([\(values)];sha256=\(digest))"
+        case let .array(values):
+            var descriptions: [String] = []
+            for value in values {
+                descriptions.append(resolvedAuditDescription(value))
+            }
+            return "[" + descriptions.joined(separator: ",") + "]"
+        case let .dictionary(values):
+            return "{" + values.keys.sorted().map {
+                "\($0):\(resolvedAuditDescription(values[$0]!))"
+            }.joined(separator: ",") + "}"
+        case let .opaque(type):
+            return "<\(type)>"
+        }
     }
 
     private static func stableMetadata(_ metadata: [String: Any]) -> [String: String] {

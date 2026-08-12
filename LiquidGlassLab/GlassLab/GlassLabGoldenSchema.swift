@@ -150,6 +150,107 @@ struct GoldenCell: Codable, Hashable {
     }
 }
 
+// MARK: - Complete settled renderer snapshot
+
+/// One typed value read from the resolved Core Animation tree. The archive
+/// keeps the original value kind instead of flattening everything to text, so
+/// scalar analysis, recursive comparison, and Consumer projection are views of
+/// the same observation.
+indirect enum GoldenResolvedValue: Codable, Equatable {
+    case boolean(Bool)
+    case number(Double)
+    case string(String)
+    case color(GoldenResolvedColor)
+    case point(GoldenResolvedPair)
+    case size(GoldenResolvedPair)
+    case rect(GoldenResolvedRect)
+    case matrix(GoldenResolvedMatrix)
+    case array([GoldenResolvedValue])
+    case dictionary([String: GoldenResolvedValue])
+    /// Research evidence may retain an unfamiliar readable type without
+    /// pretending it is safe to replay. Replay-critical projections reject it.
+    case opaque(type: String)
+}
+
+struct GoldenResolvedColor: Codable, Equatable {
+    /// Core Graphics color-space identity as captured, not merely its model.
+    let colorSpaceName: String?
+    let model: String
+    let components: [Double]
+    /// The Consumer projection is explicitly extended-sRGB. Keeping this
+    /// conversion next to the source components makes it deterministic without
+    /// erasing the original color-space identity used by research comparisons.
+    let extendedSRGB: GlassMaterialColorValue?
+}
+
+struct GoldenResolvedPair: Codable, Equatable {
+    let x: Double
+    let y: Double
+}
+
+struct GoldenResolvedRect: Codable, Equatable {
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+
+    init(_ rect: CGRect) {
+        x = rect.origin.x
+        y = rect.origin.y
+        width = rect.width
+        height = rect.height
+    }
+}
+
+struct GoldenResolvedMatrix: Codable, Equatable {
+    let objCType: String
+    let coefficients: [Double]
+}
+
+enum GoldenResolvedPropertyState: String, Codable {
+    case value
+    case nilValue = "nil"
+    case unreadable
+}
+
+struct GoldenResolvedProperty: Codable, Equatable {
+    let state: GoldenResolvedPropertyState
+    let value: GoldenResolvedValue?
+    let attributes: [String: String]
+}
+
+struct GoldenResolvedLayer: Codable, Equatable {
+    let path: String
+    let layerClass: String
+    let name: String?
+    let frame: GoldenResolvedRect
+    let bounds: GoldenResolvedRect
+    let opacity: Double
+    let isHidden: Bool
+    let masksToBounds: Bool
+    let cornerRadius: Double
+    let hasMask: Bool
+    /// Replay-critical private layer properties, currently marginWidth.
+    let properties: [String: GoldenResolvedProperty]
+}
+
+struct GoldenResolvedPass: Codable, Equatable {
+    let id: String
+    let order: Int
+    let layerPath: String
+    let layerClass: String
+    let location: String
+    let objectClass: String
+    let name: String?
+    let properties: [String: GoldenResolvedProperty]
+}
+
+struct GoldenResolvedSnapshot: Codable, Equatable {
+    let shortSide: Double
+    let layers: [GoldenResolvedLayer]
+    let passes: [GoldenResolvedPass]
+}
+
 // MARK: - Section 1: static-scalar
 
 struct GoldenStaticScalarRow: Codable {
