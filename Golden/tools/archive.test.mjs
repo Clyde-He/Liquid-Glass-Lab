@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateArchive } from "./lib/archive.mjs";
+import { compareArchives, validateArchive } from "./lib/archive.mjs";
 
 const property = (value, state = "value") => ({
   state,
@@ -234,4 +234,16 @@ test("macOS 26 has the same archive model without inventing Semantic evidence", 
   ]) candidate[key].operatingSystem = candidate.capture.operatingSystem;
   candidate.semantic = null;
   assert.deepEqual(validateArchive(candidate), []);
+});
+
+test("whole-archive comparison reports value drift without inventing module gates", () => {
+  const baseline = archive();
+  const candidate = structuredClone(baseline);
+  candidate.directory = "/tmp/candidate";
+  candidate.static.observations[0].snapshot.passes[0]
+    .properties.inputFaceOpacity.value.number = 0.9;
+  const report = compareArchives(baseline, candidate);
+  assert.equal(report.equivalent, false);
+  assert.equal(report.static.changedObservations, 1);
+  assert.equal(report.static.topologyChangedObservations, 0);
 });

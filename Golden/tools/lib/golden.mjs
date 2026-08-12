@@ -10,12 +10,11 @@
 // learning declares the sections it needs and, if it is a `cross-version` one,
 // receives every OS at once.
 
-import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CELL_FIELDS, axisValues, sweptAxes } from "./cell.mjs";
-import { normalizeManifest, resolveModule } from "./manifest.mjs";
+import { ARCHIVE_FILES, acceptedArchives } from "./archive.mjs";
 import { projectStaticScalar, projectStaticTree } from "./snapshot-projections.mjs";
 
 // .../Golden/tools/lib/golden.mjs -> .../Golden
@@ -36,44 +35,45 @@ export async function osDirectories() {
 
 /** Canonical accepted archives, with one same-major staging replacement when requested. */
 export async function acceptedArchivesReplacing(replacement = null) {
-  const archives = [];
-  for (const name of await osDirectories()) {
-    const directory = path.join(goldenDirectory, name);
-    const manifest = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8"));
-    if (manifest.status === "accepted") archives.push({ name, directory });
-  }
+  const archives = await acceptedArchives(goldenDirectory);
   if (replacement) {
     const index = archives.findIndex(({ name }) => name === replacement.name);
-    if (index < 0) throw new Error(`no accepted archive to replace for ${replacement.name}`);
-    archives[index] = replacement;
+    if (index < 0) archives.push({
+      ...replacement, major: Number(replacement.name.slice("macOS-".length)),
+    });
+    else archives[index] = { ...archives[index], ...replacement };
   }
-  return archives;
+  return archives.sort((left, right) => left.major - right.major);
 }
 
-export async function readManifest(osDirectory) {
-  return readManifestAt(path.join(goldenDirectory, osDirectory));
-}
-
-export async function readManifestAt(directory) {
-  const raw = await readFile(path.join(directory, "manifest.json"), "utf8");
-  return normalizeManifest(JSON.parse(raw), {
-    osDirectory: path.basename(directory),
-    goldenDirectory: path.dirname(directory),
-  });
-}
-
-export async function resolveModulePath(directory, idOrAlias) {
-  const manifest = await readManifestAt(directory);
-  const module = resolveModule(manifest, idOrAlias);
-  if (!module) throw new Error(`Unknown Golden module or alias: ${idOrAlias}`);
-  return { manifest, module, file: path.join(directory, module.file) };
-}
+const MODULE_FILES = {
+  "core.dynamic": ARCHIVE_FILES.dynamic,
+  "tint.parameterization.sweep": ARCHIVE_FILES.tintSweep,
+  "tint.parameterization.focused-2b": ARCHIVE_FILES.tintFocused,
+  "tint.parameterization.hue-2c": ARCHIVE_FILES.tintHue,
+  "tint.sync-resolution": ARCHIVE_FILES.tintSync,
+  "tint.wide-gamut": ARCHIVE_FILES.tintWideGamut,
+  "semantic.usage-trees": ARCHIVE_FILES.semantic,
+};
 
 export async function loadModuleDocument(directory, idOrAlias) {
-  const resolved = await resolveModulePath(directory, idOrAlias);
+  if (["core.static-scalar", "static-scalar", "core.static-tree", "static-tree"].includes(idOrAlias)) {
+    const file = path.join(directory, ARCHIVE_FILES.static);
+    const source = JSON.parse(await readFile(file, "utf8"));
+    const tree = idOrAlias.includes("tree");
+    return {
+      module: { id: tree ? "core.static-tree" : "core.static-scalar", file: ARCHIVE_FILES.static },
+      file,
+      document: tree ? projectStaticTree(source) : projectStaticScalar(source),
+    };
+  }
+  const canonical = idOrAlias === "dynamic" ? "core.dynamic" : idOrAlias;
+  const relative = MODULE_FILES[canonical];
+  if (!relative) throw new Error(`Unknown Golden evidence document: ${idOrAlias}`);
+  const file = path.join(directory, relative);
   return {
-    ...resolved,
-    document: JSON.parse(await readFile(resolved.file, "utf8")),
+    module: { id: canonical, file: relative }, file,
+    document: JSON.parse(await readFile(file, "utf8")),
   };
 }
 
@@ -126,10 +126,6 @@ export function normalizeUnifiedDocument(document) {
       swept: document?.axes?.swept ?? sweptAxes(cells),
     },
   };
-}
-
-export function sha256(bytes) {
-  return createHash("sha256").update(bytes).digest("hex");
 }
 
 // MARK: - Assertions
