@@ -23,6 +23,16 @@ function versionsWith(archives, section) {
 const indexByCell = (document) =>
   new Map((document.rows ?? document.runs ?? []).map((row) => [cellKey(row.cell), row]));
 
+const staticCoreRows = (document) => (document.rows ?? []).filter((row) =>
+  row.cell.width === 480
+    && row.cell.height === 200
+    && row.cell.cornerRadius === 16
+    && row.cell.key === false
+    && row.cell.backdrop === "Light"
+    && row.cell.tint === "None"
+    && row.cell.host === "Panel"
+);
+
 /** Every property name any glassBackground pass exposes in a static tree. */
 function glassVocabulary(document) {
   const keys = new Set();
@@ -96,7 +106,7 @@ export default [
         expect.unverifiable("static-tree present on fewer than two versions");
       }
       for (const { name, document } of versions) {
-        const rows = document.rows ?? [];
+        const rows = staticCoreRows(document);
         const groups = new Map();
         for (const row of rows) {
           const key = cellKey(row.cell, ["variant", "subvariant", "main"]);
@@ -253,7 +263,10 @@ export default [
 
       for (const { name, document } of versions) {
         const rows = (document.rows ?? []).filter(
-          (row) => !row.cell.subvariant && row.cell.subdued === false && row.cell.main
+          (row) => !row.cell.subvariant
+            && row.cell.subdued === false
+            && row.cell.main
+            && row.cell.appearance === "Light"
         );
         const perVariant = new Map();
         for (const row of rows) {
@@ -332,6 +345,7 @@ export default [
               && row.cell.main === true
               && !row.cell.subvariant
               && row.cell.subdued === false
+              && row.cell.appearance === "Light"
           )
           .sort((a, b) => a.cell.shortSide - b.cell.shortSide);
         if (rows.length < 2) continue;

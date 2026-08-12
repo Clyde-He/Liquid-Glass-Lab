@@ -16,6 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CELL_FIELDS, axisValues, sweptAxes } from "./cell.mjs";
 import { normalizeManifest, resolveModule } from "./manifest.mjs";
+import { projectStaticScalar, projectStaticTree } from "./snapshot-projections.mjs";
 
 // .../Golden/tools/lib/golden.mjs -> .../Golden
 export const goldenDirectory = path.dirname(
@@ -87,25 +88,23 @@ export async function loadUnified(osDirectory) {
 
 /** Loads unified sections from an arbitrary candidate directory. */
 export async function loadUnifiedAt(archiveDirectory) {
-  const directory = path.join(archiveDirectory, "unified");
-  const manifest = await readManifestAt(archiveDirectory);
-  const sections = {};
-  for (const name of SECTIONS) {
-    const module = manifest.modules.find((entry) => entry.id === `core.${name}`);
-    try {
-      const document = normalizeUnifiedDocument(JSON.parse(
-        await readFile(
-          module ? path.join(archiveDirectory, module.file)
-            : path.join(directory, `${name}.json`),
-          "utf8"
-        )
-      ));
-      sections[name] = { ...document, archiveRole: module?.role ?? null };
-    } catch {
-      sections[name] = null;
-    }
+  const staticDocument = JSON.parse(
+    await readFile(path.join(archiveDirectory, "static.json"), "utf8")
+  );
+  let dynamic = null;
+  try {
+    dynamic = normalizeUnifiedDocument(JSON.parse(
+      await readFile(path.join(archiveDirectory, "dynamic.json"), "utf8")
+    ));
+  } catch {
+    // Dynamic remains an honest optional domain for a deliberately partial
+    // archive; learnings report its absence as unverifiable.
   }
-  return sections;
+  return {
+    "static-scalar": normalizeUnifiedDocument(projectStaticScalar(staticDocument)),
+    "static-tree": normalizeUnifiedDocument(projectStaticTree(staticDocument)),
+    dynamic,
+  };
 }
 
 /**

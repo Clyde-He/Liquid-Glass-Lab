@@ -170,6 +170,86 @@ indirect enum GoldenResolvedValue: Codable, Equatable {
     /// Research evidence may retain an unfamiliar readable type without
     /// pretending it is safe to replay. Replay-critical projections reject it.
     case opaque(type: String)
+
+    private enum CodingKeys: String, CodingKey {
+        case type, boolean, number, string, color, point, size, rect, matrix
+        case array, dictionary, opaqueType
+    }
+
+    private enum Kind: String, Codable {
+        case boolean, number, string, color, point, size, rect, matrix
+        case array, dictionary, opaque
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .type) {
+        case .boolean:
+            self = .boolean(try container.decode(Bool.self, forKey: .boolean))
+        case .number:
+            self = .number(try container.decode(Double.self, forKey: .number))
+        case .string:
+            self = .string(try container.decode(String.self, forKey: .string))
+        case .color:
+            self = .color(try container.decode(GoldenResolvedColor.self, forKey: .color))
+        case .point:
+            self = .point(try container.decode(GoldenResolvedPair.self, forKey: .point))
+        case .size:
+            self = .size(try container.decode(GoldenResolvedPair.self, forKey: .size))
+        case .rect:
+            self = .rect(try container.decode(GoldenResolvedRect.self, forKey: .rect))
+        case .matrix:
+            self = .matrix(try container.decode(GoldenResolvedMatrix.self, forKey: .matrix))
+        case .array:
+            self = .array(try container.decode([GoldenResolvedValue].self, forKey: .array))
+        case .dictionary:
+            self = .dictionary(try container.decode(
+                [String: GoldenResolvedValue].self,
+                forKey: .dictionary
+            ))
+        case .opaque:
+            self = .opaque(type: try container.decode(String.self, forKey: .opaqueType))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .boolean(value):
+            try container.encode(Kind.boolean, forKey: .type)
+            try container.encode(value, forKey: .boolean)
+        case let .number(value):
+            try container.encode(Kind.number, forKey: .type)
+            try container.encode(value, forKey: .number)
+        case let .string(value):
+            try container.encode(Kind.string, forKey: .type)
+            try container.encode(value, forKey: .string)
+        case let .color(value):
+            try container.encode(Kind.color, forKey: .type)
+            try container.encode(value, forKey: .color)
+        case let .point(value):
+            try container.encode(Kind.point, forKey: .type)
+            try container.encode(value, forKey: .point)
+        case let .size(value):
+            try container.encode(Kind.size, forKey: .type)
+            try container.encode(value, forKey: .size)
+        case let .rect(value):
+            try container.encode(Kind.rect, forKey: .type)
+            try container.encode(value, forKey: .rect)
+        case let .matrix(value):
+            try container.encode(Kind.matrix, forKey: .type)
+            try container.encode(value, forKey: .matrix)
+        case let .array(value):
+            try container.encode(Kind.array, forKey: .type)
+            try container.encode(value, forKey: .array)
+        case let .dictionary(value):
+            try container.encode(Kind.dictionary, forKey: .type)
+            try container.encode(value, forKey: .dictionary)
+        case let .opaque(type):
+            try container.encode(Kind.opaque, forKey: .type)
+            try container.encode(type, forKey: .opaqueType)
+        }
+    }
 }
 
 struct GoldenResolvedColor: Codable, Equatable {

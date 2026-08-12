@@ -1,4 +1,4 @@
-// Static Recipe resolution, from the scalar shader-input sweep.
+// Static Recipe resolution, from the scalar projection of typed Snapshots.
 //
 // Source: Documentation/AppKitGlassReverseEngineering.md — "Geometry input is
 // the shortest side".
@@ -20,7 +20,9 @@ const baseRows = (rows) =>
 
 const regularMain = (rows) =>
   baseRows(rows).filter(
-    (row) => row.cell.variant === 1 && row.cell.main === true
+    (row) => row.cell.variant === 1
+      && row.cell.main === true
+      && row.cell.appearance === "Light"
   );
 
 const payloadSignature = (row) =>
@@ -302,7 +304,10 @@ export default [
       // Pair rows that differ in appearance and nothing else.
       const groups = new Map();
       for (const row of sections[SECTION].rows ?? []) {
-        if (row.slice !== "core") continue;
+        if (row.cell.width !== 480 || row.cell.height !== 200
+            || row.cell.cornerRadius !== 16 || row.cell.key !== false
+            || row.cell.backdrop !== "Light" || row.cell.tint !== "None"
+            || row.cell.host !== "Panel") continue;
         const key = [
           row.cell.variant, row.cell.subvariant, row.cell.main,
           row.cell.key, row.cell.subdued, row.cell.width, row.cell.height,
