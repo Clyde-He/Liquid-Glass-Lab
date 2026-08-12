@@ -359,11 +359,28 @@ async function scanDirectory(root, relative, registered, problems) {
 
 export async function validateFullDirectory(root, { expectedStatus = null } = {}) {
   const problems = [];
+  const rawReads = new Map();
+  function recordRawRead(file, bytes) {
+    const entry = { file, bytes: bytes.length, sha256: sha256(bytes) };
+    const previous = rawReads.get(file);
+    if (previous && JSON.stringify(previous) !== JSON.stringify(entry)) {
+      problems.push(`${file}: changed while Full admission was reading`);
+    }
+    rawReads.set(file, entry);
+    return entry;
+  }
+  const readInventory = () => [...rawReads.values()].sort((lhs, rhs) =>
+    lhs.file < rhs.file ? -1 : lhs.file > rhs.file ? 1 : 0);
   let manifest;
   try {
-    manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
+    const bytes = await readFile(path.join(root, "manifest.json"));
+    recordRawRead("manifest.json", bytes);
+    manifest = JSON.parse(bytes.toString("utf8"));
   } catch (error) {
-    return { manifest: null, documents: new Map(), problems: [`manifest.json: ${error.message}`] };
+    return {
+      manifest: null, documents: new Map(), readInventory: readInventory(),
+      problems: [`manifest.json: ${error.message}`],
+    };
   }
   problems.push(...validateManifestV2(manifest));
   if (expectedStatus && manifest.status !== expectedStatus) {
@@ -460,8 +477,9 @@ export async function validateFullDirectory(root, { expectedStatus = null } = {}
       const info = await lstat(absolute);
       if (!info.isFile() || info.isSymbolicLink()) throw new Error("not a regular file");
       const bytes = await readFile(absolute);
-      if (bytes.length !== module.integrity?.bytes) problems.push(`${module.file}: byte count disagrees with manifest`);
-      if (sha256(bytes) !== module.integrity?.sha256) problems.push(`${module.file}: sha256 mismatch`);
+      const observed = recordRawRead(module.file, bytes);
+      if (observed.bytes !== module.integrity?.bytes) problems.push(`${module.file}: byte count disagrees with manifest`);
+      if (observed.sha256 !== module.integrity?.sha256) problems.push(`${module.file}: sha256 mismatch`);
       const payload = JSON.parse(bytes.toString("utf8"));
       documents.set(module.id, payload);
       const payloadSchemaVersion = payload.formatVersion ?? payload.schemaVersion ?? 1;
@@ -480,7 +498,9 @@ export async function validateFullDirectory(root, { expectedStatus = null } = {}
     }
   }
   try {
-    const meta = JSON.parse(await readFile(path.join(root, "unified/meta.json"), "utf8"));
+    const bytes = await readFile(path.join(root, "unified/meta.json"));
+    recordRawRead("unified/meta.json", bytes);
+    const meta = JSON.parse(bytes.toString("utf8"));
     for (const module of (manifest.modules ?? []).filter(({ id }) => id.startsWith("core."))) {
       const entry = meta.sections?.[module.id.slice("core.".length)];
       if (!entry || entry.file !== path.basename(module.file)
@@ -501,5 +521,5 @@ export async function validateFullDirectory(root, { expectedStatus = null } = {}
   } catch (error) {
     problems.push(`directory root cannot be inspected: ${error.message}`);
   }
-  return { manifest, documents, problems };
+  return { manifest, documents, readInventory: readInventory(), problems };
 }

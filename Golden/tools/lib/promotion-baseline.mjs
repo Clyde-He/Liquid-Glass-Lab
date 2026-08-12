@@ -8,6 +8,12 @@ import {
 import { goldenDirectory } from "./golden.mjs";
 import { sha256, validateFullDirectory } from "./profile.mjs";
 
+export function assertAdmissionMatchesInventory(admission, inventory) {
+  if (JSON.stringify(admission.readInventory) !== JSON.stringify(inventory)) {
+    throw new Error("accepted Full admission bytes do not match the authenticated inventory");
+  }
+}
+
 export async function authenticateAcceptedBaseline(input, {
   canonicalRoot = goldenDirectory,
   base = repositoryRoot,
@@ -26,6 +32,7 @@ export async function authenticateAcceptedBaseline(input, {
   if (admission.problems.length) {
     throw new Error(`invalid accepted Full baseline: ${admission.problems.join("; ")}`);
   }
+  assertAdmissionMatchesInventory(admission, inventory);
   const manifestName = `macOS-${Number.parseInt(admission.manifest.platform?.version, 10)}`;
   if (manifestName !== name) {
     throw new Error(`accepted Full baseline platform does not match ${name}`);

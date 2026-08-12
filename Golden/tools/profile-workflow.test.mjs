@@ -12,7 +12,8 @@ import {
   resolveBootstrapContext, resolveCanonicalAcceptedDirectory, resolveExternalOutputPath,
 } from "./lib/bootstrap.mjs";
 import {
-  assertAcceptedBaselineUnchanged, authenticateAcceptedBaseline, copyRetainedModules,
+  assertAcceptedBaselineUnchanged, assertAdmissionMatchesInventory,
+  authenticateAcceptedBaseline, copyRetainedModules,
 } from "./lib/promotion-baseline.mjs";
 import { importArtifactEnvelope, MAX_ARTIFACT_BYTES } from "./lib/artifact-handoff.mjs";
 import { catalogDocumentProblems, packageResourceProblems } from "./lib/catalog-certification.mjs";
@@ -178,6 +179,24 @@ test("same-major promotion authenticates and binds its accepted baseline", async
     const [payload, manifestBytes] = await Promise.all([
       readFile(payloadPath), readFile(manifestPath),
     ]);
+    const omittedManifest = JSON.parse(manifestBytes);
+    omittedManifest.modules = omittedManifest.modules.filter(({ id }) => id !== retained.id);
+    omittedManifest.profiles.full.carriedForward =
+      omittedManifest.profiles.full.carriedForward.filter((id) => id !== retained.id);
+    await rm(payloadPath);
+    await writeFile(manifestPath, `${JSON.stringify(omittedManifest, null, 2)}\n`);
+    const transientAdmission = await validateFullDirectory(canonical, {
+      expectedStatus: "accepted",
+    });
+    assert.deepEqual(transientAdmission.problems, []);
+    await writeFile(payloadPath, payload);
+    await writeFile(manifestPath, manifestBytes);
+    await assertAcceptedBaselineUnchanged(baseline);
+    assert.throws(
+      () => assertAdmissionMatchesInventory(transientAdmission, baseline.inventory),
+      /admission bytes do not match the authenticated inventory/
+    );
+
     const injectedPayload = Buffer.concat([payload, Buffer.from("\n")]);
     const injectedManifest = JSON.parse(manifestBytes);
     injectedManifest.modules.find(({ id }) => id === retained.id).integrity = {
@@ -674,6 +693,7 @@ test("atomic new-major install uses the Darwin no-replace primitive", async () =
   assert.match(capture, /assertCleanGitStateUnchanged\(startingGit\)/);
   assert.match(promotionBaseline, /resolveCanonicalAcceptedDirectory/);
   assert.match(promotionBaseline, /validateFullDirectory\(directory, \{ expectedStatus: "accepted" \}\)/);
+  assert.match(promotionBaseline, /assertAdmissionMatchesInventory\(admission, inventory\)/);
   assert.match(promotionBaseline, /copied bytes do not match the admitted baseline/);
   assert.doesNotMatch(capture, /writeFile\(stagedPath/);
   assert.match(certifier, /--scratch-path/);

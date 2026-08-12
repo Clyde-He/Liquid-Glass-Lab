@@ -39,6 +39,7 @@ test("Full validates complete staging integrity before promotion", () => {
   assert.match(runnerSource, /await buildManifest\(staging, acceptedBaseline\)/);
   assert.doesNotMatch(runnerSource, /readFile\(path\.join\(accepted,/);
   assert.match(baselineSource, /validateFullDirectory\(directory, \{ expectedStatus: "accepted" \}\)/);
+  assert.match(baselineSource, /assertAdmissionMatchesInventory\(admission, inventory\)/);
   assert.match(runnerSource, /validateFullDirectory/);
   assert.match(profileSource, /sha256 mismatch/);
   assert.match(profileSource, /on disk but unregistered/);
