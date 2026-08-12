@@ -11,6 +11,9 @@ import {
   bootstrapComparisonEvidence, createSameVolumeTransaction, gitState, inventoryDigest, pathsOverlap,
   resolveBootstrapContext, resolveCanonicalAcceptedDirectory, resolveExternalOutputPath,
 } from "./lib/bootstrap.mjs";
+import {
+  assertAcceptedBaselineUnchanged, authenticateAcceptedBaseline, copyRetainedModules,
+} from "./lib/promotion-baseline.mjs";
 import { importArtifactEnvelope, MAX_ARTIFACT_BYTES } from "./lib/artifact-handoff.mjs";
 import { catalogDocumentProblems, packageResourceProblems } from "./lib/catalog-certification.mjs";
 import { comparisonReportIsEquivalent } from "./lib/comparison-contract.mjs";
@@ -128,14 +131,19 @@ test("same-major promotion authenticates and binds its accepted baseline", async
   const repository = path.join(root, "repo");
   const canonicalRoot = path.join(repository, "Golden");
   const canonical = path.join(canonicalRoot, "macOS-27");
+  const git = (...args) => spawnSync("git", args, { cwd: repository, encoding: "utf8" });
   try {
     await mkdir(canonicalRoot, { recursive: true });
     await cp(path.join(goldenDirectory, "macOS-27"), canonical, { recursive: true });
+    assert.equal(git("init").status, 0);
+    assert.equal(git("add", ".").status, 0);
+    assert.equal(git("-c", "user.name=Golden Test", "-c", "user.email=golden@example.invalid",
+      "commit", "-m", "fixture").status, 0);
     assert.equal(await resolveCanonicalAcceptedDirectory(canonical, "macOS-27", {
       canonicalRoot, base: repository,
     }), canonical);
 
-    const noncanonical = path.join(repository, "fixtures/macOS-27");
+    const noncanonical = path.join(root, "fixtures/macOS-27");
     await mkdir(noncanonical, { recursive: true });
     await assert.rejects(
       resolveCanonicalAcceptedDirectory(noncanonical, "macOS-27", {
@@ -145,27 +153,50 @@ test("same-major promotion authenticates and binds its accepted baseline", async
     );
 
     const symlinkTarget = path.join(root, "symlink-target");
+    const symlinkCanonicalRoot = path.join(root, "symlink-canonical");
     await mkdir(symlinkTarget);
-    await symlink(symlinkTarget, path.join(canonicalRoot, "macOS-99"));
+    await mkdir(symlinkCanonicalRoot);
+    await symlink(symlinkTarget, path.join(symlinkCanonicalRoot, "macOS-99"));
     await assert.rejects(
-      resolveCanonicalAcceptedDirectory(path.join(canonicalRoot, "macOS-99"), "macOS-99", {
-        canonicalRoot, base: repository,
-      }),
+      resolveCanonicalAcceptedDirectory(
+        path.join(symlinkCanonicalRoot, "macOS-99"), "macOS-99", {
+          canonicalRoot: symlinkCanonicalRoot, base: root,
+        }
+      ),
       /not a symlink/
     );
 
-    const admitted = await validateFullDirectory(canonical, { expectedStatus: "accepted" });
-    assert.deepEqual(admitted.problems, []);
-    const reviewed = await archiveInventory(canonical);
-    const payloadPath = path.join(canonical, "unified/dynamic.json");
-    const payload = await readFile(payloadPath);
-    await writeFile(payloadPath, Buffer.concat([payload, Buffer.from("\n")]));
-    const stale = await validateFullDirectory(canonical, { expectedStatus: "accepted" });
-    assert.match(stale.problems.join("; "), /byte count disagrees|sha256 mismatch/);
+    const baseline = await authenticateAcceptedBaseline(canonical, {
+      canonicalRoot, base: repository, gitRoot: repository,
+    });
+    assert.deepEqual(baseline.admission.problems, []);
+    const retained = baseline.admission.manifest.modules.find(
+      ({ id }) => id === "external.window-context"
+    );
+    const payloadPath = path.join(canonical, retained.file);
+    const manifestPath = path.join(canonical, "manifest.json");
+    const [payload, manifestBytes] = await Promise.all([
+      readFile(payloadPath), readFile(manifestPath),
+    ]);
+    const injectedPayload = Buffer.concat([payload, Buffer.from("\n")]);
+    const injectedManifest = JSON.parse(manifestBytes);
+    injectedManifest.modules.find(({ id }) => id === retained.id).integrity = {
+      bytes: injectedPayload.length, sha256: sha256(injectedPayload),
+    };
+    await writeFile(payloadPath, injectedPayload);
+    await writeFile(manifestPath, `${JSON.stringify(injectedManifest, null, 2)}\n`);
+    const copied = path.join(root, "copied-retained");
     await assert.rejects(
-      assertArchiveInventoryUnchanged(canonical, reviewed, "accepted Full baseline"),
+      copyRetainedModules(copied, baseline, baseline.admission.manifest.profiles.full.required),
+      /copied bytes do not match the admitted baseline/
+    );
+    await assert.rejects(
+      assertAcceptedBaselineUnchanged(baseline),
       /accepted Full baseline bytes changed/
     );
+    await writeFile(payloadPath, payload);
+    await writeFile(manifestPath, manifestBytes);
+    await assertAcceptedBaselineUnchanged(baseline);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -625,6 +656,9 @@ test("atomic new-major install uses the Darwin no-replace primitive", async () =
   assert.match(source, /RENAME_EXCL/);
   const bootstrap = await readFile(path.join(goldenDirectory, "tools/bootstrap-new-major.mjs"), "utf8");
   const capture = await readFile(path.join(goldenDirectory, "tools/capture-profile.mjs"), "utf8");
+  const promotionBaseline = await readFile(
+    path.join(goldenDirectory, "tools/lib/promotion-baseline.mjs"), "utf8"
+  );
   const certifier = await readFile(path.join(goldenDirectory, "tools/certify-package.mjs"), "utf8");
   assert.match(bootstrap, /source staging was preserved/);
   assert.match(bootstrap, /assertReviewedInventory\(transaction/);
@@ -634,10 +668,13 @@ test("atomic new-major install uses the Darwin no-replace primitive", async () =
   assert.match(capture, /acceptedArchivesReplacing/);
   assert.match(capture, /includeCrossVersion: archives\.length > 1/);
   assert.match(capture, /createSameVolumeTransaction/);
-  assert.match(capture, /resolveCanonicalAcceptedDirectory/);
-  assert.match(capture, /validateFullDirectory\(accepted, \{ expectedStatus: "accepted" \}\)/);
+  assert.match(capture, /authenticateAcceptedBaseline\(accepted\)/);
+  assert.match(capture, /buildManifest\(staging, acceptedBaseline\)/);
   assert.match(capture, /assertArchiveInventoryUnchanged\(accepted, acceptedInventory/);
   assert.match(capture, /assertCleanGitStateUnchanged\(startingGit\)/);
+  assert.match(promotionBaseline, /resolveCanonicalAcceptedDirectory/);
+  assert.match(promotionBaseline, /validateFullDirectory\(directory, \{ expectedStatus: "accepted" \}\)/);
+  assert.match(promotionBaseline, /copied bytes do not match the admitted baseline/);
   assert.doesNotMatch(capture, /writeFile\(stagedPath/);
   assert.match(certifier, /--scratch-path/);
   assert.match(certifier, /executedExpectedTest/);

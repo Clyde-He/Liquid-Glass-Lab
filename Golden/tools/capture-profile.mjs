@@ -12,10 +12,12 @@ import { DYNAMIC_CONTRACT_VERSION } from "./lib/dynamic-contract.mjs";
 import { validateManifestV2 } from "./lib/manifest.mjs";
 import { acceptedArchivesReplacing } from "./lib/golden.mjs";
 import {
-  archiveInventory, assertArchiveInventoryUnchanged, assertCleanGitState,
+  archiveInventory, assertArchiveInventoryUnchanged,
   assertCleanGitStateUnchanged, createSameVolumeTransaction,
-  resolveCanonicalAcceptedDirectory,
 } from "./lib/bootstrap.mjs";
+import {
+  assertAcceptedBaselineUnchanged, authenticateAcceptedBaseline, copyRetainedModules,
+} from "./lib/promotion-baseline.mjs";
 import {
   CLAIMS, FULL_DRIVERS as FULL, FULL_MODULE_IDS as REQUIRED,
   PROFILE_DEFINITION_VERSION, payloadModule, platformFrom, profileForMajor,
@@ -73,7 +75,7 @@ function run(app, flag, destination) {
   if (!result.stdout?.trim()) throw new Error(`${flag} did not hand off an artifact over stdout`);
   importArtifactEnvelope(result.stdout, destination);
 }
-async function buildManifest(root, accepted) {
+async function buildManifest(root, acceptedBaseline) {
   const metaBytes = await readFile(path.join(root, "unified/meta.json"));
   const meta = JSON.parse(metaBytes);
   const platform = platformFrom(meta.operatingSystem ?? "");
@@ -103,18 +105,9 @@ async function buildManifest(root, accepted) {
     if (optional.includes(id)) module.profileStatus = "optional";
     modules.push(module);
   }
-  const carriedForward = [];
-  if (accepted) {
-    const old = JSON.parse(await readFile(path.join(accepted, "manifest.json")));
-    for (const oldModule of old.modules ?? []) {
-      if (REQUIRED.includes(oldModule.id)) continue;
-      const target = path.join(root, oldModule.file);
-      await mkdir(path.dirname(target), { recursive: true });
-      await copyFile(path.join(accepted, oldModule.file), target);
-      modules.push(oldModule);
-      if (oldModule.profileStatus === "carried-forward") carriedForward.push(oldModule.id);
-    }
-  }
+  const retained = await copyRetainedModules(root, acceptedBaseline, REQUIRED);
+  modules.push(...retained.modules);
+  const carriedForward = retained.carriedForward;
   const ids = new Set(modules.map(({ id }) => id));
   const missing = required.filter((id) => !ids.has(id));
   if (missing.length) throw new Error(`incomplete Full staging: ${missing.join(", ")}`);
@@ -166,19 +159,20 @@ async function recreateStagingPreservingTintCheckpoints(staging) {
   }
   await rm(resume, { recursive: true, force: true });
 }
-async function promote(staging, accepted) {
-  if (!accepted) throw new Error("--promote requires --accepted");
-  const startingGit = assertCleanGitState();
+async function promote(staging, acceptedBaseline) {
+  if (!acceptedBaseline) throw new Error("--promote requires --accepted");
+  await assertAcceptedBaselineUnchanged(acceptedBaseline);
+  const accepted = acceptedBaseline.directory;
+  const acceptedInventory = acceptedBaseline.inventory;
+  const acceptedAdmission = acceptedBaseline.admission;
+  const startingGit = acceptedBaseline.git;
   const stagedInventory = await archiveInventory(staging);
   const stagedAdmission = await validateStagingIntegrity(staging);
   await assertArchiveInventoryUnchanged(staging, stagedInventory, "Full staging");
   const staged = stagedAdmission.manifest;
   const osDirectory = `macOS-${Number.parseInt(staged.platform.version, 10)}`;
-  accepted = await resolveCanonicalAcceptedDirectory(accepted, osDirectory);
-  const acceptedInventory = await archiveInventory(accepted);
-  const acceptedAdmission = await validateFullDirectory(accepted, { expectedStatus: "accepted" });
-  if (acceptedAdmission.problems.length) {
-    throw new Error(`invalid accepted Full baseline: ${acceptedAdmission.problems.join("; ")}`);
+  if (acceptedBaseline.name !== osDirectory) {
+    throw new Error("promotion target product, OS major, or architecture does not match staging");
   }
   await assertArchiveInventoryUnchanged(accepted, acceptedInventory, "accepted Full baseline");
   const previous = acceptedAdmission.manifest;
@@ -289,6 +283,7 @@ if (profile === "drift-scan") {
   await rename(staging, output);
   console.error(`Drift Scan complete (noncanonical): ${output}`);
 } else {
+  const acceptedBaseline = accepted ? await authenticateAcceptedBaseline(accepted) : null;
   const staging = `${output}.full-staging`;
   await recreateStagingPreservingTintCheckpoints(staging);
   const [, coreFlag, coreRelative] = FULL[0];
@@ -300,8 +295,8 @@ if (profile === "drift-scan") {
     // that a module passed its current completeness gates.
     run(app, flag, destination);
   }
-  await buildManifest(staging, accepted);
+  await buildManifest(staging, acceptedBaseline);
   await validateStagingIntegrity(staging);
-  if (process.argv.includes("--promote")) await promote(staging, accepted);
+  if (process.argv.includes("--promote")) await promote(staging, acceptedBaseline);
   else console.error(`Full capture staged, validated, and not promoted: ${staging}`);
 }
