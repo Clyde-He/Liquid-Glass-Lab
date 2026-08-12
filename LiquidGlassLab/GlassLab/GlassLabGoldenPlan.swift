@@ -3,11 +3,11 @@
 //  LiquidGlassLab
 //
 //  The capture plan and the conversions from the lab's per-study capture types
-//  into unified rows.
+//  into observations.
 //
 //  The plan is data, not control flow, so the driver cannot quietly acquire an
-//  axis. Every slice states the claim that requires it; a slice with no claim
-//  behind it does not belong here. See Golden/CAPTURE-SPEC.md.
+//  axis. Product and research requirements share this one coordinate list; an
+//  overlapping coordinate is observed once. See Golden/CAPTURE-SPEC.md.
 //
 
 #if os(macOS)
@@ -21,12 +21,16 @@ enum GlassLabGoldenPlan {
     static let referenceCornerRadius: Double = 16
     static let staticAppearance = GlassLabTestAppearance.light
     static let staticBackdrop = GlassLabBackdropMode.light
+    /// One canonical physical context serves research and Consumer projection.
+    /// 120 comfortably contains the largest currently resolved backdrop margin.
+    static let staticWindowPadding: Double = 120
 
     // MARK: - Static plan
 
-    /// One context to visit. The variant/subvariant sweep happens inside it.
+    /// One exact settled renderer observation. `label` and `requiresCatalog`
+    /// are plan-only metadata and are never persisted as evidence identity.
     struct StaticContext {
-        let slice: String
+        let label: String
         let width: Double
         let height: Double
         let cornerRadius: Double
@@ -35,10 +39,13 @@ enum GlassLabGoldenPlan {
         let subdued: Bool
         let appearance: GlassLabTestAppearance
         let host: GlassLabWindowHostType
-        /// Nil sweeps all 21 variants; otherwise only these, at nil subvariant.
-        let variants: [Int]?
+        let variant: Int
+        let subvariant: String?
+        let requiresCatalog: Bool
 
-        var sweepsEveryVariant: Bool { variants == nil }
+        var cell: GoldenCell {
+            .staticCell(context: self, backdrop: staticBackdrop)
+        }
     }
 
     /// Variants 1 and 2 are Regular and Clear: the two materials the strength
@@ -57,6 +64,10 @@ enum GlassLabGoldenPlan {
         16, 24, 32, 48, 64, 80, 96, 128, 300, 400, 480, 600,
     ]
 
+    /// Exact runtime interpolation anchors. These coordinates are ordinary
+    /// Static observations; Catalog is only a projection over this subset.
+    static let catalogShortSides: [Double] = [48, 64, 96, 128, 160, 200, 320]
+
     static let cornerRadiusSlice: [Double] = [0, 8, 32]
 
     /// `min(width, height)` must be reachable from more than one aspect ratio,
@@ -67,83 +78,144 @@ enum GlassLabGoldenPlan {
 
     static func staticContexts() -> [StaticContext] {
         var contexts: [StaticContext] = []
+        var indexByIdentity: [String: Int] = [:]
 
-        // Core: the whole variant vocabulary at one reference geometry, under
-        // both controlled appearances. Appearance is an axis here and not a
-        // constant because it moves resolved static values — the earlier
-        // archive was captured under an uncontrolled appearance, and pinning it
-        // to one value would have answered "which Variants follow appearance"
-        // for only half the vocabulary.
+        func append(
+            label: String,
+            width: Double,
+            height: Double,
+            cornerRadius: Double,
+            main: Bool,
+            key: Bool,
+            subdued: Bool,
+            appearance: GlassLabTestAppearance,
+            host: GlassLabWindowHostType = .panel,
+            variant: Int,
+            subvariant: String?,
+            requiresCatalog: Bool = false
+        ) {
+            let candidate = StaticContext(
+                label: label,
+                width: width,
+                height: height,
+                cornerRadius: cornerRadius,
+                main: main,
+                key: key,
+                subdued: subdued,
+                appearance: appearance,
+                host: host,
+                variant: variant,
+                subvariant: subvariant,
+                requiresCatalog: requiresCatalog
+            )
+            let identity = candidate.cell.identity
+            if let index = indexByIdentity[identity] {
+                if requiresCatalog, !contexts[index].requiresCatalog {
+                    let existing = contexts[index]
+                    contexts[index] = StaticContext(
+                        label: existing.label,
+                        width: existing.width,
+                        height: existing.height,
+                        cornerRadius: existing.cornerRadius,
+                        main: existing.main,
+                        key: existing.key,
+                        subdued: existing.subdued,
+                        appearance: existing.appearance,
+                        host: existing.host,
+                        variant: existing.variant,
+                        subvariant: existing.subvariant,
+                        requiresCatalog: true
+                    )
+                }
+                return
+            }
+            indexByIdentity[identity] = contexts.count
+            contexts.append(candidate)
+        }
+
+        // Research core: the whole variant vocabulary at one reference
+        // geometry under both controlled appearances.
         for appearance in GlassLabTestAppearance.controlledCases {
             for main in [false, true] {
-            for subdued in [false, true] {
-                contexts.append(StaticContext(
-                    slice: "core",
-                    width: referenceWidth,
-                    height: referenceHeight,
-                    cornerRadius: referenceCornerRadius,
-                    main: main,
-                    key: false,
-                    subdued: subdued,
-                    appearance: appearance,
-                    host: .panel,
-                    variants: nil
-                ))
-            }
+                for subdued in [false, true] {
+                    for variant in GlassLabTuning.variants {
+                        for subvariant in [nil]
+                            + GlassLabTuning.knownSubvariants.map(Optional.some) {
+                            append(
+                                label: "research-core",
+                                width: referenceWidth,
+                                height: referenceHeight,
+                                cornerRadius: referenceCornerRadius,
+                                main: main,
+                                key: false,
+                                subdued: subdued,
+                                appearance: appearance,
+                                variant: variant,
+                                subvariant: subvariant
+                            )
+                        }
+                    }
+                }
             }
         }
 
-        // Size: the formula classes and their caps.
+        // Research size: the formula classes and their caps.
         for shortSide in sizeSliceShortSides {
             for main in [false, true] {
-                contexts.append(StaticContext(
-                    slice: "size",
-                    width: referenceWidth,
-                    height: shortSide,
-                    cornerRadius: referenceCornerRadius,
-                    main: main,
-                    key: false,
-                    subdued: false,
-                    appearance: staticAppearance,
-                    host: .panel,
-                    variants: sliceVariants
-                ))
+                for variant in sliceVariants {
+                    append(
+                        label: "research-size",
+                        width: referenceWidth,
+                        height: shortSide,
+                        cornerRadius: referenceCornerRadius,
+                        main: main,
+                        key: false,
+                        subdued: false,
+                        appearance: staticAppearance,
+                        variant: variant,
+                        subvariant: nil
+                    )
+                }
             }
         }
 
-        // Transposed: the same short side reached with width and height swapped.
+        // Research transposed: one short side through two aspect ratios.
         for size in transposedSizes {
             for main in [false, true] {
-                contexts.append(StaticContext(
-                    slice: "transposed",
-                    width: size.width,
-                    height: size.height,
-                    cornerRadius: referenceCornerRadius,
-                    main: main,
-                    key: false,
-                    subdued: false,
-                    appearance: staticAppearance,
-                    host: .panel,
-                    variants: sliceVariants
-                ))
+                for variant in sliceVariants {
+                    append(
+                        label: "research-transposed",
+                        width: size.width,
+                        height: size.height,
+                        cornerRadius: referenceCornerRadius,
+                        main: main,
+                        key: false,
+                        subdued: false,
+                        appearance: staticAppearance,
+                        variant: variant,
+                        subvariant: nil
+                    )
+                }
             }
         }
 
-        // Corner radius: proving it reaches no shader input needs a second value.
+        // Research corner radius.
         for radius in cornerRadiusSlice {
             for main in [false, true] {
-                contexts.append(StaticContext(
-                    slice: "cornerRadius",
-                    width: referenceWidth,
-                    height: referenceHeight,
-                    cornerRadius: radius,
-                    main: main,
-                    key: false,
-                    subdued: false,
-                    appearance: staticAppearance,
-                    host: .panel,
-                    variants: sliceVariants
-                ))
+                for variant in sliceVariants {
+                    append(
+                        label: "research-corner-radius",
+                        width: referenceWidth,
+                        height: referenceHeight,
+                        cornerRadius: radius,
+                        main: main,
+                        key: false,
+                        subdued: false,
+                        appearance: staticAppearance,
+                        variant: variant,
+                        subvariant: nil
+                    )
+                }
             }
         }
 
@@ -154,62 +226,51 @@ enum GlassLabGoldenPlan {
         // which would confound the two participation states this exists to
         // separate.
         for subdued in [false, true] {
-            contexts.append(StaticContext(
-                slice: "key",
-                width: referenceWidth,
-                height: referenceHeight,
-                cornerRadius: referenceCornerRadius,
-                main: false,
-                key: true,
-                subdued: subdued,
-                appearance: staticAppearance,
-                host: .panel,
-                variants: sliceVariants
-            ))
+            for variant in sliceVariants {
+                append(
+                    label: "research-key",
+                    width: referenceWidth,
+                    height: referenceHeight,
+                    cornerRadius: referenceCornerRadius,
+                    main: false,
+                    key: true,
+                    subdued: subdued,
+                    appearance: staticAppearance,
+                    variant: variant,
+                    subvariant: nil
+                )
+            }
+        }
+
+        // Product interpolation grid. The append operation unions its 24
+        // overlaps with research instead of acquiring them a second time.
+        for appearance in GlassLabTestAppearance.controlledCases {
+            for variant in sliceVariants {
+                for main in [false, true] {
+                    for shortSide in catalogShortSides {
+                        append(
+                            label: "product",
+                            width: referenceWidth,
+                            height: shortSide,
+                            cornerRadius: referenceCornerRadius,
+                            main: main,
+                            key: false,
+                            subdued: false,
+                            appearance: appearance,
+                            variant: variant,
+                            subvariant: nil,
+                            requiresCatalog: true
+                        )
+                    }
+                }
+            }
         }
 
         return contexts
     }
 
-    /// The tree is expensive per row, so it takes the core product only, plus
-    /// one repeat pass for within-capture stability evidence.
-    static func treeContexts() -> [StaticContext] {
-        var contexts = staticContexts().filter {
-            $0.slice == "core" && $0.appearance == staticAppearance
-        }
-        // One row per variant at nil subvariant, not a second full product:
-        // enough to show the tree settles to the same signatures twice, at a
-        // fraction of the cost of re-sweeping all 336 cells.
-        contexts.append(StaticContext(
-            slice: "repeat",
-            width: referenceWidth,
-            height: referenceHeight,
-            cornerRadius: referenceCornerRadius,
-            main: true,
-            key: false,
-            subdued: false,
-            appearance: staticAppearance,
-            host: .panel,
-            variants: GlassLabTuning.variants
-        ))
-        // Appearance slice: one row per Variant under DarkAqua. The tree is the
-        // expensive section, so this buys the whole variant vocabulary at one
-        // participation state rather than a second full product. It exists to
-        // answer one question — does topology follow appearance — which the
-        // dynamic section can only answer for Variants 1 and 2.
-        contexts.append(StaticContext(
-            slice: "appearance",
-            width: referenceWidth,
-            height: referenceHeight,
-            cornerRadius: referenceCornerRadius,
-            main: true,
-            key: false,
-            subdued: false,
-            appearance: .dark,
-            host: .panel,
-            variants: GlassLabTuning.variants
-        ))
-        return contexts
+    static func catalogContexts() -> [StaticContext] {
+        staticContexts().filter(\.requiresCatalog)
     }
 
     // MARK: - Dynamic plan
@@ -285,19 +346,15 @@ enum GlassLabGoldenPlan {
 // MARK: - Conversions
 
 extension GoldenCell {
-    /// A static Recipe row. Appearance is recorded rather than left nil so a
-    /// settled dynamic sample can be paired against its static endpoint; the
-    /// previous archive could not do that comparison for exactly this reason.
+    /// One exact static Recipe condition.
     static func staticCell(
-        variant: Int,
-        subvariant: String?,
         context: GlassLabGoldenPlan.StaticContext,
         backdrop: GlassLabBackdropMode
     ) -> GoldenCell {
         let appearance = context.appearance
         return GoldenCell(
-            variant: variant,
-            subvariant: subvariant,
+            variant: context.variant,
+            subvariant: context.subvariant,
             main: context.main,
             key: context.key,
             subdued: context.subdued,
@@ -309,46 +366,6 @@ extension GoldenCell {
             cornerRadius: context.cornerRadius,
             host: context.host.rawValue,
             direction: nil
-        )
-    }
-}
-
-extension GoldenStaticScalarRow {
-    init(entry: GlassLabTuning.MatrixEntry, cell: GoldenCell, slice: String) {
-        self.init(
-            cell: cell,
-            accepted: entry.appActive
-                && entry.isActualMainWindow == entry.requestedMain,
-            participation: entry.participation,
-            slice: slice,
-            passes: Passes(
-                shader: entry.hasShaderPass,
-                highlight: entry.hasHighlightPass
-            ),
-            inputs: entry.inputs,
-            highlight: entry.highlight,
-            geometry: entry.geometry,
-            colors: entry.shaderColors.merging(entry.highlightColors) { first, _ in
-                first
-            },
-            points: entry.shaderPoints,
-            strings: entry.shaderStrings
-        )
-    }
-}
-
-extension GoldenStaticTreeRow {
-    init(entry: GlassLabTuning.PassAuditEntry, cell: GoldenCell, slice: String) {
-        self.init(
-            cell: cell,
-            accepted: entry.appActive
-                && entry.isActualMainWindow == entry.requestedMain,
-            participation: entry.participation,
-            slice: slice,
-            topologySignature: entry.snapshot.topologySignature,
-            valueSignature: entry.snapshot.valueSignature,
-            layers: entry.snapshot.layers,
-            passes: entry.snapshot.passes
         )
     }
 }

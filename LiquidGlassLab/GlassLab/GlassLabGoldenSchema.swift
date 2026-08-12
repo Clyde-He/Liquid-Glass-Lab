@@ -15,7 +15,7 @@
 import AppKit
 import Foundation
 
-let goldenSchemaVersion = 1
+let goldenSchemaVersion = 2
 
 /// One coordinate in the archive.
 ///
@@ -251,70 +251,22 @@ struct GoldenResolvedSnapshot: Codable, Equatable {
     let passes: [GoldenResolvedPass]
 }
 
-// MARK: - Section 1: static-scalar
+// MARK: - Settled static observations
 
-struct GoldenStaticScalarRow: Codable {
+/// One exact requested condition paired with the one complete tree observed
+/// after it settled. Scalar analysis, recursive audit, and Consumer replay are
+/// projections; none is separately stored or captured.
+struct GoldenStaticObservation: Codable {
     let cell: GoldenCell
-    /// Whether the requested participation was actually observed. A row that is
-    /// not accepted is never written; the flag exists so a reader can assert it
-    /// rather than trust the exporter.
-    let accepted: Bool
-    let participation: String
-    let slice: String
-    let passes: Passes
-    let inputs: [String: Double]
-    let highlight: [String: Double]
-    let geometry: [String: Double]
-    let colors: [String: String]
-    let points: [String: GlassLabTuning.MatrixEntry.PointValue]
-    let strings: [String: String]
-
-    struct Passes: Codable {
-        let shader: Bool
-        let highlight: Bool
-    }
+    let snapshot: GoldenResolvedSnapshot
 }
 
-struct GoldenStaticScalarDocument: Codable {
+struct GoldenStaticDocument: Codable {
     let schemaVersion: Int
-    let section: String
-    let capturedAt: String
-    let operatingSystem: String
-    let environment: GoldenEnvironment
-    /// Declared inputs are identical on every row, so one copy is enough.
-    let capability: Capability
-    let rows: [GoldenStaticScalarRow]
-
-    struct Capability: Codable {
-        let shaderInputKeys: [String]
-        let highlightInputKeys: [String]
-        let geometryKeys: [String]
-    }
+    let observations: [GoldenStaticObservation]
 }
 
-// MARK: - Section 2: static-tree
-
-struct GoldenStaticTreeRow: Codable {
-    let cell: GoldenCell
-    let accepted: Bool
-    let participation: String
-    let slice: String
-    let topologySignature: String
-    let valueSignature: String
-    let layers: [String: GlassLabTuning.PassAuditLayerRecord]
-    let passes: [String: GlassLabTuning.PassAuditPassRecord]
-}
-
-struct GoldenStaticTreeDocument: Codable {
-    let schemaVersion: Int
-    let section: String
-    let capturedAt: String
-    let operatingSystem: String
-    let environment: GoldenEnvironment
-    let rows: [GoldenStaticTreeRow]
-}
-
-// MARK: - Section 3: dynamic
+// MARK: - Dynamic
 
 struct GoldenDynamicSample: Codable {
     /// Observed progress, not requested: the renderer is the source of truth

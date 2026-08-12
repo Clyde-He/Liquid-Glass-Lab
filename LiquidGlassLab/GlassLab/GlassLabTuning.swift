@@ -3273,216 +3273,12 @@ enum GlassLabTuning {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    // MARK: - Recipe matrix capture
-
-    struct MatrixEntry: Codable {
-        struct PointValue: Codable, Equatable {
-            let x: Double
-            let y: Double
-        }
-
-        let context: String
-        let appActive: Bool
-        let isActualKeyWindow: Bool
-        let isActualMainWindow: Bool
-        let participation: String
-        let requestedMain: Bool
-        let subdued: Bool
-        let glassWidth: Double
-        let glassHeight: Double
-        let cornerRadius: Double
-        let variant: Int
-        let subvariant: String?
-        /// Capability inventory is separate from the sparse value maps:
-        /// a listed key with no value is nil; an unlisted key is absent.
-        let hasShaderPass: Bool
-        let shaderInputKeys: [String]
-        /// Backward-compatible name for the numeric glassBackground payload.
-        let inputs: [String: Double]
-        let shaderColors: [String: String]
-        let shaderPoints: [String: PointValue]
-        let shaderStrings: [String: String]
-        let hasHighlightPass: Bool
-        let highlightInputKeys: [String]
-        let highlight: [String: Double]
-        let highlightColors: [String: String]
-        let geometryKeys: [String]
-        let geometry: [String: Double]
-    }
-
-    /// Versioned export envelope used by repository Golden Standards. Axes
-    /// describe what was swept; Environment records fixed provenance without
-    /// multiplying verified non-Recipe controls into the Cartesian product.
-    struct MatrixDocument: Codable {
-        struct Axes: Codable {
-            struct SizeSample: Codable {
-                let width: Double
-                let height: Double
-                let cornerRadius: Double
-            }
-
-            let main: [Bool]
-            let subdued: [Bool]
-            let variants: [Int]
-            let subvariants: [String?]
-            let sizes: [SizeSample]
-        }
-
-        struct Environment: Codable {
-            let hostType: String
-            let windowMargin: Double
-            let scrim: Bool
-            let reducedTintOpacity: Bool
-            let adaptiveAppearance: Int
-            let tint: String?
-            let overridesEnabled: Bool
-        }
-
-        let schemaVersion: Int
-        let capturedAt: String
-        let operatingSystem: String
-        let axes: Axes
-        let environment: Environment
-        let entries: [MatrixEntry]
-    }
-
-    struct PassAuditEntry: Codable {
-        let context: String
-        let appActive: Bool
-        let isActualKeyWindow: Bool
-        let isActualMainWindow: Bool
-        let participation: String
-        let requestedMain: Bool
-        let subdued: Bool
-        let glassWidth: Double
-        let glassHeight: Double
-        let cornerRadius: Double
-        let variant: Int
-        let subvariant: String?
-        let snapshot: PassAuditSnapshot
-    }
-
-    struct PassAuditDocument: Codable {
-        struct Axes: Codable {
-            let main: [Bool]
-            let subdued: [Bool]
-            let variants: [Int]
-            let subvariants: [String?]
-        }
-
-        struct Context: Codable {
-            let hostType: String
-            let windowMargin: Double
-            let glassWidth: Double
-            let glassHeight: Double
-            let cornerRadius: Double
-            let scrim: Bool
-            let reducedTintOpacity: Bool
-            let adaptiveAppearance: Int
-            let tint: String?
-            let overridesEnabled: Bool
-        }
-
-        let formatVersion: Int
-        let capturedAt: String
-        let operatingSystem: String
-        let axes: Axes
-        let context: Context
-        let entries: [PassAuditEntry]
-    }
+    // MARK: - Settled capture
 
     enum MatrixCaptureError: Error {
         case applicationInactive
         case missingLayerTree
-        case participationChanged(
-            expectedMain: Bool,
-            actualMain: Bool,
-            actualKey: Bool
-        )
-    }
-
-    /// One fully typed snapshot used both for adaptive stability detection and
-    /// the final MatrixEntry. Reusing the settled payload avoids traversing the
-    /// private layer/filter tree a second time for every Cartesian-product cell.
-    private struct MatrixPayload: Equatable {
-        let hasShaderPass: Bool
-        let shaderInputKeys: [String]
-        let inputs: [String: Double]
-        let shaderColors: [String: String]
-        let shaderPoints: [String: MatrixEntry.PointValue]
-        let shaderStrings: [String: String]
-        let hasHighlightPass: Bool
-        let highlightInputKeys: [String]
-        let highlight: [String: Double]
-        let highlightColors: [String: String]
-        let geometryKeys: [String]
-        let geometry: [String: Double]
-    }
-
-    /// Captures the fixed-geometry recursive pass audit for one accepted
-    /// Main/Subdued context. The caller owns the outer four-context loop so a
-    /// context interrupted by application deactivation can be retried whole.
-    @MainActor
-    /// See `captureMatrix` for the meaning of `requestedKey` and `variants`.
-    static func capturePassAudit(
-        on glass: NSGlassEffectView,
-        context: String,
-        requestedMain: Bool,
-        requestedKey: Bool = false,
-        subdued: Bool,
-        variants selectedVariants: [Int]? = nil,
-        restoring state: GlassLabState
-    ) async throws -> [PassAuditEntry] {
-        var entries: [PassAuditEntry] = []
-
-        defer {
-            setGuarded(nil, forKey: "_subvariant", on: glass)
-            setGuarded(state.variant == 0 ? 1 : 0, forKey: "_variant", on: glass)
-            applyRecipe(from: state, to: glass)
-        }
-
-        let sweptVariants = selectedVariants ?? variants
-        let subvariants: [String?] = selectedVariants == nil
-            ? [nil] + knownSubvariants.map(Optional.some)
-            : [nil]
-        for variant in sweptVariants {
-            for subvariant in subvariants {
-                guard NSApp.isActive else {
-                    throw MatrixCaptureError.applicationInactive
-                }
-                selectRecipeCell(variant: variant, subvariant: subvariant, on: glass)
-                refreshResolvedWindowContext(on: glass)
-                let snapshot = try await settledPassAuditSnapshot(from: glass)
-                let actualKey = glass.window.map { NSApp.keyWindow === $0 } ?? false
-                let actualMain = glass.window.map { NSApp.mainWindow === $0 } ?? false
-                guard NSApp.isActive else {
-                    throw MatrixCaptureError.applicationInactive
-                }
-                guard actualMain == requestedMain, actualKey == requestedKey else {
-                    throw MatrixCaptureError.participationChanged(
-                        expectedMain: requestedMain,
-                        actualMain: actualMain,
-                        actualKey: actualKey
-                    )
-                }
-                entries.append(PassAuditEntry(
-                    context: context,
-                    appActive: NSApp.isActive,
-                    isActualKeyWindow: actualKey,
-                    isActualMainWindow: actualMain,
-                    participation: actualKey ? "key" : (actualMain ? "main" : "neither"),
-                    requestedMain: requestedMain,
-                    subdued: subdued,
-                    glassWidth: state.glassWidth,
-                    glassHeight: state.glassHeight,
-                    cornerRadius: state.cornerRadius,
-                    variant: variant,
-                    subvariant: subvariant,
-                    snapshot: snapshot
-                ))
-            }
-        }
-        return entries
+        case unstableResolvedTree
     }
 
     @MainActor
@@ -3516,174 +3312,43 @@ enum GlassLabTuning {
         return previous
     }
 
-    private static func selectRecipeCell(
-        variant: Int,
-        subvariant: String?,
-        on glass: NSGlassEffectView
-    ) {
-        // Clear both axes first so an unchanged setter cannot leave a recipe
-        // resolved from the previous Cartesian-product cell.
-        setGuarded(nil, forKey: "_subvariant", on: glass)
-        setGuarded(variant == 0 ? 1 : 0, forKey: "_variant", on: glass)
-        setGuarded(variant, forKey: "_variant", on: glass)
-        setGuarded(subvariant, forKey: "_subvariant", on: glass)
-    }
-
-    /// Sweeps the full Cartesian product of every integer variant and each
-    /// known subvariant state (`nil`, menu, sheet, camera), then restores the
-    /// original recipe. This intentionally records combinations that collapse
-    /// to the same output: storage is orthogonal, recipe consumption is sparse.
-    /// The real key/main participation of `glass.window` is part of what is
-    /// being measured, so run once per surface.
+    /// Bounded full-tree settle used by canonical Static capture. Three
+    /// consecutive complete typed reads must agree. No property exclusions or
+    /// tolerances are hidden here: exhaustion rejects the occurrence.
     @MainActor
-    /// - Parameters:
-    ///   - requestedKey: the expected real key participation. Every historical
-    ///     export path required this to be false, because the hard case the
-    ///     harness was built for is main-*without*-key. The Golden key slice is
-    ///     the one caller that wants it true, and it has to be requested rather
-    ///     than tolerated so a window that stole focus mid-sweep still fails.
-    ///   - variants: nil sweeps the whole vocabulary against every subvariant.
-    ///     An explicit list sweeps only those, at nil subvariant, for slices
-    ///     that exist to move a geometry or participation axis rather than the
-    ///     material axis.
-    static func captureMatrix(
-        on glass: NSGlassEffectView,
-        context: String,
-        requestedMain: Bool,
-        requestedKey: Bool = false,
-        subdued: Bool,
-        variants selectedVariants: [Int]? = nil,
-        restoring state: GlassLabState
-    ) async throws -> [MatrixEntry] {
-        var entries: [MatrixEntry] = []
-
-        defer {
-            // Restore the state's recipe (bounce so the setter can't
-            // short-circuit back into a stale resolution), including when an
-            // inactive/context transition aborts this batch for a clean retry.
-            setGuarded(nil, forKey: "_subvariant", on: glass)
-            setGuarded(state.variant == 0 ? 1 : 0, forKey: "_variant", on: glass)
-            applyRecipe(from: state, to: glass)
-        }
-
-        let sweptVariants = selectedVariants ?? variants
-        let subvariants: [String?] = selectedVariants == nil
-            ? [nil] + knownSubvariants.map(Optional.some)
-            : [nil]
-        for variant in sweptVariants {
-            for subvariant in subvariants {
-                guard NSApp.isActive else {
-                    throw MatrixCaptureError.applicationInactive
-                }
-                selectRecipeCell(variant: variant, subvariant: subvariant, on: glass)
-                // The resolver normally reacts asynchronously. Explicitly run
-                // its window-context hook, then retain the 180 ms historical
-                // wait only as a ceiling rather than paying it for every cell.
-                refreshResolvedWindowContext(on: glass)
-                let payload = try await settledMatrixPayload(from: glass)
-                let actualKey = glass.window.map { NSApp.keyWindow === $0 } ?? false
-                let actualMain = glass.window.map { NSApp.mainWindow === $0 } ?? false
-                guard NSApp.isActive else {
-                    throw MatrixCaptureError.applicationInactive
-                }
-                guard actualMain == requestedMain, actualKey == requestedKey else {
-                    throw MatrixCaptureError.participationChanged(
-                        expectedMain: requestedMain,
-                        actualMain: actualMain,
-                        actualKey: actualKey
-                    )
-                }
-                entries.append(MatrixEntry(
-                    context: context,
-                    appActive: NSApp.isActive,
-                    isActualKeyWindow: actualKey,
-                    isActualMainWindow: actualMain,
-                    participation: actualKey ? "key" : (actualMain ? "main" : "neither"),
-                    requestedMain: requestedMain,
-                    subdued: subdued,
-                    glassWidth: state.glassWidth,
-                    glassHeight: state.glassHeight,
-                    cornerRadius: state.cornerRadius,
-                    variant: variant,
-                    subvariant: subvariant,
-                    hasShaderPass: payload.hasShaderPass,
-                    shaderInputKeys: payload.shaderInputKeys,
-                    inputs: payload.inputs,
-                    shaderColors: payload.shaderColors,
-                    shaderPoints: payload.shaderPoints,
-                    shaderStrings: payload.shaderStrings,
-                    hasHighlightPass: payload.hasHighlightPass,
-                    highlightInputKeys: payload.highlightInputKeys,
-                    highlight: payload.highlight,
-                    highlightColors: payload.highlightColors,
-                    geometryKeys: payload.geometryKeys,
-                    geometry: payload.geometry
-                ))
-            }
-        }
-        return entries
-    }
-
-    /// Samples after 30 ms checkpoints and returns once two snapshots are
-    /// identical after at least 60 ms. Most recipes settle in that first pair;
-    /// unstable cells continue through the former 180 ms safety boundary.
-    @MainActor
-    private static func settledMatrixPayload(
+    static func settledResolvedTreeSnapshot(
         from glass: NSGlassEffectView
-    ) async throws -> MatrixPayload {
-        var previous: MatrixPayload?
-        var elapsedMilliseconds = 0
-        for delayMilliseconds in [30, 30, 30, 30, 60] {
-            try await Task.sleep(for: .milliseconds(delayMilliseconds))
+    ) async throws -> GoldenResolvedSnapshot {
+        var previous: GoldenResolvedSnapshot?
+        var stableMatches = 0
+        var observedSnapshot = false
+        for _ in 0..<16 {
+            try Task.checkCancellation()
             guard NSApp.isActive else {
                 throw MatrixCaptureError.applicationInactive
             }
-            elapsedMilliseconds += delayMilliseconds
             glass.needsLayout = true
             glass.layoutSubtreeIfNeeded()
             CATransaction.flush()
-            let current = captureMatrixPayload(from: glass)
-            if elapsedMilliseconds >= 60, current == previous {
-                return current
+            guard let current = captureResolvedTreeSnapshot(from: glass) else {
+                previous = nil
+                stableMatches = 0
+                try await Task.sleep(for: .milliseconds(300))
+                continue
+            }
+            observedSnapshot = true
+            if current == previous {
+                stableMatches += 1
+                if stableMatches >= 2 { return current }
+            } else {
+                stableMatches = 0
             }
             previous = current
+            try await Task.sleep(for: .milliseconds(300))
         }
-        return previous ?? captureMatrixPayload(from: glass)
+        if !observedSnapshot { throw MatrixCaptureError.missingLayerTree }
+        throw MatrixCaptureError.unstableResolvedTree
     }
 
-    @MainActor
-    private static func captureMatrixPayload(
-        from glass: NSGlassEffectView
-    ) -> MatrixPayload {
-        let shaderInputKeys = captureShaderInputKeys(from: glass)
-        let highlightInputKeys = captureHighlightInputKeys(from: glass)
-        return MatrixPayload(
-            hasShaderPass: shaderInputKeys != nil,
-            shaderInputKeys: shaderInputKeys.map { $0.sorted() } ?? [],
-            inputs: captureShaderInputs(from: glass),
-            shaderColors: captureShaderColors(from: glass).mapValues(colorDescription),
-            shaderPoints: captureShaderPoints(from: glass).mapValues {
-                MatrixEntry.PointValue(x: $0.x, y: $0.y)
-            },
-            shaderStrings: captureShaderStrings(from: glass),
-            hasHighlightPass: highlightInputKeys != nil,
-            highlightInputKeys: highlightInputKeys.map { $0.sorted() } ?? [],
-            highlight: captureHighlightValues(from: glass),
-            highlightColors: captureHighlightColors(from: glass).mapValues(colorDescription),
-            geometryKeys: captureLayerGeometryKeys(from: glass).sorted(),
-            geometry: captureLayerGeometry(from: glass)
-        )
-    }
-
-    private static func colorDescription(_ color: NSColor) -> String {
-        guard let converted = color.usingColorSpace(.sRGB) else { return color.description }
-        return String(
-            format: "rgba(%.6g,%.6g,%.6g,%.6g)",
-            converted.redComponent,
-            converted.greenComponent,
-            converted.blueComponent,
-            converted.alphaComponent
-        )
-    }
 }
 #endif
