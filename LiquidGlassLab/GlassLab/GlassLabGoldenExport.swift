@@ -12,7 +12,6 @@
 
 #if os(macOS)
 import AppKit
-import CryptoKit
 import Foundation
 import SwiftUI
 
@@ -21,7 +20,6 @@ enum GlassLabGoldenExportError: LocalizedError {
     case emptySection(String)
     case duplicateRow(section: String, cell: String)
     case unprojectableCatalog(cell: String)
-    case incompleteProfile(missing: [String])
     case promotionFailed(String)
 
     var errorDescription: String? {
@@ -36,8 +34,6 @@ enum GlassLabGoldenExportError: LocalizedError {
         case let .unprojectableCatalog(cell):
             "Static context \(cell) is required by Consumer but cannot project "
                 + "a complete supported style sample."
-        case let .incompleteProfile(missing):
-            "Golden staging is incomplete; missing \(missing.joined(separator: ", "))."
         case let .promotionFailed(detail):
             "Golden staging could not be promoted atomically: \(detail)"
         }
@@ -147,31 +143,20 @@ extension GlassLabView {
             .joined(separator: "\n")
     }
 
-    static func goldenReport(_ meta: GoldenMeta) -> String {
-        var lines = ["== Golden archive =="]
-        for name in ["static", "dynamic"] {
-            guard let section = meta.sections[name] else { continue }
-            let megabytes = Double(section.bytes) / 1_048_576
-            let slices = section.slices
-                .sorted { $0.key < $1.key }
-                .map { "\($0.key)=\($0.value)" }
-                .joined(separator: " ")
-            lines.append(
-                "\(name.padding(toLength: 14, withPad: " ", startingAt: 0)) "
-                + "\(section.rows) rows  \(String(format: "%.1f", megabytes)) MB"
-                + (section.repeatedCells > 0
-                    ? "  \(section.repeatedCells) repeated"
-                    : "")
-            )
-            lines.append("  slices: \(slices)")
-            lines.append("  swept: \(section.swept.joined(separator: ", "))")
-        }
-        return lines.joined(separator: "\n")
+    static func goldenReport(_ summary: GoldenCaptureSummary) -> String {
+        [
+            "== Golden capture ==",
+            "Static: \(summary.staticObservations) observations",
+            "Dynamic: \(summary.dynamicRuns) runs",
+            "OS: \(summary.capture.operatingSystem)",
+            "Architecture: \(summary.capture.architecture)",
+            "Display: \(summary.capture.displaySignature)",
+        ].joined(separator: "\n")
     }
 
     // MARK: - Driver
 
-    func captureGoldenArchive(into directory: URL) async throws -> GoldenMeta {
+    func captureGoldenArchive(into directory: URL) async throws -> GoldenCaptureSummary {
         let originalRenderer = state.rendererMode
         let originalUsage = state.semanticUsage
         let originalSemanticPage = selectedSemanticPage
@@ -236,13 +221,6 @@ extension GlassLabView {
         state.testBackdrop = GlassLabGoldenPlan.staticBackdrop
         state.windowPadding = GlassLabGoldenPlan.staticWindowPadding
         state.isTestWindowKey = false
-        let environment = GoldenEnvironment(
-            windowMargin: GlassLabGoldenPlan.staticWindowPadding,
-            scrim: false,
-            reducedTintOpacity: false,
-            adaptiveAppearance: 2,
-            overridesEnabled: false
-        )
         let capturedAt = ISO8601DateFormatter().string(from: Date())
         let operatingSystem = ProcessInfo.processInfo.operatingSystemVersionString
 
@@ -255,16 +233,28 @@ extension GlassLabView {
         state.isCapturingRecipeMatrix = true
         let staticDocument = try await captureStaticSection()
         state.isCapturingRecipeMatrix = false
-        let dynamic = try await captureDynamicSection(
-            environment: environment,
-            capturedAt: capturedAt,
-            operatingSystem: operatingSystem
+        let dynamic = try await captureDynamicSection()
+
+        #if arch(arm64)
+        let architecture = "arm64"
+        #elseif arch(x86_64)
+        let architecture = "x86_64"
+        #else
+        let architecture = "unknown"
+        #endif
+        let capture = GoldenCaptureDocument(
+            schemaVersion: goldenSchemaVersion,
+            operatingSystem: operatingSystem,
+            architecture: architecture,
+            displaySignature: GlassMaterialStyleAtlas.Environment.current(
+                for: state.testWindow.liveWindow?.screen
+            ).displaySignature,
+            capturedAt: capturedAt
         )
 
         return try Self.writeGoldenArchive(
             into: directory,
-            capturedAt: capturedAt,
-            operatingSystem: operatingSystem,
+            capture: capture,
             staticDocument: staticDocument,
             dynamic: dynamic
         )
@@ -378,17 +368,14 @@ extension GlassLabView {
         }
         return GoldenStaticDocument(
             schemaVersion: goldenSchemaVersion,
+            consumerCells: contexts.filter(\.requiresCatalog).map(\.cell),
             observations: observations
         )
     }
 
     // MARK: - Dynamic
 
-    private func captureDynamicSection(
-        environment: GoldenEnvironment,
-        capturedAt: String,
-        operatingSystem: String
-    ) async throws -> GoldenDynamicDocument {
+    private func captureDynamicSection() async throws -> GoldenDynamicDocument {
         let contexts = GlassLabGoldenPlan.dynamicContexts()
         var runs: [GoldenDynamicRun] = []
 
@@ -428,10 +415,6 @@ extension GlassLabView {
         }
         return GoldenDynamicDocument(
             schemaVersion: goldenSchemaVersion,
-            section: "dynamic",
-            capturedAt: capturedAt,
-            operatingSystem: operatingSystem,
-            environment: environment,
             runs: runs
         )
     }
@@ -440,11 +423,10 @@ extension GlassLabView {
 
     private static func writeGoldenArchive(
         into directory: URL,
-        capturedAt: String,
-        operatingSystem: String,
+        capture: GoldenCaptureDocument,
         staticDocument: GoldenStaticDocument,
         dynamic: GoldenDynamicDocument
-    ) throws -> GoldenMeta {
+    ) throws -> GoldenCaptureSummary {
         let fileManager = FileManager.default
         let parent = directory.deletingLastPathComponent()
         try fileManager.createDirectory(
@@ -469,18 +451,12 @@ extension GlassLabView {
         )
         defer { try? fileManager.removeItem(at: staging) }
 
-        let meta = try writeGoldenArchivePayload(
+        try writeGoldenArchivePayload(
             into: staging,
-            capturedAt: capturedAt,
-            operatingSystem: operatingSystem,
+            capture: capture,
             staticDocument: staticDocument,
             dynamic: dynamic
         )
-        let required = Set(["static", "dynamic"])
-        let missing = required.subtracting(meta.sections.keys).sorted()
-        guard missing.isEmpty else {
-            throw GlassLabGoldenExportError.incompleteProfile(missing: missing)
-        }
         do {
             if fileManager.fileExists(atPath: directory.path) {
                 _ = try fileManager.replaceItemAt(
@@ -497,64 +473,56 @@ extension GlassLabView {
                 error.localizedDescription
             )
         }
-        return meta
+        return GoldenCaptureSummary(
+            capture: capture,
+            staticObservations: staticDocument.observations.count,
+            dynamicRuns: dynamic.runs.count
+        )
     }
 
     private static func writeGoldenArchivePayload(
         into directory: URL,
-        capturedAt: String,
-        operatingSystem: String,
+        capture: GoldenCaptureDocument,
         staticDocument: GoldenStaticDocument,
         dynamic: GoldenDynamicDocument
-    ) throws -> GoldenMeta {
+    ) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
 
-        var sections: [String: GoldenMeta.Section] = [:]
-        sections["static"] = try write(
+        try write(
             staticDocument,
             rows: staticDocument.observations.map(\.cell),
-            slices: [],
             named: "static",
             into: directory,
             encoder: encoder,
             allowsRepeats: false
         )
-        sections["dynamic"] = try write(
+        try write(
             dynamic,
             rows: dynamic.runs.map(\.cell),
-            slices: dynamic.runs.map(\.slice),
             named: "dynamic",
             into: directory,
             encoder: encoder,
             allowsRepeats: true
         )
-
-        let meta = GoldenMeta(
-            schemaVersion: goldenSchemaVersion,
-            operatingSystem: operatingSystem,
-            capturedAt: capturedAt,
-            role: "canonical",
-            sections: sections
+        try write(
+            capture,
+            rows: [],
+            named: "capture",
+            into: directory,
+            encoder: encoder,
+            allowsRepeats: false
         )
-        let metaEncoder = JSONEncoder()
-        metaEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try metaEncoder.encode(meta).write(
-            to: directory.appendingPathComponent("meta.json"),
-            options: .atomic
-        )
-        return meta
     }
 
     private static func write<Document: Encodable>(
         _ document: Document,
         rows: [GoldenCell],
-        slices: [String],
         named name: String,
         into directory: URL,
         encoder: JSONEncoder,
         allowsRepeats: Bool
-    ) throws -> GoldenMeta.Section {
+    ) throws {
         let identities = rows.map(\.identity)
         let repeated = identities.count - Set(identities).count
         if !allowsRepeats, repeated > 0 {
@@ -573,47 +541,6 @@ extension GlassLabView {
             options: .atomic
         )
 
-        var sliceCounts: [String: Int] = [:]
-        for slice in slices { sliceCounts[slice, default: 0] += 1 }
-
-        return GoldenMeta.Section(
-            file: file,
-            rows: rows.count,
-            repeatedCells: repeated,
-            bytes: bytes.count,
-            sha256: SHA256.hash(data: bytes)
-                .map { String(format: "%02x", $0) }
-                .joined(),
-            swept: GoldenCell.sweptAxes(in: rows),
-            slices: sliceCounts
-        )
-    }
-}
-
-extension GoldenCell {
-    /// Axes that actually take more than one non-nil value. Recorded so a
-    /// reader can tell "this axis was held constant" from "this axis was never
-    /// controlled" without inspecting every row.
-    static func sweptAxes(in cells: [GoldenCell]) -> [String] {
-        var axes: [String] = []
-        func check(_ name: String, _ values: [AnyHashable?]) {
-            let distinct = Set(values.compactMap { $0 })
-            if distinct.count > 1 { axes.append(name) }
-        }
-        check("variant", cells.map { $0.variant.map(AnyHashable.init) })
-        check("subvariant", cells.map { $0.subvariant.map(AnyHashable.init) })
-        check("main", cells.map { $0.main.map(AnyHashable.init) })
-        check("key", cells.map { $0.key.map(AnyHashable.init) })
-        check("subdued", cells.map { $0.subdued.map(AnyHashable.init) })
-        check("appearance", cells.map { $0.appearance.map(AnyHashable.init) })
-        check("backdrop", cells.map { $0.backdrop.map(AnyHashable.init) })
-        check("tint", cells.map { $0.tint.map(AnyHashable.init) })
-        check("width", cells.map { $0.width.map(AnyHashable.init) })
-        check("height", cells.map { $0.height.map(AnyHashable.init) })
-        check("cornerRadius", cells.map { $0.cornerRadius.map(AnyHashable.init) })
-        check("host", cells.map { $0.host.map(AnyHashable.init) })
-        check("direction", cells.map { $0.direction.map(AnyHashable.init) })
-        return axes
     }
 }
 #endif

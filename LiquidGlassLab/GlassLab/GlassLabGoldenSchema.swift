@@ -343,6 +343,10 @@ struct GoldenStaticObservation: Codable {
 
 struct GoldenStaticDocument: Codable {
     let schemaVersion: Int
+    /// Compiled from the same Swift requirement list that drives acquisition.
+    /// Catalog tooling selects these keys rather than duplicating the product
+    /// coordinate table in another language.
+    let consumerCells: [GoldenCell]
     let observations: [GoldenStaticObservation]
 }
 
@@ -390,42 +394,24 @@ struct GoldenDynamicRun: Codable {
 
 struct GoldenDynamicDocument: Codable {
     let schemaVersion: Int
-    let section: String
-    let capturedAt: String
-    let operatingSystem: String
-    let environment: GoldenEnvironment
     let runs: [GoldenDynamicRun]
 }
 
 // MARK: - Shared
 
-/// Conditions held constant across a whole capture. Anything that varies row to
-/// row belongs in the cell instead, or it cannot be compared.
-struct GoldenEnvironment: Codable {
-    let windowMargin: Double
-    let scrim: Bool
-    let reducedTintOpacity: Bool
-    let adaptiveAppearance: Int
-    let overridesEnabled: Bool
-}
-
-struct GoldenMeta: Codable {
+/// Small capture-level provenance. File names and completion are structural:
+/// a finalized directory exists only after all required files validate.
+struct GoldenCaptureDocument: Codable {
     let schemaVersion: Int
     let operatingSystem: String
+    let architecture: String
+    let displaySignature: String
     let capturedAt: String
-    /// Written by the exporter, so unlike the transcoded archive this is
-    /// primary evidence rather than derived output.
-    let role: String
-    let sections: [String: Section]
+}
 
-    struct Section: Codable {
-        let file: String
-        let rows: Int
-        let repeatedCells: Int
-        let bytes: Int
-        let sha256: String
-        let swept: [String]
-        let slices: [String: Int]
-    }
+struct GoldenCaptureSummary {
+    let capture: GoldenCaptureDocument
+    let staticObservations: Int
+    let dynamicRuns: Int
 }
 #endif

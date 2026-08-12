@@ -114,6 +114,7 @@ function snapshot() {
 test("one Snapshot projects typed scalar and recursive research views", () => {
   const document = {
     schemaVersion: 2,
+    consumerCells: [],
     observations: [{ cell: { main: true, key: false }, snapshot: snapshot() }],
   };
   const scalar = projectStaticScalar(document).rows[0];
