@@ -37,6 +37,124 @@ final class TintMatrixSynthesizerTests: XCTestCase {
     }
 
     @MainActor
+    func testSelectedMajorGoldenBackedTintCertification() throws {
+        guard let rawMajor = ProcessInfo.processInfo.environment[
+            "CERTIFY_OS_MAJOR"
+        ] else {
+            throw XCTSkip(
+                "Run through certify-package.mjs to select a Golden major"
+            )
+        }
+        let major = try XCTUnwrap(Int(rawMajor))
+        XCTAssertTrue(
+            GlassMaterialTintMatrixSynthesizer.supportedOSMajorVersions
+                .contains(major),
+            "macOS \(major) is not in the synthesizer support set"
+        )
+        let directory = "Golden/macOS-\(major)"
+        let requiredModules = [
+            "tint.parameterization.sweep",
+            "tint.parameterization.focused-2b",
+            "tint.parameterization.hue-2c",
+            "tint.sync-resolution",
+            "tint.wide-gamut",
+        ]
+        let manifest = try loadManifest(directory: directory)
+        for moduleID in requiredModules {
+            XCTAssertTrue(
+                manifest.modules.contains { $0.id == moduleID },
+                "Missing required Golden module \(moduleID)"
+            )
+        }
+
+        var worst = Residual(
+            value: 0,
+            colorID: "",
+            coefficient: 0,
+            fixture: ""
+        )
+        var rowCount = 0
+        for moduleID in requiredModules.prefix(3) {
+            let document = try loadSweep(
+                moduleID: moduleID,
+                directory: directory
+            )
+            for row in document.rows {
+                let synthesized = try XCTUnwrap(
+                    GlassMaterialTintMatrixSynthesizer.matrix(
+                        for: row.sourceColor,
+                        cell: row.cell,
+                        osMajorVersion: major
+                    ),
+                    "No synthesized matrix for \(row.colorID) in \(moduleID)"
+                )
+                XCTAssertEqual(synthesized.count, row.matrix.count)
+                rowCount += 1
+                for coefficient in row.matrix.indices {
+                    let residual = abs(
+                        Double(synthesized[coefficient])
+                            - Double(row.matrix[coefficient])
+                    )
+                    if residual > worst.value {
+                        worst = Residual(
+                            value: residual,
+                            colorID: row.colorID,
+                            coefficient: coefficient,
+                            fixture: moduleID
+                        )
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(rowCount, 3_496)
+        XCTAssertLessThanOrEqual(
+            worst.value,
+            0.0002,
+            failureDescription(for: worst)
+        )
+
+        let wide = try loadWideGamutDocument(
+            moduleID: "tint.wide-gamut",
+            directory: directory
+        )
+        XCTAssertEqual(wide.rows.count, 408)
+        XCTAssertEqual(
+            wide.rows.filter { !$0.isInCertifiedDomain }.count,
+            288
+        )
+        for row in wide.rows {
+            let reference = try XCTUnwrap(row.flushMatrix)
+            let synthesized = try XCTUnwrap(
+                GlassMaterialTintMatrixSynthesizer.matrix(
+                    for: row.sourceColor,
+                    cell: row.cell,
+                    osMajorVersion: major
+                )
+            )
+            XCTAssertEqual(synthesized.count, reference.count)
+            for coefficient in reference.indices {
+                XCTAssertLessThanOrEqual(
+                    abs(
+                        Double(synthesized[coefficient])
+                            - Double(reference[coefficient])
+                    ),
+                    0.0002,
+                    "Wide-gamut residual in \(row.colorID) coefficient \(coefficient)"
+                )
+            }
+        }
+
+        let sync = try loadWideGamutDocument(
+            moduleID: "tint.sync-resolution",
+            directory: directory
+        )
+        XCTAssertEqual(
+            sync.rows.filter { $0.colorID.hasPrefix("alpha-p3-") }.count,
+            80
+        )
+    }
+
+    @MainActor
     func testMacOS27GoldenSweepsPassParameterizedMatrixGate() throws {
         var worst = Residual(
             value: 0,
@@ -838,6 +956,21 @@ final class TintMatrixSynthesizerTests: XCTestCase {
         }
 
         var modules: [Module]
+    }
+
+    private func loadManifest(directory: String) throws -> GoldenManifest {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        return try JSONDecoder().decode(
+            GoldenManifest.self,
+            from: Data(
+                contentsOf: repositoryRoot
+                    .appendingPathComponent(directory)
+                    .appendingPathComponent("manifest.json")
+            )
+        )
     }
 
     private func moduleURL(

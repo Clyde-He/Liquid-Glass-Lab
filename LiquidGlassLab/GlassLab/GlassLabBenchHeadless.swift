@@ -13,7 +13,89 @@ import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
+private struct GlassLabHeadlessArtifactEntry: Encodable {
+    let path: String
+    let bytes: Int
+    let data: Data
+}
+
+private struct GlassLabHeadlessArtifactEnvelope: Encodable {
+    let schemaVersion = 1
+    let rootKind: String
+    let entries: [GlassLabHeadlessArtifactEntry]
+}
+
 extension GlassLabView {
+    private static func streamHeadlessArtifactIfRequested(
+        at artifact: URL,
+        arguments: [String]
+    ) throws {
+        guard arguments.contains("--artifact-stdout") else { return }
+        let manager = FileManager.default
+        let keys: Set<URLResourceKey> = [
+            .isDirectoryKey,
+            .isRegularFileKey,
+            .isSymbolicLinkKey,
+        ]
+        let rootValues = try artifact.resourceValues(forKeys: keys)
+        guard rootValues.isSymbolicLink != true else {
+            throw CocoaError(.fileReadUnsupportedScheme)
+        }
+
+        let rootKind: String
+        var entries: [GlassLabHeadlessArtifactEntry] = []
+        if rootValues.isRegularFile == true {
+            let data = try Data(contentsOf: artifact)
+            rootKind = "file"
+            entries.append(.init(path: "artifact", bytes: data.count, data: data))
+        } else if rootValues.isDirectory == true {
+            rootKind = "directory"
+            func collect(directory: URL, relativeDirectory: String) throws {
+                let children = try manager.contentsOfDirectory(
+                    at: directory,
+                    includingPropertiesForKeys: Array(keys),
+                    options: []
+                ).sorted { $0.lastPathComponent < $1.lastPathComponent }
+                for child in children {
+                    let values = try child.resourceValues(forKeys: keys)
+                    guard values.isSymbolicLink != true else {
+                        throw CocoaError(.fileReadUnsupportedScheme)
+                    }
+                    let relative = relativeDirectory.isEmpty
+                        ? child.lastPathComponent
+                        : relativeDirectory + "/" + child.lastPathComponent
+                    if values.isDirectory == true {
+                        try collect(directory: child, relativeDirectory: relative)
+                    } else if values.isRegularFile == true {
+                        let data = try Data(contentsOf: child)
+                        entries.append(.init(
+                            path: relative,
+                            bytes: data.count,
+                            data: data
+                        ))
+                    } else {
+                        throw CocoaError(.fileReadUnsupportedScheme)
+                    }
+                }
+            }
+            try collect(directory: artifact, relativeDirectory: "")
+        } else {
+            throw CocoaError(.fileReadUnsupportedScheme)
+        }
+        guard !entries.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        FileHandle.standardOutput.write(try encoder.encode(
+            GlassLabHeadlessArtifactEnvelope(
+                rootKind: rootKind,
+                entries: entries
+            )
+        ))
+        FileHandle.standardError.write(Data(
+            "GLASS_LAB_ARTIFACT_TRANSPORT=stdout-json-v1\n".utf8
+        ))
+    }
+
     /// Drives the last open P1 exit criterion: a resize forces AppKit to
     /// re-resolve the Recipe and hand back a fresh tree, and the authored
     /// strength must survive that without being reverted to the system value
@@ -216,6 +298,16 @@ extension GlassLabView {
         } else {
             destination = URL(fileURLWithPath: requestedDestination)
         }
+        // A headless capture is foreground-sensitive for its entire lifetime,
+        // not just at launch. Long Tint sweeps otherwise let Terminal or the
+        // preceding raw executable reclaim activation between driver phases.
+        let activationWatchdog = Task { @MainActor in
+            while !Task.isCancelled {
+                NSApplication.shared.activate(ignoringOtherApps: true)
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        defer { activationWatchdog.cancel() }
         if tintParameterizationFlag != nil
             || tintParameterizationFocusedFlag != nil
             || tintParameterizationHueFlag != nil {
@@ -258,6 +350,10 @@ extension GlassLabView {
                         .appending("Wrote \(written.path)\n")
                         .appending("GLASS_LAB_ARTIFACT_PATH=\(written.path)\n").utf8
                 ))
+                try Self.streamHeadlessArtifactIfRequested(
+                    at: written,
+                    arguments: arguments
+                )
                 state.testWindow.tearDown()
                 exit(0)
             }
@@ -288,6 +384,10 @@ extension GlassLabView {
                             + "GLASS_LAB_ARTIFACT_PATH=\(written.path)\n"
                     ).utf8
                 ))
+                try Self.streamHeadlessArtifactIfRequested(
+                    at: written,
+                    arguments: arguments
+                )
                 state.testWindow.tearDown()
                 exit(document.passed ? 0 : 2)
             }
@@ -313,6 +413,10 @@ extension GlassLabView {
                             + "GLASS_LAB_ARTIFACT_PATH=\(written.path)\n"
                     ).utf8
                 ))
+                try Self.streamHeadlessArtifactIfRequested(
+                    at: written,
+                    arguments: arguments
+                )
                 state.testWindow.tearDown()
                 exit(document.passed ? 0 : 2)
             }
@@ -344,6 +448,10 @@ extension GlassLabView {
                     (report + "\nWrote \(destination.path)\n"
                         + "GLASS_LAB_ARTIFACT_PATH=\(destination.path)\n").utf8
                 ))
+                try Self.streamHeadlessArtifactIfRequested(
+                    at: destination,
+                    arguments: arguments
+                )
                 state.testWindow.tearDown()
                 exit(document.complete ? 0 : 2)
             }
@@ -357,6 +465,10 @@ extension GlassLabView {
                     (Self.goldenReport(meta) + "\nWrote \(destination.path)\n"
                         + "GLASS_LAB_ARTIFACT_PATH=\(destination.path)\n").utf8
                 ))
+                try Self.streamHeadlessArtifactIfRequested(
+                    at: destination,
+                    arguments: arguments
+                )
                 state.testWindow.tearDown()
                 exit(0)
             } else if resizeFlag != nil {
@@ -415,9 +527,21 @@ extension GlassLabView {
                 (report + "\nWrote \(written.path)\n"
                     + "GLASS_LAB_ARTIFACT_PATH=\(written.path)\n").utf8
             ))
+            try Self.streamHeadlessArtifactIfRequested(
+                at: written,
+                arguments: arguments
+            )
         } catch {
-            let message = (error as? LocalizedError)?.errorDescription
+            var message = (error as? LocalizedError)?.errorDescription
                 ?? error.localizedDescription
+            do {
+                try Self.streamHeadlessArtifactIfRequested(
+                    at: destination,
+                    arguments: arguments
+                )
+            } catch {
+                message += "\nArtifact handoff failed: \(error.localizedDescription)"
+            }
             FileHandle.standardError.write(Data(
                 "Headless capture failed: \(message)\n".utf8
             ))

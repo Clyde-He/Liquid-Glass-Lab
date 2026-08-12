@@ -8,6 +8,10 @@ const source = await readFile(
   "utf8"
 );
 const runnerSource = await readFile(`${goldenDirectory}/tools/capture-profile.mjs`, "utf8");
+const baselineSource = await readFile(
+  `${goldenDirectory}/tools/lib/promotion-baseline.mjs`, "utf8"
+);
+const profileSource = await readFile(`${goldenDirectory}/tools/lib/profile.mjs`, "utf8");
 
 const fullBlock = source.match(/static let full = Profile\(([\s\S]*?)\n    \)\n\n    static func full/)?.[1] ?? "";
 const driftBlock = source.match(/static let driftScan = Profile\(([\s\S]*?)\n    \)\n}/)?.[1] ?? "";
@@ -30,10 +34,18 @@ test("macOS 26 explicitly downgrades Semantic to optional", async () => {
 test("Full validates complete staging integrity before promotion", () => {
   assert.match(runnerSource, /await recreateStagingPreservingTintCheckpoints\(staging\)/);
   assert.match(runnerSource, /const TINT_CHECKPOINT_FILES = FULL\.slice\(1, 4\)/);
-  assert.match(runnerSource, /await validateStagingIntegrity\(staging\);\n  const previous/);
-  assert.match(runnerSource, /sha256 mismatch/);
-  assert.match(runnerSource, /on disk but unregistered/);
-  assert.match(runnerSource, /GLASS_LAB_ARTIFACT_PATH/);
+  assert.match(runnerSource, /const stagedAdmission = await validateStagingIntegrity\(staging\)/);
+  assert.match(runnerSource, /const acceptedBaseline = accepted \? await authenticateAcceptedBaseline\(accepted\)/);
+  assert.match(runnerSource, /await buildManifest\(staging, acceptedBaseline\)/);
+  assert.doesNotMatch(runnerSource, /readFile\(path\.join\(accepted,/);
+  assert.match(baselineSource, /validateFullDirectory\(directory, \{ expectedStatus: "accepted" \}\)/);
+  assert.match(baselineSource, /assertAdmissionMatchesInventory\(admission, inventory\)/);
+  assert.match(runnerSource, /validateFullDirectory/);
+  assert.match(profileSource, /sha256 mismatch/);
+  assert.match(profileSource, /on disk but unregistered/);
+  assert.match(runnerSource, /--artifact-stdout/);
+  assert.match(runnerSource, /importArtifactEnvelope/);
+  assert.doesNotMatch(runnerSource, /existsSync\(artifact\)/);
   assert.match(runnerSource, /--checkpoint-stdin/);
   assert.match(runnerSource, /Recovered Tint checkpoint after/);
   assert.match(source, /driver: "--capture-golden"/);

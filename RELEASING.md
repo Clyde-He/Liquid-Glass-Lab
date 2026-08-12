@@ -5,15 +5,16 @@
 ## Prepare the release
 
 1. Update `CHANGELOG.md`, moving completed entries from `Unreleased` into a dated version section.
-2. Confirm every supported macOS major has a bundled catalog and has completed its targeted on-device visual acceptance.
-3. Review the supported surface in `LiquidGlassLab/GlassMaterial/README.md`. Experimental SPI is not part of the stable product contract.
-4. Run the package tests:
+2. For every macOS major claimed as certified by the release, run `node Golden/tools/certify-package.mjs --os macOS-N --report /private/tmp/macOS-N-package-certification.json`. This is a release-time, read-only use of Golden evidence; the Package continues to bundle only `LiquidGlassLab/GlassMaterial/Catalog`.
+3. Confirm every supported macOS major has a bundled catalog and has completed its targeted on-device visual acceptance.
+4. Review the supported surface in `LiquidGlassLab/GlassMaterial/README.md`. Experimental SPI is not part of the stable product contract.
+5. Run the package tests:
 
    ```sh
    swift test
    ```
 
-5. Build the independent consumer:
+6. Build the independent consumer:
 
    ```sh
    xcodebuild \
@@ -22,8 +23,8 @@
      build
    ```
 
-6. Exercise Regular/Clear, Light/Dark, active/inactive, Tint, the supported geometry range, and both Outer Shadow policies in the Consumer Demo.
-7. Merge the release-preparation pull request and fast-forward local `main` to `origin/main`.
+7. Exercise Regular/Clear, Light/Dark, active/inactive, Tint, the supported geometry range, and both Outer Shadow policies in the Consumer Demo.
+8. Merge the release-preparation pull request and fast-forward local `main` to `origin/main`.
 
 ## Publish the release
 

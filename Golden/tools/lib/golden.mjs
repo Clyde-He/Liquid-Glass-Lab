@@ -28,9 +28,25 @@ export const SECTIONS = ["static-scalar", "static-tree", "dynamic"];
 export async function osDirectories() {
   const entries = await readdir(goldenDirectory, { withFileTypes: true });
   return entries
-    .filter((entry) => entry.isDirectory() && /^macOS-/.test(entry.name))
+    .filter((entry) => entry.isDirectory() && /^macOS-[0-9]+$/.test(entry.name))
     .map((entry) => entry.name)
-    .sort();
+    .sort((lhs, rhs) => Number(lhs.slice(6)) - Number(rhs.slice(6)));
+}
+
+/** Canonical accepted archives, with one same-major staging replacement when requested. */
+export async function acceptedArchivesReplacing(replacement = null) {
+  const archives = [];
+  for (const name of await osDirectories()) {
+    const directory = path.join(goldenDirectory, name);
+    const manifest = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8"));
+    if (manifest.status === "accepted") archives.push({ name, directory });
+  }
+  if (replacement) {
+    const index = archives.findIndex(({ name }) => name === replacement.name);
+    if (index < 0) throw new Error(`no accepted archive to replace for ${replacement.name}`);
+    archives[index] = replacement;
+  }
+  return archives;
 }
 
 export async function readManifest(osDirectory) {
@@ -66,15 +82,20 @@ export async function loadModuleDocument(directory, idOrAlias) {
  * here" rather than failing.
  */
 export async function loadUnified(osDirectory) {
-  const directory = path.join(goldenDirectory, osDirectory, "unified");
-  const manifest = await readManifest(osDirectory);
+  return loadUnifiedAt(path.join(goldenDirectory, osDirectory));
+}
+
+/** Loads unified sections from an arbitrary candidate directory. */
+export async function loadUnifiedAt(archiveDirectory) {
+  const directory = path.join(archiveDirectory, "unified");
+  const manifest = await readManifestAt(archiveDirectory);
   const sections = {};
   for (const name of SECTIONS) {
     const module = manifest.modules.find((entry) => entry.id === `core.${name}`);
     try {
       const document = normalizeUnifiedDocument(JSON.parse(
         await readFile(
-          module ? path.join(goldenDirectory, osDirectory, module.file)
+          module ? path.join(archiveDirectory, module.file)
             : path.join(directory, `${name}.json`),
           "utf8"
         )

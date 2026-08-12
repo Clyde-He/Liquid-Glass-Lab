@@ -1,171 +1,91 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
-import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { copyFile, cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { importArtifactEnvelope } from "./lib/artifact-handoff.mjs";
+import { comparisonReportIsEquivalent } from "./lib/comparison-contract.mjs";
+import { compareStableDynamicRuns } from "./lib/dynamic-equivalence.mjs";
+import { DYNAMIC_CONTRACT_VERSION } from "./lib/dynamic-contract.mjs";
 import { validateManifestV2 } from "./lib/manifest.mjs";
-import { tintDocumentGateProblems } from "./lib/tint-compare.mjs";
-
-const FULL = [
-  ["core", "--capture-golden", "unified"],
-  ["tint.parameterization.sweep", "--capture-tint-parameterization", "tint-parameterization-sweep.json"],
-  ["tint.parameterization.focused-2b", "--capture-tint-parameterization-focused", "tint-parameterization-focused-phase-2b.json"],
-  ["tint.parameterization.hue-2c", "--capture-tint-parameterization-phase-2c", "tint-parameterization-hue-phase-2c.json"],
-  ["tint.sync-resolution", "--verify-tint-sync-resolution", "tint-sync-resolution.json"],
-  ["tint.wide-gamut", "--verify-tint-wide-gamut-model", "tint-wide-gamut-model.json"],
-  ["semantic.usage-trees", "--capture-semantic-usage-trees", "semantic-usage-trees.json"],
-];
-const REQUIRED = [
-  "core.static-scalar", "core.static-tree", "core.dynamic",
-  ...FULL.slice(1).map(([id]) => id),
-];
+import { acceptedArchivesReplacing } from "./lib/golden.mjs";
+import {
+  archiveInventory, assertArchiveInventoryUnchanged,
+  assertCleanGitStateUnchanged, createSameVolumeTransaction,
+} from "./lib/bootstrap.mjs";
+import {
+  assertAcceptedBaselineUnchanged, authenticateAcceptedBaseline, copyRetainedModules,
+} from "./lib/promotion-baseline.mjs";
+import {
+  CLAIMS, FULL_DRIVERS as FULL, FULL_MODULE_IDS as REQUIRED,
+  PROFILE_DEFINITION_VERSION, payloadModule, platformFrom, profileForMajor,
+  validateFullDirectory,
+} from "./lib/profile.mjs";
+import {
+  readDispositions, releaseVerificationProblems, verifyArchiveSet,
+} from "./lib/verify-engine.mjs";
 const TINT_CHECKPOINT_FILES = FULL.slice(1, 4).map(([, , file]) => file);
 const TINT_CHECKPOINT_FLAGS = new Set(FULL.slice(1, 4).map(([, flag]) => flag));
-const CLAIMS = {
-  "core.static-scalar": ["recipe-values", "static-axis-response"],
-  "core.static-tree": ["recursive-topology", "pass-inventory", "resolved-pass-values"],
-  "core.dynamic": ["transition-curve", "dynamic-axis-response", "settled-endpoints"],
-  "tint.parameterization.sweep": ["tint-transform-family", "tint-matrix-fit"],
-  "tint.parameterization.focused-2b": ["tint-rgb-holdouts"],
-  "tint.parameterization.hue-2c": ["tint-hue-boundary"],
-  "tint.sync-resolution": ["flush-settled-tint-equivalence"],
-  "tint.wide-gamut": ["display-p3-tint-model"],
-  "semantic.usage-trees": ["semantic-role-topology"],
-  "external.window-context": ["window-context-invariance"],
-};
 const toolDirectory = path.dirname(fileURLToPath(import.meta.url));
+const args = process.argv.slice(2);
 
-function usage() {
+function usage(message) {
+  if (message) console.error(message);
   console.error("usage: capture-profile.mjs <full|drift-scan> --app APP --output DIR [--accepted DIR] [--promote]");
   process.exit(64);
 }
 function option(name) {
-  const index = process.argv.indexOf(name);
-  return index < 0 ? null : process.argv[index + 1];
+  const joined = args.find((argument) => argument.startsWith(`${name}=`));
+  if (joined) return joined.slice(name.length + 1);
+  const index = args.indexOf(name);
+  if (index < 0) return null;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) usage(`${name} requires a value`);
+  return value;
 }
 function run(app, flag, destination) {
   const handoff = `@temporary/${process.pid}-${path.basename(destination)}`;
   const checkpoint = existsSync(destination) && statSync(destination).isFile()
     ? readFileSync(destination) : undefined;
-  const args = [flag, handoff];
+  const args = [flag, handoff, "--artifact-stdout"];
   if (checkpoint) args.push("--checkpoint-stdin");
-  const result = spawnSync(app, args, { encoding: "utf8", input: checkpoint });
-  if (result.stdout) process.stdout.write(result.stdout);
+  const result = spawnSync(app, args, {
+    encoding: "utf8", input: checkpoint, maxBuffer: 128 * 1024 * 1024,
+  });
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) throw result.error;
-  const artifact = /^GLASS_LAB_ARTIFACT_PATH=(.+)$/m.exec(result.stderr ?? "")?.[1];
   if (result.status !== 0) {
-    if (TINT_CHECKPOINT_FLAGS.has(flag) && artifact && existsSync(artifact)) {
-      rmSync(destination, { recursive: true, force: true });
-      mkdirSync(path.dirname(destination), { recursive: true });
-      cpSync(artifact, destination, { force: true });
-      rmSync(artifact, { force: true });
-      process.stderr.write(`Recovered Tint checkpoint after ${flag} failure\n`);
-    }
-    throw new Error(`${flag} exited ${result.status ?? "by signal"}`);
-  }
-  if (!artifact) throw new Error(`${flag} did not report an artifact path`);
-  rmSync(destination, { recursive: true, force: true });
-  mkdirSync(path.dirname(destination), { recursive: true });
-  cpSync(artifact, destination, { recursive: true, force: true });
-  rmSync(artifact, { recursive: true, force: true });
-}
-const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
-function platformFrom(operatingSystem) {
-  const version = /Version ([0-9.]+)/.exec(operatingSystem)?.[1]
-    ?? /macOS ([0-9.]+)/.exec(operatingSystem)?.[1] ?? "unknown";
-  const build = /Build ([^)]+)/.exec(operatingSystem)?.[1] ?? "unknown";
-  return { product: "macOS", version, build, architecture: process.arch };
-}
-function stripDynamicVolatileFields(value) {
-  if (!value || typeof value !== "object") return;
-  if (Array.isArray(value)) {
-    for (const item of value) stripDynamicVolatileFields(item);
-    return;
-  }
-  delete value.inputMaxHeadroom;
-  for (const child of Object.values(value)) stripDynamicVolatileFields(child);
-}
-function normalizedDynamicRuns(runs) {
-  const problems = [];
-  const normalized = structuredClone(runs ?? []);
-  for (const [runIndex, run] of normalized.entries()) {
-    delete run.maximumAttachedAnimationDuration;
-    for (const [sampleIndex, sample] of (run.samples ?? []).entries()) {
-      delete sample.elapsed;
-      stripDynamicVolatileFields(sample);
-      if (Number.isFinite(sample.progress) && Number.isFinite(sample.requestedProgress)) {
-        const delta = Math.abs(sample.progress - sample.requestedProgress);
-        if (delta <= 0.02) sample.progress = sample.requestedProgress;
-        else problems.push(`run ${runIndex} sample ${sampleIndex}: progress delta ${delta}`);
+    let recoveryError = null;
+    if (TINT_CHECKPOINT_FLAGS.has(flag) && result.stdout?.trim()) {
+      try {
+        importArtifactEnvelope(result.stdout, destination);
+        process.stderr.write(`Recovered Tint checkpoint after ${flag} failure\n`);
+      } catch (error) {
+        recoveryError = error;
+        process.stderr.write(`Tint checkpoint recovery failed: ${error.message}\n`);
       }
     }
+    throw new Error(
+      `${flag} exited ${result.status ?? "by signal"}`
+      + (recoveryError ? `; checkpoint recovery failed: ${recoveryError.message}` : "")
+    );
   }
-  return { normalized, problems };
+  if (!result.stdout?.trim()) throw new Error(`${flag} did not hand off an artifact over stdout`);
+  importArtifactEnvelope(result.stdout, destination);
 }
-function firstDifference(lhs, rhs, path = "runs") {
-  if (Object.is(lhs, rhs)) return null;
-  if (typeof lhs !== "object" || lhs === null
-      || typeof rhs !== "object" || rhs === null) {
-    return `${path}: ${JSON.stringify(lhs)} != ${JSON.stringify(rhs)}`;
-  }
-  const lhsKeys = Object.keys(lhs);
-  const rhsKeys = Object.keys(rhs);
-  if (JSON.stringify(lhsKeys) !== JSON.stringify(rhsKeys)) {
-    return `${path}: keys ${JSON.stringify(lhsKeys)} != ${JSON.stringify(rhsKeys)}`;
-  }
-  for (const key of lhsKeys) {
-    const difference = firstDifference(lhs[key], rhs[key], `${path}.${key}`);
-    if (difference) return difference;
-  }
-  return null;
-}
-async function payloadModule(root, id, file) {
-  const bytes = await readFile(path.join(root, file));
-  const payload = JSON.parse(bytes);
-  if (id.startsWith("tint.")) {
-    const problems = tintDocumentGateProblems(payload, id);
-    if (problems.length) throw new Error(`${id} failed admission: ${problems.join("; ")}`);
-  }
-  if (id === "semantic.usage-trees") {
-    const context = payload.context ?? {};
-    const canonicalContext = context.hostType === "Panel"
-      && context.glassWidth === 480 && context.glassHeight === 200
-      && context.cornerRadius === 16 && context.windowMargin === 40;
-    const invalidEntry = !Array.isArray(payload.entries) || payload.entries.length !== 48
-      || payload.entries.some((entry) => entry.actualKey
-        || entry.actualMain !== entry.requestedMain
-        || (entry.isAvailable && entry.snapshot == null));
-    if (!canonicalContext || invalidEntry) {
-      throw new Error("semantic.usage-trees failed canonical context or completeness gates");
-    }
-  }
-  const capturedAt = payload.capturedAt ?? payload.generatedAt ?? null;
-  return {
-    id, file, payloadSchemaVersion: payload.formatVersion ?? payload.schemaVersion ?? 1,
-    planVersion: 1, platform: platformFrom(payload.operatingSystem ?? ""), capturedAt,
-    capture: { environment: payload.environment ?? payload.context ?? null, sessionID: payload.sessionID ?? null },
-    provenance: { kind: "direct-capture" }, coverageClaims: CLAIMS[id],
-    integrity: { sha256: sha256(bytes), bytes: bytes.length }, role: "canonical",
-    profileStatus: "required",
-  };
-}
-async function buildManifest(root, accepted) {
+async function buildManifest(root, acceptedBaseline) {
   const metaBytes = await readFile(path.join(root, "unified/meta.json"));
   const meta = JSON.parse(metaBytes);
   const platform = platformFrom(meta.operatingSystem ?? "");
   const osMajor = Number.parseInt(platform.version, 10);
-  const required = osMajor >= 27
-    ? REQUIRED : REQUIRED.filter((id) => id !== "semantic.usage-trees");
-  const optional = osMajor >= 27 ? [] : ["semantic.usage-trees"];
+  const { required, optional, unsupported } = profileForMajor(osMajor);
   const modules = [];
   for (const [section, entry] of Object.entries(meta.sections ?? {})) {
     modules.push({
       id: `core.${section}`, file: `unified/${entry.file}`,
-      payloadSchemaVersion: meta.schemaVersion ?? 1, planVersion: 1, platform,
+      payloadSchemaVersion: meta.schemaVersion ?? 1, planVersion: PROFILE_DEFINITION_VERSION, platform,
       capturedAt: meta.capturedAt, capture: { environment: null, sessionID: null },
       provenance: { kind: "direct-capture", payloadMetadata: "unified/meta.json" },
       coverageClaims: CLAIMS[`core.${section}`],
@@ -185,18 +105,9 @@ async function buildManifest(root, accepted) {
     if (optional.includes(id)) module.profileStatus = "optional";
     modules.push(module);
   }
-  const carriedForward = [];
-  if (accepted) {
-    const old = JSON.parse(await readFile(path.join(accepted, "manifest.json")));
-    for (const oldModule of old.modules ?? []) {
-      if (REQUIRED.includes(oldModule.id)) continue;
-      const target = path.join(root, oldModule.file);
-      await mkdir(path.dirname(target), { recursive: true });
-      await copyFile(path.join(accepted, oldModule.file), target);
-      modules.push(oldModule);
-      if (oldModule.profileStatus === "carried-forward") carriedForward.push(oldModule.id);
-    }
-  }
+  const retained = await copyRetainedModules(root, acceptedBaseline, REQUIRED);
+  modules.push(...retained.modules);
+  const carriedForward = retained.carriedForward;
   const ids = new Set(modules.map(({ id }) => id));
   const missing = required.filter((id) => !ids.has(id));
   if (missing.length) throw new Error(`incomplete Full staging: ${missing.join(", ")}`);
@@ -209,8 +120,9 @@ async function buildManifest(root, accepted) {
   const manifest = {
     protocolVersion: 2, status: "staged", platform, capturedAt: meta.capturedAt,
     modules, profiles: { full: {
-      required, optional, unsupported: [], carriedForward,
+      required, optional, unsupported, carriedForward,
       captureBuildPolicy: "single-build", builds,
+      dynamicContractVersion: DYNAMIC_CONTRACT_VERSION,
     } },
   };
   const problems = validateManifestV2(manifest);
@@ -218,47 +130,10 @@ async function buildManifest(root, accepted) {
   await writeFile(path.join(root, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 async function validateStagingIntegrity(root) {
-  const manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
-  const problems = validateManifestV2(manifest);
-  const registered = new Set(["unified/meta.json"]);
-  for (const module of manifest.modules ?? []) {
-    registered.add(module.file);
-    try {
-      const bytes = await readFile(path.join(root, module.file));
-      if (bytes.length !== module.integrity.bytes) {
-        problems.push(`${module.file}: byte count disagrees with manifest`);
-      }
-      if (sha256(bytes) !== module.integrity.sha256) {
-        problems.push(`${module.file}: sha256 mismatch`);
-      }
-      JSON.parse(bytes.toString("utf8"));
-    } catch (error) {
-      problems.push(`${module.file}: ${error instanceof SyntaxError ? "not valid JSON" : "listed but missing"}`);
-    }
-  }
-  try {
-    const meta = JSON.parse(await readFile(path.join(root, "unified/meta.json"), "utf8"));
-    for (const module of (manifest.modules ?? []).filter(({ id }) => id.startsWith("core."))) {
-      const entry = meta.sections?.[module.id.slice("core.".length)];
-      if (!entry || entry.file !== path.basename(module.file)
-          || entry.sha256 !== module.integrity.sha256
-          || entry.bytes !== module.integrity.bytes) {
-        problems.push(`${module.file}: unified metadata disagrees with manifest`);
-      }
-    }
-  } catch {
-    problems.push("unified/meta.json: missing or not valid JSON");
-  }
-  async function scan(relative = "") {
-    for (const entry of await readdir(path.join(root, relative), { withFileTypes: true })) {
-      const file = path.join(relative, entry.name);
-      if (entry.isDirectory()) await scan(file);
-      else if (entry.name.endsWith(".json") && file !== "manifest.json"
-          && !registered.has(file)) problems.push(`${file}: on disk but unregistered`);
-    }
-  }
-  await scan();
+  const checked = await validateFullDirectory(root, { expectedStatus: "staged" });
+  const { problems } = checked;
   if (problems.length) throw new Error(`invalid Full staging: ${problems.join("; ")}`);
+  return checked;
 }
 async function recreateStagingPreservingTintCheckpoints(staging) {
   const resume = `${staging}.resume-${process.pid}`;
@@ -284,13 +159,24 @@ async function recreateStagingPreservingTintCheckpoints(staging) {
   }
   await rm(resume, { recursive: true, force: true });
 }
-async function promote(staging, accepted) {
-  if (!accepted) throw new Error("--promote requires --accepted");
-  await validateStagingIntegrity(staging);
-  const previous = JSON.parse(await readFile(path.join(accepted, "manifest.json")));
+async function promote(staging, acceptedBaseline) {
+  if (!acceptedBaseline) throw new Error("--promote requires --accepted");
+  await assertAcceptedBaselineUnchanged(acceptedBaseline);
+  const accepted = acceptedBaseline.directory;
+  const acceptedInventory = acceptedBaseline.inventory;
+  const acceptedAdmission = acceptedBaseline.admission;
+  const startingGit = acceptedBaseline.git;
+  const stagedInventory = await archiveInventory(staging);
+  const stagedAdmission = await validateStagingIntegrity(staging);
+  await assertArchiveInventoryUnchanged(staging, stagedInventory, "Full staging");
+  const staged = stagedAdmission.manifest;
+  const osDirectory = `macOS-${Number.parseInt(staged.platform.version, 10)}`;
+  if (acceptedBaseline.name !== osDirectory) {
+    throw new Error("promotion target product, OS major, or architecture does not match staging");
+  }
+  await assertArchiveInventoryUnchanged(accepted, acceptedInventory, "accepted Full baseline");
+  const previous = acceptedAdmission.manifest;
   const previousRequired = previous.profiles?.full?.required ?? [];
-  const stagedPath = path.join(staging, "manifest.json");
-  const staged = JSON.parse(await readFile(stagedPath));
   const samePlatform = previous.platform?.product === staged.platform?.product
     && Number.parseInt(previous.platform?.version, 10)
       === Number.parseInt(staged.platform?.version, 10)
@@ -319,59 +205,59 @@ async function promote(staging, accepted) {
       const report = JSON.parse(result.stdout);
       comparisons.push({ id, slice, summary: report.summary });
       const summary = report.summary;
-      if ([
-        "missingRows", "addedRows", "missingPasses", "addedPasses",
-        "missingFields", "addedFields", "changedValues",
-        "topologyChangedRows", "valueChangedRows",
-      ].some((field) => (summary[field] ?? 0) !== 0)) equivalent = false;
+      if (!comparisonReportIsEquivalent(report)) equivalent = false;
     }
   }
-  const oldDynamicFile = previous.modules.find(({ id }) => id === "core.dynamic")?.file;
-  const newDynamicFile = staged.modules.find(({ id }) => id === "core.dynamic")?.file;
-  const oldDynamic = JSON.parse(await readFile(path.join(accepted, oldDynamicFile)));
-  const newDynamic = JSON.parse(await readFile(path.join(staging, newDynamicFile)));
-  const oldNormalized = normalizedDynamicRuns(oldDynamic.runs);
-  const newNormalized = normalizedDynamicRuns(newDynamic.runs);
-  const dynamicProblems = [...oldNormalized.problems, ...newNormalized.problems];
-  const durationDeltas = (oldDynamic.runs ?? []).map((run, index) => {
-    const baseline = run.maximumAttachedAnimationDuration;
-    const candidate = newDynamic.runs?.[index]?.maximumAttachedAnimationDuration;
-    if (!Number.isFinite(baseline) || !Number.isFinite(candidate)) {
-      dynamicProblems.push(
-        `run ${index}: maximumAttachedAnimationDuration must be finite on both sides`
-      );
-      return Number.POSITIVE_INFINITY;
-    }
-    return Math.abs(baseline - candidate);
+  const oldDynamic = acceptedAdmission.documents.get("core.dynamic");
+  const newDynamic = stagedAdmission.documents.get("core.dynamic");
+  const dynamicComparison = compareStableDynamicRuns(oldDynamic.runs, newDynamic.runs, {
+    requireBaselinePairing:
+      previous.profiles?.full?.captureBuildPolicy !== "historical-mixed",
   });
-  if (durationDeltas.some((delta) => delta > 0.05)) {
-    dynamicProblems.push(`maximum animation duration delta ${Math.max(...durationDeltas)}`);
-  }
-  const payloadDifference = firstDifference(
-    oldNormalized.normalized,
-    newNormalized.normalized
-  );
-  if (payloadDifference) dynamicProblems.push(payloadDifference);
-  const dynamicEquivalent = dynamicProblems.length === 0;
-  if (!dynamicEquivalent) equivalent = false;
-  comparisons.push({
-    id: "core.dynamic", equivalent: dynamicEquivalent,
-    baselineRuns: oldDynamic.runs?.length ?? null,
-    candidateRuns: newDynamic.runs?.length ?? null,
-    maximumAnimationDurationDelta: Math.max(0, ...durationDeltas),
-    problems: dynamicProblems,
-  });
+  if (!dynamicComparison.equivalent) equivalent = false;
+  comparisons.push({ id: "core.dynamic", ...dynamicComparison });
   await writeFile(`${staging}.equivalence.json`, `${JSON.stringify({ equivalent, comparisons }, null, 2)}\n`);
   if (!equivalent && !process.argv.includes("--accept-drift")) {
     throw new Error(`Full value equivalence failed; inspect ${staging}.equivalence.json and rerun with --accept-drift after approval`);
   }
-  staged.status = "accepted";
-  await writeFile(stagedPath, `${JSON.stringify(staged, null, 2)}\n`);
-  const result = spawnSync("xcrun", [
-    "swift", path.join(toolDirectory, "atomic-promote.swift"), staging, accepted,
-  ], { stdio: "inherit" });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`atomic promotion exited ${result.status}`);
+  const archives = await acceptedArchivesReplacing({ name: osDirectory, directory: staging });
+  const verification = await verifyArchiveSet({
+    archives,
+    includeCrossVersion: archives.length > 1,
+    dispositions: await readDispositions(),
+  });
+  const verificationProblems = releaseVerificationProblems(verification);
+  if (verificationProblems.length) {
+    throw new Error(`promotion verification failed: ${verificationProblems.join("; ")}`);
+  }
+  const { transactionRoot, transaction } = await createSameVolumeTransaction(
+    accepted, `${osDirectory}-promotion`
+  );
+  try {
+    await cp(staging, transaction, { recursive: true, force: false, errorOnExist: true });
+    const acceptedManifestPath = path.join(transaction, "manifest.json");
+    const acceptedManifest = JSON.parse(await readFile(acceptedManifestPath));
+    acceptedManifest.status = "accepted";
+    await writeFile(acceptedManifestPath, `${JSON.stringify(acceptedManifest, null, 2)}\n`);
+    const checked = await validateFullDirectory(transaction, { expectedStatus: "accepted" });
+    if (checked.problems.length) {
+      throw new Error(`accepted promotion transaction invalid: ${checked.problems.join("; ")}`);
+    }
+    const transactionInventory = await archiveInventory(transaction);
+    await assertArchiveInventoryUnchanged(accepted, acceptedInventory, "accepted Full baseline");
+    await assertArchiveInventoryUnchanged(staging, stagedInventory, "Full staging");
+    await assertArchiveInventoryUnchanged(
+      transaction, transactionInventory, "accepted promotion transaction"
+    );
+    assertCleanGitStateUnchanged(startingGit);
+    const result = spawnSync("xcrun", [
+      "swift", path.join(toolDirectory, "atomic-promote.swift"), transaction, accepted,
+    ], { stdio: "inherit" });
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error(`atomic promotion exited ${result.status}`);
+  } finally {
+    await rm(transactionRoot, { recursive: true, force: true });
+  }
 }
 
 const profile = process.argv[2];
@@ -397,6 +283,7 @@ if (profile === "drift-scan") {
   await rename(staging, output);
   console.error(`Drift Scan complete (noncanonical): ${output}`);
 } else {
+  const acceptedBaseline = accepted ? await authenticateAcceptedBaseline(accepted) : null;
   const staging = `${output}.full-staging`;
   await recreateStagingPreservingTintCheckpoints(staging);
   const [, coreFlag, coreRelative] = FULL[0];
@@ -408,8 +295,8 @@ if (profile === "drift-scan") {
     // that a module passed its current completeness gates.
     run(app, flag, destination);
   }
-  await buildManifest(staging, accepted);
+  await buildManifest(staging, acceptedBaseline);
   await validateStagingIntegrity(staging);
-  if (process.argv.includes("--promote")) await promote(staging, accepted);
+  if (process.argv.includes("--promote")) await promote(staging, acceptedBaseline);
   else console.error(`Full capture staged, validated, and not promoted: ${staging}`);
 }

@@ -281,6 +281,8 @@ function compareTintStructurally(
     }
   }
   return {
+    equivalent: missingRows.length === 0 && addedRows.length === 0
+      && invalid.length === 0 && classificationChanges.length === 0,
     summary: {
       fixture: comparisonLabel, tintMode: "structural",
       baseline: baselineDirectory, candidate: candidateDirectory,
@@ -721,7 +723,17 @@ function comparePassAuditsSemantically(
     rawValueChangedRows: valueChangedRows,
   };
 
+  const equivalent = [
+    missingRows.length, addedRows.length,
+    missingPasses, addedPasses,
+    missingProperties, addedProperties,
+    passObjectClassChanges, passOwnerClassChanges,
+    missingFields, addedFields, changedValues,
+    topologyChangedRows,
+  ].every((count) => count === 0);
+
   return {
+    equivalent,
     summary,
     missingRowIdentities: missingRows.slice(0, differenceLimit),
     addedRowIdentities: addedRows.slice(0, differenceLimit),
@@ -925,6 +937,10 @@ const summary = {
 };
 
 console.log(JSON.stringify({
+  equivalent: [
+    missingRows.length, addedRows.length, missingFields, addedFields, changedValues,
+    ...(isPassAudit ? [topologyChangedRows] : []),
+  ].every((count) => count === 0),
   summary,
   missingRowIdentities: missingRows.slice(0, differenceLimit),
   addedRowIdentities: addedRows.slice(0, differenceLimit),

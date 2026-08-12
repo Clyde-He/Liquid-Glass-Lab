@@ -92,6 +92,61 @@ node Golden/tools/verify.mjs --os macOS-27   # one directory
 node Golden/tools/verify.mjs --verbose       # show each assertion
 ```
 
+## Three capture and release workflows
+
+Use the smallest workflow that answers the question. They share one versioned Full profile and one admission implementation, so “quick” and “complete” no longer mean different definitions of valid evidence.
+
+### 1. New-system quick validation
+
+`drift-scan` captures only the Style Atlas and Tint sync probes. It is intentionally noncanonical and cannot be promoted or used to certify the Package:
+
+```sh
+node Golden/tools/capture-profile.mjs drift-scan \
+  --app /path/to/LiquidGlassLab.app/Contents/MacOS/LiquidGlassLab \
+  --output /private/tmp/glass-drift-macOS-28
+```
+
+Use this immediately after installing a new macOS build to decide whether a Full capture is warranted. Compare or inspect the two reports, but do not file this directory under `Golden/macOS-N`.
+
+Every driver keeps the capture app active for its full run and returns its file or directory as one bounded stdout artifact envelope (90 MiB decoded maximum). The Node runner reconstructs that artifact in staging, so it never needs privacy access to the sandbox container; retained Tint checkpoints travel back to the app over stdin.
+
+### 2. Complete canonical capture
+
+`full` is the Golden superset: Core static scalar/tree/dynamic, every registered Tint study, and the Semantic usage tree required by the per-major profile. It writes and validates `<output>.full-staging` without touching accepted data:
+
+```sh
+node Golden/tools/capture-profile.mjs full \
+  --app /path/to/LiquidGlassLab.app/Contents/MacOS/LiquidGlassLab \
+  --output /private/tmp/macOS-28
+```
+
+For a brand-new major, create a review report against the latest lower accepted major, then accept the exact reviewed bytes:
+
+```sh
+node Golden/tools/bootstrap-new-major.mjs \
+  --candidate /private/tmp/macOS-28.full-staging \
+  --report /private/tmp/macOS-28-bootstrap-review.json
+
+node Golden/tools/bootstrap-new-major.mjs \
+  --candidate /private/tmp/macOS-28.full-staging \
+  --report /private/tmp/macOS-28-bootstrap-review.json \
+  --accept
+```
+
+Preview is the default. The report must live outside the repository and binds the manifest and complete file inventory, shared profile version, comparisons, Dynamic coverage, verifier outcomes, git revision, and clean worktree state including untracked files. Acceptance regenerates comparison evidence and structured verification from a same-filesystem transaction outside the worktree before creating `Golden/macOS-N` through a no-replace atomic rename, and preserves the original staging directory. If no lower accepted baseline exists, an explicit `--waive-baseline "reason"` is required. Refreshing an already accepted major continues to use `capture-profile.mjs full --accepted Golden/macOS-N --promote`; promotion substitutes staging into the complete accepted archive set and reruns both per-version and cross-version learnings before replacement. Bootstrap never replaces an existing major.
+
+### 3. Package certification against Golden
+
+The Package does not load, call, or bundle `Golden` at runtime. Release engineering calls the read-only certifier, which uses the selected accepted Golden as test evidence:
+
+```sh
+node Golden/tools/certify-package.mjs \
+  --os macOS-27 \
+  --report /private/tmp/macOS-27-package-certification.json
+```
+
+Certification requires a clean tree with no tracked or untracked changes, an accepted exact Full profile, structured Golden verification with no undispositioned skip or stale reviewed disposition, the exact per-major Catalog contract, Swift decoding/topology tests, a selected-major Golden-backed Tint synthesis test, and the full Swift Package test suite. SwiftPM builds in an isolated temporary scratch directory, and `swift package dump-package` must show `Catalog` as the only product resource; `Golden` remains repository-only research evidence.
+
 ### Two kinds of learning
 
 A **per-version** learning answers "does this hold on this OS". A **cross-version** learning (`kind: "cross-version"`) receives every loaded archive at once and answers a different question: *what changed, and does `LiquidGlassLab/GlassMaterial` still hold*. Those are the ones that turn a version bump into a work list. The current set checks that both versions address the same cells, that the topology determinants and variant classes survived, that no channel the strength curve classifies has vanished, and that the size formulas kept their shape where their constants moved.
@@ -104,7 +159,9 @@ A learning may report only three outcomes, and **a claim nothing checked must ne
 - **skip, section missing** — this OS has not captured what the learning reads;
 - **skip, unverifiable** — the section exists but the axis the claim needs was never swept. The learning calls `expect.unverifiable(reason)` and the reason says what capture would settle it.
 
-The third outcome exists because the earlier suite used an `ok(true, "not present here")` escape hatch, and two learnings sat green for weeks having verified nothing. Both are now honest skips, and both name the fix: sweep a second corner radius, and add one transposed size pair so two rows share a short side at different width and height.
+Committed exceptions live in `verification-dispositions.json` and bind an exact OS directory or cross-version pair, learning ID, and reason. The ordinary verifier still reports them as skips; bootstrap, same-major promotion, and Package certification reject every unmatched skip and every reviewed disposition that has become stale for the selected verification scope.
+
+The third outcome exists because the earlier suite used an `ok(true, "not present here")` escape hatch, allowing a claim to sit green while verifying nothing. The two current macOS 26 skips are explicitly dispositioned because that OS has no gated blur endpoint and therefore no tap-only hump; macOS 27 supplies those observations and runs both claims normally.
 
 Learnings assert **structure, not per-version values**. `inputInnerRefractionAmount` is proportional-below-a-cap on both macOS 26 and 27, but the ratio differs (-0.8·S versus -0.5·S), so the learning asserts the shape and reports the values. A learning that hard-codes a measured constant will fail on the next OS for no useful reason. The same rule kills universal ratios: 0.35·S bleed and 0.4·S shadow height belong to the Variant 1 family, not to the material system — Variant 9 resolves 0.071·S outer refraction and Variants 4, 5, and 11 are capped.
 
