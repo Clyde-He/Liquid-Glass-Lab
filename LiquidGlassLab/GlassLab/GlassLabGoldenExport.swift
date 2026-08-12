@@ -2,7 +2,7 @@
 //  GlassLabGoldenExport.swift
 //  LiquidGlassLab
 //
-//  Drives the capture plan and writes the unified Golden archive.
+//  Drives the canonical Static Snapshot and Dynamic capture plan.
 //
 //  One command produces every section, because the sections have to agree on
 //  their environment to be comparable. Capturing them separately is how the
@@ -55,7 +55,7 @@ extension GlassLabView {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Capture"
-        panel.message = "Choose the OS directory to write unified/ into."
+        panel.message = "Choose a directory for the Static and Dynamic capture."
         guard panel.runModal() == .OK, let base = panel.url else { return }
 
         isCapturingMatrix = true
@@ -114,36 +114,6 @@ extension GlassLabView {
             )
         }
         return lines.joined(separator: "\n")
-    }
-
-    static func goldenRegistryReport() -> String {
-        func report(_ profile: GlassLabGoldenCaptureRegistry.Profile) -> [String] {
-            var lines = [
-                "== \(profile.id) ==",
-                "Canonical: \(profile.canonical ? "yes" : "no")",
-                "Promotable: \(profile.promotable ? "yes" : "no")",
-            ]
-            for module in profile.modules {
-                lines.append(
-                    "  \(module.availability.rawValue)  \(module.id)"
-                    + "  driver=\(module.driver ?? "missing")"
-                    + "  resume=\(module.resumeScope)"
-                )
-            }
-            let problems = profile.validationProblems()
-            lines.append(
-                problems.isEmpty ? "Registry: valid" : "Registry: \(problems.joined(separator: "; "))"
-            )
-            return lines
-        }
-        return (
-            report(GlassLabGoldenCaptureRegistry.full(
-                forOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
-            ))
-                + [""]
-                + report(GlassLabGoldenCaptureRegistry.driftScan)
-        )
-            .joined(separator: "\n")
     }
 
     static func goldenReport(_ summary: GoldenCaptureSummary) -> String {

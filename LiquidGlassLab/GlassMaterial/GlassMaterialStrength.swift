@@ -1408,9 +1408,9 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
 
     /// Gives an internal Lab harness sole ownership of `materialStrength`.
     ///
-    /// The Style Atlas verifier installs the atlas it just captured directly;
+    /// The Style Atlas verifier installs the bundled Catalog directly;
     /// leaving the product controller attached would let its bundled catalog
-    /// replace that reference atlas on the next configuration change. This is
+    /// replace that Catalog on the next configuration change. This is
     /// intentionally internal so product consumers retain the single managed
     /// controller path.
     func useExternallyManagedMaterialStrength() {

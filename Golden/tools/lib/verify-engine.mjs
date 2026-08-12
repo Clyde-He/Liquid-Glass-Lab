@@ -1,7 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import {
-  LearningFailure, Unverifiable, goldenDirectory, loadUnifiedAt, makeExpect,
+  LearningFailure, Unverifiable, goldenDirectory, loadLearningSections, makeExpect,
 } from "./golden.mjs";
 import { ARCHIVE_FILES, admitArchive } from "./archive.mjs";
 
@@ -132,7 +132,10 @@ export async function verifyArchiveSet({ archives, includeCrossVersion = false, 
   for (const archive of archives) {
     const result = await checkIntegrity(archive.name, archive.directory);
     integrity.push(result);
-    if (result.archive) loaded.set(archive.name, await loadUnifiedAt(archive.directory));
+    if (result.archive) loaded.set(
+      archive.name,
+      await loadLearningSections(archive.directory)
+    );
   }
 
   const learnings = await loadLearnings();

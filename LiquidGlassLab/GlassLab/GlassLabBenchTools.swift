@@ -41,15 +41,12 @@ extension GlassLabView {
                     Button(
                         isCapturingMatrix
                             ? "Capturing…"
-                            : "Capture Core Golden Modules (Atomic)"
+                            : "Capture Golden Snapshot"
                     ) {
                         exportGoldenArchive()
                     }
                     .disabled(isCapturingMatrix)
-                    Button("Show Full / Drift Registry") {
-                        state.reportOutput = Self.goldenRegistryReport()
-                    }
-                    Text("The core driver stages static-scalar, static-tree, dynamic, and meta, validates completeness, then atomically replaces unified/. It is one driver inside Full Golden, not the whole Full profile: Full also requires Tint and Semantic modules. Drift Scan is explicitly noncanonical and cannot be promoted.")
+                    Text("Captures the canonical typed Static Snapshots and Dynamic traces. The `golden capture` command combines this artifact with Tint and Semantic evidence into one staging archive.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }

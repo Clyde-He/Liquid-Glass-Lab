@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   analyzeTintParameterization,
 } from "./analyze-tint-parameterization.mjs";
-import { goldenDirectory, loadModuleDocument } from "./lib/golden.mjs";
+import { goldenDirectory, loadEvidenceDocument } from "./lib/golden.mjs";
 
 const LUMA = [0.2126, 0.7152, 0.0722];
 
@@ -147,7 +147,7 @@ test("macOS 27 Golden sweeps pass the complete parameterized matrix gate", async
   let rowCount = 0;
   let maximumResidual = 0;
   for (const moduleID of fixtures) {
-    const { document } = await loadModuleDocument(
+    const { document } = await loadEvidenceDocument(
       `${goldenDirectory}/macOS-27`, moduleID
     );
     const result = analyzeTintParameterization(document);

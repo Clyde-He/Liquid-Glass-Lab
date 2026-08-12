@@ -5,24 +5,20 @@
 // whole body of knowledge on a new OS becomes one command instead of a manual
 // reread.
 //
-// Learnings read the unified archive under `<os>/unified/`, whose three
-// sections all address rows by the same cell coordinate (see cell.mjs). A
-// learning declares the sections it needs and, if it is a `cross-version` one,
-// receives every OS at once.
+// Learnings keep their scalar/tree section vocabulary, but those sections are
+// now read-time projections of the one typed static.json Snapshot store.
 
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CELL_FIELDS, axisValues, sweptAxes } from "./cell.mjs";
-import { ARCHIVE_FILES, acceptedArchives } from "./archive.mjs";
+import { ARCHIVE_FILES } from "./archive.mjs";
 import { projectStaticScalar, projectStaticTree } from "./snapshot-projections.mjs";
 
 // .../Golden/tools/lib/golden.mjs -> .../Golden
 export const goldenDirectory = path.dirname(
   path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 );
-
-export const SECTIONS = ["static-scalar", "static-tree", "dynamic"];
 
 /** OS directories present in the archive, e.g. ["macOS-26", "macOS-27"]. */
 export async function osDirectories() {
@@ -33,20 +29,7 @@ export async function osDirectories() {
     .sort((lhs, rhs) => Number(lhs.slice(6)) - Number(rhs.slice(6)));
 }
 
-/** Canonical accepted archives, with one same-major staging replacement when requested. */
-export async function acceptedArchivesReplacing(replacement = null) {
-  const archives = await acceptedArchives(goldenDirectory);
-  if (replacement) {
-    const index = archives.findIndex(({ name }) => name === replacement.name);
-    if (index < 0) archives.push({
-      ...replacement, major: Number(replacement.name.slice("macOS-".length)),
-    });
-    else archives[index] = { ...archives[index], ...replacement };
-  }
-  return archives.sort((left, right) => left.major - right.major);
-}
-
-const MODULE_FILES = {
+const EVIDENCE_FILES = {
   "core.dynamic": ARCHIVE_FILES.dynamic,
   "tint.parameterization.sweep": ARCHIVE_FILES.tintSweep,
   "tint.parameterization.focused-2b": ARCHIVE_FILES.tintFocused,
@@ -56,63 +39,50 @@ const MODULE_FILES = {
   "semantic.usage-trees": ARCHIVE_FILES.semantic,
 };
 
-export async function loadModuleDocument(directory, idOrAlias) {
+export async function loadEvidenceDocument(directory, idOrAlias) {
   if (["core.static-scalar", "static-scalar", "core.static-tree", "static-tree"].includes(idOrAlias)) {
     const file = path.join(directory, ARCHIVE_FILES.static);
     const source = JSON.parse(await readFile(file, "utf8"));
     const tree = idOrAlias.includes("tree");
     return {
-      module: { id: tree ? "core.static-tree" : "core.static-scalar", file: ARCHIVE_FILES.static },
       file,
       document: tree ? projectStaticTree(source) : projectStaticScalar(source),
     };
   }
   const canonical = idOrAlias === "dynamic" ? "core.dynamic" : idOrAlias;
-  const relative = MODULE_FILES[canonical];
+  const relative = EVIDENCE_FILES[canonical];
   if (!relative) throw new Error(`Unknown Golden evidence document: ${idOrAlias}`);
   const file = path.join(directory, relative);
   return {
-    module: { id: canonical, file: relative }, file,
+    file,
     document: JSON.parse(await readFile(file, "utf8")),
   };
 }
 
-/**
- * Loads the unified sections of one OS directory. A section this OS has not
- * captured resolves to null, which is how a learning reports "not applicable
- * here" rather than failing.
- */
-export async function loadUnified(osDirectory) {
-  return loadUnifiedAt(path.join(goldenDirectory, osDirectory));
-}
-
-/** Loads unified sections from an arbitrary candidate directory. */
-export async function loadUnifiedAt(archiveDirectory) {
+/** Materializes the projection sections consumed by existing learnings. */
+export async function loadLearningSections(archiveDirectory) {
   const staticDocument = JSON.parse(
     await readFile(path.join(archiveDirectory, "static.json"), "utf8")
   );
   let dynamic = null;
   try {
-    dynamic = normalizeUnifiedDocument(JSON.parse(
+    dynamic = normalizeLearningDocument(JSON.parse(
       await readFile(path.join(archiveDirectory, "dynamic.json"), "utf8")
     ));
   } catch {
-    // Dynamic remains an honest optional domain for a deliberately partial
-    // archive; learnings report its absence as unverifiable.
+    // Learnings report an absent domain as unverifiable.
   }
   return {
-    "static-scalar": normalizeUnifiedDocument(projectStaticScalar(staticDocument)),
-    "static-tree": normalizeUnifiedDocument(projectStaticTree(staticDocument)),
+    "static-scalar": normalizeLearningDocument(projectStaticScalar(staticDocument)),
+    "static-tree": normalizeLearningDocument(projectStaticTree(staticDocument)),
     dynamic,
   };
 }
 
 /**
- * Direct captures do not duplicate their cell axes into every section. Derive
- * them at read time from the authoritative rows while retaining any declared
- * values written by the historical unifier.
+ * Projections do not duplicate their cell axes. Derive them from rows.
  */
-export function normalizeUnifiedDocument(document) {
+export function normalizeLearningDocument(document) {
   const rows = document?.rows ?? document?.runs ?? [];
   const cells = rows.map((row) => row.cell ?? {});
   const derivedValues = Object.fromEntries(

@@ -1,19 +1,32 @@
 # Releasing AdjustableGlass
 
-`AdjustableGlass` uses Semantic Versioning tags. The Swift Package manifest does not contain a version number; SwiftPM resolves versions from Git tags.
+`AdjustableGlass` uses Semantic Versioning tags. SwiftPM resolves versions from Git tags; `Package.swift` has no version field.
 
 ## Prepare the release
 
 1. Update `CHANGELOG.md`, moving completed entries from `Unreleased` into a dated version section.
-2. For every macOS major claimed as certified by the release, run `node Golden/tools/certify-package.mjs --os macOS-N --report /private/tmp/macOS-N-package-certification.json`. This is a release-time, read-only use of Golden evidence; the Package continues to bundle only `LiquidGlassLab/GlassMaterial/Catalog`.
-3. Confirm every supported macOS major has a bundled catalog and has completed its targeted on-device visual acceptance.
-4. Review the supported surface in `LiquidGlassLab/GlassMaterial/README.md`. Experimental SPI is not part of the stable product contract.
-5. Run the package tests:
+2. Verify every accepted Golden and all cross-version learnings:
 
    ```sh
-   swift test
+   node Golden/tools/verify.mjs
    ```
 
+3. Require the committed Catalog for each certified major to be the deterministic Golden projection:
+
+   ```sh
+   node Golden/tools/golden.mjs catalog --os macOS-26 --check
+   node Golden/tools/golden.mjs catalog --os macOS-27 --check
+   ```
+
+4. Run the Node and Swift suites, including the selected-major Golden-backed Tint checks:
+
+   ```sh
+   node --test Golden/tools/*.test.mjs
+   CERTIFY_OS_MAJOR=26 swift test
+   CERTIFY_OS_MAJOR=27 swift test
+   ```
+
+5. Confirm `swift package dump-package` exposes `Catalog` as the only processed product resource. Golden must remain repository-only.
 6. Build the independent consumer:
 
    ```sh
@@ -23,8 +36,9 @@
      build
    ```
 
-7. Exercise Regular/Clear, Light/Dark, active/inactive, Tint, the supported geometry range, and both Outer Shadow policies in the Consumer Demo.
-8. Merge the release-preparation pull request and fast-forward local `main` to `origin/main`.
+7. Exercise Regular/Clear, Light/Dark, active/inactive, Tint, the supported geometry range, and both Outer Shadow policies in the Consumer Demo. Confirm the bundled Provider serves at least one value known to come from the current generated Catalog.
+8. Inspect the final diff and ensure the repository is clean after committing. Any later change requires rerunning the relevant checks.
+9. Merge the release-preparation pull request and fast-forward local `main` to `origin/main`.
 
 ## Publish the release
 
@@ -35,10 +49,10 @@ git tag -a 0.1.0 -m 'AdjustableGlass 0.1.0'
 git push origin 0.1.0
 ```
 
-Create a GitHub Release from that tag and use the matching `CHANGELOG.md` section as its notes. Do not move or reuse a published version tag; release a new patch version for corrections.
+Create a GitHub Release from that tag using the matching `CHANGELOG.md` section. Never move or reuse a published tag; issue a new patch release for corrections.
 
 ## Version policy before 1.0
 
-- Patch: fixes and catalog corrections that preserve the supported API.
-- Minor: supported API additions, new certified macOS majors, or an explicitly documented breaking change.
-- Major: the long-term public API and private-runtime compatibility policy are stable enough for a `1.0.0` contract.
+- Patch: fixes and Catalog corrections that preserve the supported API.
+- Minor: supported API additions, new certified macOS majors, or explicitly documented breaking changes.
+- Major: the public API and private-runtime compatibility policy are stable enough for a `1.0.0` contract.

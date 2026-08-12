@@ -63,7 +63,7 @@ Complete: true
 SHA-256: 16ff4af8dd05a7a975462e2d4806d817201adfe915e23ea408960895534a3120
 ```
 
-This fixture is registered in `Golden/macOS-27/manifest.json`.
+This is the accepted `tint-parameterization-sweep.json` evidence document.
 
 ### Focused Phase 2b
 
@@ -77,7 +77,7 @@ Complete: true
 SHA-256: 37904f0b6911450c8c1876abaf00cf81a9b874c3c5bfbd03a7a2573e66f4bb92
 ```
 
-This fixture is registered in `Golden/macOS-27/manifest.json`.
+This is the accepted `tint-parameterization-focused-phase-2b.json` evidence document.
 
 ### Hue-Fraction Phase 2c
 
@@ -91,7 +91,7 @@ Complete: true
 SHA-256: 880668e22e1450cc3368a1cac4f169295488aae40b76303fb76ab9dba4fc1d15
 ```
 
-This fixture is registered in `Golden/macOS-27/manifest.json`.
+This is the accepted `tint-parameterization-hue-phase-2c.json` evidence document.
 
 Across the three datasets there are 437 source colors and 3,496 captured rows. Every document is complete. The analyzer reports zero structurally unclassified rows and all capture hard gates pass.
 
@@ -410,11 +410,10 @@ b416481 fix: retain unclassified tint matrices
 da43524 feat: add tint parameterization sweep
 ```
 
-The publication commit `8cce87f` contains only the handoff, the verified Phase 2c fixture, and its manifest registration. The earlier research commits contain the capture/analyzer implementation and the registered Full Grid and Phase 2b fixtures.
+The publication commit `8cce87f` contains only the handoff and verified Phase 2c evidence. The earlier research commits contain the capture/analyzer implementation and the Full Grid and Phase 2b evidence.
 
 ```text
 Documentation/TintParameterizationHandoff.md
-Golden/macOS-27/manifest.json
 Golden/macOS-27/tint-parameterization-hue-phase-2c.json
 ```
 

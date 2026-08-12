@@ -185,7 +185,7 @@ clamp          (0.34g + 0.036g²) / 0.376    Clear's inputClamp
 
 ## What is verified
 
-Measured on **macOS 26.6 (25G5065a)** and **macOS 27.0 (26A5388g)** for public **Regular and Clear** in a panel, served by one table with no version branch. Each accepted direct archive contains 104 runs / 936 samples across appearance, backdrop, participation, tint, both directions, and `shortSide` 48/200/400. Fixtures and analysis live in `Golden/macOS-26/unified/`, `Golden/macOS-27/unified/`, and the P1.1 section of [Glass Research Roadmap](../../Documentation/GlassResearchRoadmap.md).
+Measured on **macOS 26** and **macOS 27** for public **Regular and Clear** in a panel, served by one table with no version branch. Each accepted direct archive contains 104 runs / 936 samples across appearance, backdrop, participation, tint, both directions, and `shortSide` 48/200/400. Evidence lives in `Golden/macOS-26/`, `Golden/macOS-27/`, and the P1.1 section of [Glass Research Roadmap](../../Documentation/GlassResearchRoadmap.md).
 
 The executable learnings currently pass 33/33 on macOS 26. At the 200pt reference size the single-endpoint curve replays the measured continuous channels; across 48/200/400 every remaining channel stays inside the documented geometry bound. A resize/rebuild test confirms the authored strength survives AppKit replacing the whole subtree.
 

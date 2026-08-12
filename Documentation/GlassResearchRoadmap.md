@@ -187,13 +187,13 @@ The implementation must:
 
 ### P0.6 — Targeted geometry replay
 
-The former plan to replay Height 24 and 600 across the full recursive Cartesian product was superseded when the standalone Recipe Matrix and Recursive Pass Audit fixtures were retired. Use the surviving evidence before proposing a new capture axis:
+The former plan to replay Height 24 and 600 across the full recursive Cartesian product was superseded when the separate Recipe Matrix and Recursive Pass Audit producers were retired. Use the Snapshot projections before proposing a new capture axis:
 
-- use the direct Core static-tree module for full fixed-geometry recursive-product coverage and its 21-cell repeat sentinel;
-- use the direct Core static-scalar size slice for Variants 1 and 2;
-- use retained `formula-analysis.json` for dense size behavior and the retained display-context control for runtime-sensitive resolved values.
+- use the recursive projection of `static.json` for full fixed-geometry product coverage;
+- use the scalar projection of its size coordinates for Variants 1 and 2;
+- treat build/display provenance as an explicit confound when interpreting runtime-sensitive resolved values.
 
-The old all-variant Height 24/600 claim is intentionally retired. Add a new registered module or expand the recursive product only if the surviving evidence identifies a concrete uncovered topology or property family; record the new claim and admission gate before capture.
+The old all-variant Height 24/600 claim is intentionally retired. Expand the typed Swift condition list only when a concrete claim needs a new coordinate.
 
 ### P0 exit criteria
 

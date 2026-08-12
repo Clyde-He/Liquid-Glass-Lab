@@ -382,9 +382,9 @@ The former Recursive Pass Audit was the structural complement to the compact Rec
 
 For every cell, the audit traverses ordinary sublayers plus mask-owned layer trees. Stable paths key layer and pass dictionaries so an inserted pass appears as one added structural record instead of shifting every later array index. It records direct `filters`, `backgroundFilters`, `compositingFilter`, and any object-backed `effect`. CAFilter `inputKeys` and effect `CA_attributes` are captured as capabilities; every property is independently marked `value`, `nil`, or `unreadable`, with metadata and stable color/value descriptions.
 
-Each snapshot carried SHA-256 topology and resolved-value signatures. The standalone canonical files are retired; their product coverage now belongs to `core.static-tree`. The separate display-context control remains registered because its contrast claim is absent from the direct capture.
+The old exporter stored topology and value signatures beside its string-valued tree. The current Golden stores one complete typed Snapshot and derives scalar, recursive, signature, and Consumer views at read time. Display/build identity remains visible as capture provenance so cross-version value changes are not overstated as OS-only causality.
 
-Accepted OS baselines, their build manifests, and the semantic comparison tool live in [`Golden`](../Golden/README.md).
+Accepted OS baselines and the semantic comparison tool live in [`Golden`](../Golden/README.md).
 
 ## Range and control policy
 

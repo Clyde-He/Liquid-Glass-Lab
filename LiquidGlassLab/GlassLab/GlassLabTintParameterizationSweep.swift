@@ -1004,7 +1004,6 @@ extension GlassLabView {
                         isCapturingTintParameterization
                             || isCapturingTintStudy
                             || isCapturingTintRenderedAB
-                            || isCapturingAtlas
                             || isRunningAtlasReadback
                     )
                     Button("Capture / Resume Focused Phase 2b…") {
@@ -1016,7 +1015,6 @@ extension GlassLabView {
                         isCapturingTintParameterization
                             || isCapturingTintStudy
                             || isCapturingTintRenderedAB
-                            || isCapturingAtlas
                             || isRunningAtlasReadback
                     )
                 }
@@ -1030,7 +1028,6 @@ extension GlassLabView {
                         isCapturingTintParameterization
                             || isCapturingTintStudy
                             || isCapturingTintRenderedAB
-                            || isCapturingAtlas
                             || isRunningAtlasReadback
                     )
                     if isCapturingTintParameterization {
@@ -1075,7 +1072,6 @@ extension GlassLabView {
         guard !isCapturingTintParameterization,
               !isCapturingTintStudy,
               !isCapturingTintRenderedAB,
-              !isCapturingAtlas,
               !isRunningAtlasReadback else {
             return
         }

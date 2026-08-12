@@ -88,7 +88,7 @@ Suggestive (not established): in HSB terms the standard dark endpoint looks hue-
 ## Data provenance (all existing evidence)
 
 - **salmon endpoints, all 8 cells**: the pre-strip PR #3 catalog — `git show a2499e3:LiquidGlassLab/GlassMaterial/Catalog/glass-macos-27.json`, `tintMatrices` (source (1.0, 0.45, 0.35, α 0.6), flat `[cellKey, entries]` pairs). Stripped from the shipped catalog on purpose; the history copy is the data.
-- **coral endpoints, cross-version**: `Golden/macOS-26/unified/dynamic.json` and `Golden/macOS-27/unified/dynamic.json` — rows with `tint == "Coral · 50%"` (48 per version) carry resolved `ColorMatrix4x5` strings; parse with the regex in `Golden/tools/analyze-tint-study.mjs`. Rank-1 check: divide each RGB row by Rec.709 weights, require ratio spread < 1e-2, endpoints are `(k+bias, bias)`.
+- **coral endpoints, cross-version**: `Golden/macOS-26/dynamic.json` and `Golden/macOS-27/dynamic.json` — rows with `tint == "Coral · 50%"` (48 per version) carry resolved `ColorMatrix4x5` strings; parse with the regex in `Golden/tools/analyze-tint-study.mjs`. Rank-1 check: divide each RGB row by Rec.709 weights, require ratio spread < 1e-2, endpoints are `(k+bias, bias)`.
 - **multi-alpha / Cyan presets**: `GlassLabTintPreset` in `LiquidGlassLab/GlassLab/GlassLabTintStudy.swift` (Coral 25/50/100%, Cyan 50%, Reduced variants). The historical `glass-tint-study.json` exports were never checked in and are lost — **persist every new dataset under `Golden/`** so this does not happen again.
 
 ## The study

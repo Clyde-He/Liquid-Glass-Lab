@@ -422,7 +422,6 @@ extension GlassLabView {
                     isCapturingTintRenderedAB
                         || isCapturingTintParameterization
                         || isCapturingTintStudy
-                        || isCapturingAtlas
                         || isRunningAtlasReadback
                 )
                 if isCapturingTintRenderedAB {
@@ -450,7 +449,6 @@ extension GlassLabView {
         guard !isCapturingTintRenderedAB,
               !isCapturingTintParameterization,
               !isCapturingTintStudy,
-              !isCapturingAtlas,
               !isRunningAtlasReadback else {
             return
         }

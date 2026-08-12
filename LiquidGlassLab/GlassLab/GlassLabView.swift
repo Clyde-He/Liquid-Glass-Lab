@@ -136,8 +136,6 @@ struct GlassLabView: View {
     @State var hasPendingSchemaRefresh = false
     @State var atlasDocument: GlassMaterialStyleAtlas?
     @State var atlasStatus: String?
-    @State var atlasCaptureTask: Task<Void, Never>?
-    @State var isCapturingAtlas = false
     @State var atlasReadbackReport: String?
     @State var atlasReadbackTask: Task<Void, Never>?
     @State var isRunningAtlasReadback = false
@@ -264,7 +262,6 @@ struct GlassLabView: View {
             tintStudyTask?.cancel()
             tintParameterizationTask?.cancel()
             tintRenderedABTask?.cancel()
-            atlasCaptureTask?.cancel()
             atlasReadbackTask?.cancel()
             tintLockTask?.cancel()
             hudPanelController?.tearDown()

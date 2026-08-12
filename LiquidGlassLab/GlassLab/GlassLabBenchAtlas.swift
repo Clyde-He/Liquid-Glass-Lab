@@ -2,17 +2,12 @@
 //  GlassLabBenchAtlas.swift
 //  LiquidGlassLab
 //
-//  Bench: style-atlas capture and frozen-baseline acceptance. Orchestrates
-//  the probe sweep that fills a GlassMaterialStyleAtlas (appearance × variant
-//  × participation cells at bracketed short sides), persists it, drives the
-//  frozen HUD acceptance panel, and quantifies the size-interpolation error
-//  against live resolutions at unsampled sizes.
+//  Bench: runtime Provider, frozen HUD acceptance, and Catalog readback.
 //
 
 #if os(macOS)
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 extension GlassLabView {
     enum AtlasBenchError: LocalizedError {
@@ -30,7 +25,7 @@ extension GlassLabView {
             case let .captureFailed(context):
                 "The probe settled but the style capture failed at \(context)."
             case .atlasMissing:
-                "No style atlas is loaded. Capture or load one first."
+                "No style atlas is loaded. Load the Provider or bundled Catalog first."
             }
         }
     }
@@ -61,12 +56,10 @@ extension GlassLabView {
                     Button("Capture In-Window (Provider)") {
                         startAtlasProvider()
                     }
-                    .disabled(isCapturingAtlas)
                     if atlasProvider != nil {
                         Button("Recalibrate") {
                             atlasProvider?.recalibrate()
                         }
-                        .disabled(isCapturingAtlas)
                     }
                     if let providerStatus {
                         Text(providerStatus)
@@ -81,26 +74,10 @@ extension GlassLabView {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
-                    Button(
-                        isCapturingAtlas
-                            ? "Capturing…" : "Capture Probe Sweep (reference)"
-                    ) {
-                        captureStyleAtlas()
-                    }
-                    .disabled(isCapturingAtlas || isRunningAtlasReadback)
-                    if isCapturingAtlas {
-                        Button("Cancel") { atlasCaptureTask?.cancel() }
-                    }
                     Button("Load Provider") { loadSavedProviderAtlas() }
-                        .disabled(isCapturingAtlas)
-                    Button("Load Reference") { loadSavedReferenceAtlas() }
-                        .disabled(isCapturingAtlas)
-                    Button("Export Major Catalog") {
-                        exportMajorCatalog()
-                    }
-                    .disabled(isCapturingAtlas || atlasDocument == nil)
+                    Button("Load Bundled Catalog") { loadBundledCatalog() }
                 }
-                Text("The reference sweep separately drives the visible test window through appearance × Regular/Clear × Main On/Off at short sides \(Self.atlasProbeShortSides.map { String(Int($0)) }.joined(separator: "/")) — \(8 * Self.atlasProbeShortSides.count) samples. Provider and reference artifacts are deliberately isolated so one can never mask or overwrite the other.")
+                Text("Golden is the only release-evidence producer. This page loads the runtime Provider cache or the Catalog deterministically generated from accepted Golden; it never captures or exports release evidence.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -243,7 +220,7 @@ extension GlassLabView {
                     ) {
                         runAtlasInterpolationReadback()
                     }
-                    .disabled(isRunningAtlasReadback || isCapturingAtlas || atlasDocument == nil)
+                    .disabled(isRunningAtlasReadback || atlasDocument == nil)
                     if isRunningAtlasReadback {
                         Button("Cancel") { atlasReadbackTask?.cancel() }
                     }
@@ -274,8 +251,7 @@ extension GlassLabView {
         guard let atlas = atlasDocument else {
             return "No atlas in memory.\nProvider: "
                 + ((try? Self.providerAtlasStorageURL().path) ?? "unavailable")
-                + "\nReference: "
-                + ((try? Self.referenceAtlasStorageURL().path) ?? "unavailable")
+                + "\nBundled Catalog: glass-macos-<major>.json"
         }
         var lines: [String] = []
         if let environment = atlas.environment {
@@ -580,67 +556,17 @@ extension GlassLabView {
         )
     }
 
-    static func referenceAtlasStorageURL() throws -> URL {
-        try atlasStorageDirectoryURL().appendingPathComponent(
-            "glass-reference-sweep-v2.json"
-        )
-    }
-
-    func exportMajorCatalog() {
-        guard let atlas = atlasDocument,
-              atlas.hasVerifiedMainOnPayload(),
-              let major = atlas.environment?.resolvedOSMajorVersion
-        else {
-            atlasStatus = "Catalog export requires a verified paired atlas."
-            return
-        }
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "glass-macos-\(major).json"
-        guard panel.runModal() == .OK, let destinationURL = panel.url else {
-            return
-        }
-        do {
-            var catalog = atlas
-            catalog.removeAllTintMatrices()
-            catalog.environment?.osMajorVersion = major
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.sortedKeys]
-            try encoder.encode(catalog).write(
-                to: destinationURL,
-                options: .atomic
-            )
-            atlasStatus = "Exported macOS \(major) catalog to "
-                + destinationURL.path
-        } catch {
-            atlasStatus = "Catalog export failed: \(error.localizedDescription)"
-        }
-    }
-
-    private func saveAtlasToDisk(_ atlas: GlassMaterialStyleAtlas) throws -> URL {
-        guard atlas.hasVerifiedMainOnPayload() else {
-            throw AtlasBenchError.captureFailed(
-                "paired Main-On participation proof"
-            )
-        }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let url = try Self.referenceAtlasStorageURL()
-        try encoder.encode(atlas).write(to: url, options: .atomic)
-        return url
-    }
-
-    static func loadAtlasFromDisk() throws -> GlassMaterialStyleAtlas {
-        let data = try Data(contentsOf: referenceAtlasStorageURL())
-        return try JSONDecoder().decode(GlassMaterialStyleAtlas.self, from: data)
-    }
-
     func loadSavedProviderAtlas() {
         loadSavedAtlas(at: try? Self.providerAtlasStorageURL())
     }
 
-    func loadSavedReferenceAtlas() {
-        loadSavedAtlas(at: try? Self.referenceAtlasStorageURL())
+    func loadBundledCatalog() {
+        let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        loadSavedAtlas(
+            at: GlassMaterialAtlasCatalog.bundledAtlasURL(
+                forMacOSMajor: major
+            )
+        )
     }
 
     private func loadSavedAtlas(at url: URL?) {
@@ -756,110 +682,6 @@ extension GlassLabView {
         case .ready: "ready — paired Normal/Muted coverage complete"
         case let .failed(reason): "failed: \(reason)"
         }
-    }
-
-    // MARK: - Atlas capture
-
-    func captureStyleAtlas() {
-        // Mutually exclusive with the interpolation readback: both drive the
-        // same renderer, appearance, variant, and geometry state between
-        // their sleeps, so running them together would let each label
-        // samples under the other's context.
-        guard !isCapturingAtlas, !isRunningAtlasReadback else { return }
-        guard !state.hasActiveOverrides else {
-            atlasStatus = AtlasBenchError.overridesActive.errorDescription
-            return
-        }
-
-        liveRefreshTask?.cancel()
-        isCapturingAtlas = true
-        atlasStatus = "Preparing atlas capture…"
-
-        let restore = snapshotProbeContext()
-
-        atlasCaptureTask = Task { @MainActor in
-            let activity = ProcessInfo.processInfo.beginActivity(
-                options: [
-                    .userInitiated,
-                    .idleSystemSleepDisabled,
-                    .idleDisplaySleepDisabled,
-                ],
-                reason: "Capturing Liquid Glass style atlas"
-            )
-            defer {
-                ProcessInfo.processInfo.endActivity(activity)
-                restoreProbeContext(restore)
-                state.testWindow.sync(with: state)
-                isCapturingAtlas = false
-                atlasCaptureTask = nil
-                scheduleLiveReadoutRefresh(refreshSchema: true)
-            }
-
-            do {
-                let atlas = try await captureStyleAtlasDocument()
-                atlasDocument = atlas
-                let url = try saveAtlasToDisk(atlas)
-                atlasStatus = "Captured "
-                    + "\(8 * Self.atlasProbeShortSides.count) samples · "
-                    + "saved to \(url.path)"
-                hudPanelController?.setAtlas(atlas)
-            } catch is CancellationError {
-                atlasStatus = "Atlas capture cancelled; partial data discarded."
-            } catch {
-                let message = (error as? LocalizedError)?.errorDescription
-                    ?? error.localizedDescription
-                atlasStatus = "Atlas capture failed: \(message)"
-            }
-        }
-    }
-
-    /// The full probe sweep: appearance × variant × participation at every
-    /// probe short side, environment-stamped. The caller owns context
-    /// save/restore; this only drives the sweep.
-    func captureStyleAtlasDocument() async throws -> GlassMaterialStyleAtlas {
-        configureAtlasProbeContext()
-        var atlas = GlassMaterialStyleAtlas()
-        let shortSides = Self.atlasProbeShortSides
-        let total = 8 * shortSides.count
-        var index = 0
-
-        for requestedMain in [false, true] {
-            for isLight in [true, false] {
-                for isClear in [false, true] {
-                    let cell = GlassMaterialStyleAtlas.Cell(
-                        isLightAppearance: isLight,
-                        isClear: isClear,
-                        hasMainParticipation: requestedMain
-                    )
-                    state.testAppearance = isLight ? .light : .dark
-                    state.variant = isClear ? 2 : 1
-                    state.isTestWindowMain = requestedMain
-                    for shortSide in shortSides {
-                        index += 1
-                        atlasStatus = "Capturing \(index)/\(total) · "
-                            + Self.cellLabel(cell)
-                            + " · \(Int(shortSide))pt"
-                        state.glassHeight = shortSide
-                        let sample = try await captureAtlasSample(
-                            requestedMain: requestedMain,
-                            context: Self.cellLabel(cell)
-                                + " @ \(Int(shortSide))pt"
-                        )
-                        atlas.add(sample, for: cell)
-                    }
-                }
-            }
-        }
-
-        atlas.environment = .current(
-            for: state.testWindow.liveWindow?.screen
-        )
-        guard atlas.hasVerifiedMainOnPayload() else {
-            throw AtlasBenchError.captureFailed(
-                "paired Main-On participation proof"
-            )
-        }
-        return atlas
     }
 
     /// One settled sample from the probe glass under the current lab state.
@@ -1012,7 +834,7 @@ extension GlassLabView {
     // MARK: - Interpolation readback
 
     func runAtlasInterpolationReadback() {
-        guard !isRunningAtlasReadback, !isCapturingAtlas else { return }
+        guard !isRunningAtlasReadback else { return }
         guard let atlas = atlasDocument else {
             atlasStatus = AtlasBenchError.atlasMissing.errorDescription
             return
@@ -1281,25 +1103,20 @@ extension GlassLabView {
             ))
         }
 
-        // Reuse a compatible saved atlas so iterating on the acceptance
-        // half does not pay for a fresh 56-sample sweep every run; delete
-        // the saved file to force a clean capture.
-        let atlas: GlassMaterialStyleAtlas
-        if let saved = try? Self.loadAtlasFromDisk(),
-           saved.environment?.isCompatible(
-            with: .current(for: state.testWindow.liveWindow?.screen)
-           ) == true,
-           saved.hasVerifiedMainOnPayload() {
-            atlas = saved
-            step("atlas-source", true, "reused saved atlas")
-        } else {
-            FileHandle.standardError.write(Data(
-                "no compatible saved atlas — running the full probe sweep (minutes, needs the app active)\n".utf8
-            ))
-            atlas = try await captureStyleAtlasDocument()
-            _ = try? saveAtlasToDisk(atlas)
-            step("atlas-source", true, "fresh capture")
+        let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        guard let catalogURL = GlassMaterialAtlasCatalog.bundledAtlasURL(
+            forMacOSMajor: major
+        ) else {
+            throw AtlasBenchError.atlasMissing
         }
+        let atlas = try JSONDecoder().decode(
+            GlassMaterialStyleAtlas.self,
+            from: Data(contentsOf: catalogURL)
+        )
+        guard atlas.hasVerifiedMainOnPayload() else {
+            throw AtlasBenchError.captureFailed("bundled Catalog topology")
+        }
+        step("atlas-source", true, "bundled Catalog for macOS \(major)")
 
         let data = try JSONEncoder().encode(atlas)
         let decoded = try JSONDecoder().decode(
@@ -1356,7 +1173,7 @@ extension GlassLabView {
 
         let hud = GlassLabHUDPanelController()
         defer { hud.tearDown() }
-        // This smoke test verifies the raw Style Atlas captured above. The
+        // This smoke test verifies the bundled Catalog loaded above. The
         // interactive HUD deliberately starts with the product's contained
         // no-outer-shadow experiment, whose margin and shadow inputs are
         // transformed after atlas lookup. Make the headless contract explicit
@@ -1392,25 +1209,25 @@ extension GlassLabView {
         try await Task.sleep(for: .milliseconds(1000))
 
         step("freeze-installed", hud.lastFreezeSucceeded, "freeze(atlas:)")
-        let installedAtlasMatchesReference: Bool
+        let installedAtlasMatchesCatalog: Bool
         if let installed = hud.glassView?.materialStrength.frozenAtlas {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             if let installedData = try? encoder.encode(installed),
                let referenceData = try? encoder.encode(decoded) {
-                installedAtlasMatchesReference = installedData == referenceData
+                installedAtlasMatchesCatalog = installedData == referenceData
             } else {
-                installedAtlasMatchesReference = false
+                installedAtlasMatchesCatalog = false
             }
         } else {
-            installedAtlasMatchesReference = false
+            installedAtlasMatchesCatalog = false
         }
         step(
             "verification-atlas-owner",
-            installedAtlasMatchesReference,
-            installedAtlasMatchesReference
-                ? "reference atlas remains the sole installed source"
-                : "another controller replaced the reference atlas"
+            installedAtlasMatchesCatalog,
+            installedAtlasMatchesCatalog
+                ? "bundled Catalog remains the sole installed source"
+                : "another controller replaced the bundled Catalog"
         )
         step(
             "never-key-or-main",

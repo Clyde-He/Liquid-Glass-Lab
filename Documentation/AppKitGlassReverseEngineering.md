@@ -276,7 +276,7 @@ An immediate repeat in the same display session reproduced every row, signature,
 - `DLCAFilter` `glassBackground.inputKeyFillHighlightEffectOffset` changed in 268 rows;
 - `DLCAFilter` `glassBackground.inputKeyFillHighlightHeight` changed in 212 rows.
 
-Typical transitions were `maximum: 2 → 1.5`, highlight offset `-1 → -0.5` or `-2 → -1`, and highlight height `1 → 0.5`. This establishes display/runtime sensitivity for those resolved values; it does not establish which display metric drives them. The former canonical audit and full same-context repeat have been retired; the retained display-context control preserves the transition provenance, while the direct Core static-tree module owns the recursive product and a narrower 21-cell repeat sentinel.
+Typical transitions were `maximum: 2 → 1.5`, highlight offset `-1 → -0.5` or `-2 → -1`, and highlight height `1 → 0.5`. This establishes display/runtime sensitivity for those resolved values; it does not establish which display metric drives them. Current Snapshot captures record display provenance and compute topology/value comparisons directly; the old control fixture and second-sweep sentinel are no longer active evidence.
 
 The macOS 26 and macOS 27 documents use different whole-tree wrappers, so raw structural paths cannot be treated as semantic identities across releases. Matching by Recipe axes and normalized pass family gives this preliminary inventory result:
 
