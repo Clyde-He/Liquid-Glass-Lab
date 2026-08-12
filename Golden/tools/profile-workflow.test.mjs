@@ -5,10 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  archiveInventory, assertCleanGitState, assertReportStillCurrent,
+  archiveInventory, assertArchiveInventoryUnchanged, assertCleanGitState,
+  assertCleanGitStateUnchanged, assertReportStillCurrent,
   assertReviewedComparisonEvidence, BOOTSTRAP_GATE_NAMES,
   bootstrapComparisonEvidence, createSameVolumeTransaction, gitState, inventoryDigest, pathsOverlap,
-  resolveBootstrapContext, resolveExternalOutputPath,
+  resolveBootstrapContext, resolveCanonicalAcceptedDirectory, resolveExternalOutputPath,
 } from "./lib/bootstrap.mjs";
 import { importArtifactEnvelope, MAX_ARTIFACT_BYTES } from "./lib/artifact-handoff.mjs";
 import { catalogDocumentProblems, packageResourceProblems } from "./lib/catalog-certification.mjs";
@@ -84,7 +85,9 @@ test("release git state rejects both tracked changes and untracked files", async
     assert.equal(git("add", "tracked.txt").status, 0);
     assert.equal(git("-c", "user.name=Golden Test", "-c", "user.email=golden@example.invalid",
       "commit", "-m", "fixture").status, 0);
-    assert.equal(assertCleanGitState(gitState(root)).clean, true);
+    const reviewedGit = assertCleanGitState(gitState(root));
+    assert.equal(reviewedGit.clean, true);
+    assert.equal(assertCleanGitStateUnchanged(reviewedGit, gitState(root)).clean, true);
 
     await mkdir(path.join(root, "Golden"));
     const transactionState = await createSameVolumeTransaction(
@@ -103,12 +106,66 @@ test("release git state rejects both tracked changes and untracked files", async
     const untracked = gitState(root);
     assert.equal(untracked.clean, false);
     assert.throws(() => assertCleanGitState(untracked), /no tracked or untracked changes/);
+    assert.throws(
+      () => assertCleanGitStateUnchanged(reviewedGit, untracked),
+      /no tracked or untracked changes/
+    );
 
     await rm(path.join(root, "untracked.txt"));
     await writeFile(path.join(root, "tracked.txt"), "changed\n");
     const tracked = gitState(root);
     assert.equal(tracked.clean, false);
     assert.throws(() => assertCleanGitState(tracked), /clean tree/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("same-major promotion authenticates and binds its accepted baseline", async () => {
+  const root = await realpath(await mkdtemp(
+    path.join(os.tmpdir(), "golden-promotion-baseline-test-")
+  ));
+  const repository = path.join(root, "repo");
+  const canonicalRoot = path.join(repository, "Golden");
+  const canonical = path.join(canonicalRoot, "macOS-27");
+  try {
+    await mkdir(canonicalRoot, { recursive: true });
+    await cp(path.join(goldenDirectory, "macOS-27"), canonical, { recursive: true });
+    assert.equal(await resolveCanonicalAcceptedDirectory(canonical, "macOS-27", {
+      canonicalRoot, base: repository,
+    }), canonical);
+
+    const noncanonical = path.join(repository, "fixtures/macOS-27");
+    await mkdir(noncanonical, { recursive: true });
+    await assert.rejects(
+      resolveCanonicalAcceptedDirectory(noncanonical, "macOS-27", {
+        canonicalRoot, base: repository,
+      }),
+      /must be the canonical/
+    );
+
+    const symlinkTarget = path.join(root, "symlink-target");
+    await mkdir(symlinkTarget);
+    await symlink(symlinkTarget, path.join(canonicalRoot, "macOS-99"));
+    await assert.rejects(
+      resolveCanonicalAcceptedDirectory(path.join(canonicalRoot, "macOS-99"), "macOS-99", {
+        canonicalRoot, base: repository,
+      }),
+      /not a symlink/
+    );
+
+    const admitted = await validateFullDirectory(canonical, { expectedStatus: "accepted" });
+    assert.deepEqual(admitted.problems, []);
+    const reviewed = await archiveInventory(canonical);
+    const payloadPath = path.join(canonical, "unified/dynamic.json");
+    const payload = await readFile(payloadPath);
+    await writeFile(payloadPath, Buffer.concat([payload, Buffer.from("\n")]));
+    const stale = await validateFullDirectory(canonical, { expectedStatus: "accepted" });
+    assert.match(stale.problems.join("; "), /byte count disagrees|sha256 mismatch/);
+    await assert.rejects(
+      assertArchiveInventoryUnchanged(canonical, reviewed, "accepted Full baseline"),
+      /accepted Full baseline bytes changed/
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -577,6 +634,10 @@ test("atomic new-major install uses the Darwin no-replace primitive", async () =
   assert.match(capture, /acceptedArchivesReplacing/);
   assert.match(capture, /includeCrossVersion: archives\.length > 1/);
   assert.match(capture, /createSameVolumeTransaction/);
+  assert.match(capture, /resolveCanonicalAcceptedDirectory/);
+  assert.match(capture, /validateFullDirectory\(accepted, \{ expectedStatus: "accepted" \}\)/);
+  assert.match(capture, /assertArchiveInventoryUnchanged\(accepted, acceptedInventory/);
+  assert.match(capture, /assertCleanGitStateUnchanged\(startingGit\)/);
   assert.doesNotMatch(capture, /writeFile\(stagedPath/);
   assert.match(certifier, /--scratch-path/);
   assert.match(certifier, /executedExpectedTest/);

@@ -11,7 +11,11 @@ import { compareStableDynamicRuns } from "./lib/dynamic-equivalence.mjs";
 import { DYNAMIC_CONTRACT_VERSION } from "./lib/dynamic-contract.mjs";
 import { validateManifestV2 } from "./lib/manifest.mjs";
 import { acceptedArchivesReplacing } from "./lib/golden.mjs";
-import { createSameVolumeTransaction } from "./lib/bootstrap.mjs";
+import {
+  archiveInventory, assertArchiveInventoryUnchanged, assertCleanGitState,
+  assertCleanGitStateUnchanged, createSameVolumeTransaction,
+  resolveCanonicalAcceptedDirectory,
+} from "./lib/bootstrap.mjs";
 import {
   CLAIMS, FULL_DRIVERS as FULL, FULL_MODULE_IDS as REQUIRED,
   PROFILE_DEFINITION_VERSION, payloadModule, platformFrom, profileForMajor,
@@ -133,8 +137,10 @@ async function buildManifest(root, accepted) {
   await writeFile(path.join(root, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 async function validateStagingIntegrity(root) {
-  const { problems } = await validateFullDirectory(root, { expectedStatus: "staged" });
+  const checked = await validateFullDirectory(root, { expectedStatus: "staged" });
+  const { problems } = checked;
   if (problems.length) throw new Error(`invalid Full staging: ${problems.join("; ")}`);
+  return checked;
 }
 async function recreateStagingPreservingTintCheckpoints(staging) {
   const resume = `${staging}.resume-${process.pid}`;
@@ -162,11 +168,21 @@ async function recreateStagingPreservingTintCheckpoints(staging) {
 }
 async function promote(staging, accepted) {
   if (!accepted) throw new Error("--promote requires --accepted");
-  await validateStagingIntegrity(staging);
-  const previous = JSON.parse(await readFile(path.join(accepted, "manifest.json")));
+  const startingGit = assertCleanGitState();
+  const stagedInventory = await archiveInventory(staging);
+  const stagedAdmission = await validateStagingIntegrity(staging);
+  await assertArchiveInventoryUnchanged(staging, stagedInventory, "Full staging");
+  const staged = stagedAdmission.manifest;
+  const osDirectory = `macOS-${Number.parseInt(staged.platform.version, 10)}`;
+  accepted = await resolveCanonicalAcceptedDirectory(accepted, osDirectory);
+  const acceptedInventory = await archiveInventory(accepted);
+  const acceptedAdmission = await validateFullDirectory(accepted, { expectedStatus: "accepted" });
+  if (acceptedAdmission.problems.length) {
+    throw new Error(`invalid accepted Full baseline: ${acceptedAdmission.problems.join("; ")}`);
+  }
+  await assertArchiveInventoryUnchanged(accepted, acceptedInventory, "accepted Full baseline");
+  const previous = acceptedAdmission.manifest;
   const previousRequired = previous.profiles?.full?.required ?? [];
-  const stagedPath = path.join(staging, "manifest.json");
-  const staged = JSON.parse(await readFile(stagedPath));
   const samePlatform = previous.platform?.product === staged.platform?.product
     && Number.parseInt(previous.platform?.version, 10)
       === Number.parseInt(staged.platform?.version, 10)
@@ -198,10 +214,8 @@ async function promote(staging, accepted) {
       if (!comparisonReportIsEquivalent(report)) equivalent = false;
     }
   }
-  const oldDynamicFile = previous.modules.find(({ id }) => id === "core.dynamic")?.file;
-  const newDynamicFile = staged.modules.find(({ id }) => id === "core.dynamic")?.file;
-  const oldDynamic = JSON.parse(await readFile(path.join(accepted, oldDynamicFile)));
-  const newDynamic = JSON.parse(await readFile(path.join(staging, newDynamicFile)));
+  const oldDynamic = acceptedAdmission.documents.get("core.dynamic");
+  const newDynamic = stagedAdmission.documents.get("core.dynamic");
   const dynamicComparison = compareStableDynamicRuns(oldDynamic.runs, newDynamic.runs, {
     requireBaselinePairing:
       previous.profiles?.full?.captureBuildPolicy !== "historical-mixed",
@@ -212,7 +226,6 @@ async function promote(staging, accepted) {
   if (!equivalent && !process.argv.includes("--accept-drift")) {
     throw new Error(`Full value equivalence failed; inspect ${staging}.equivalence.json and rerun with --accept-drift after approval`);
   }
-  const osDirectory = `macOS-${Number.parseInt(staged.platform.version, 10)}`;
   const archives = await acceptedArchivesReplacing({ name: osDirectory, directory: staging });
   const verification = await verifyArchiveSet({
     archives,
@@ -236,6 +249,13 @@ async function promote(staging, accepted) {
     if (checked.problems.length) {
       throw new Error(`accepted promotion transaction invalid: ${checked.problems.join("; ")}`);
     }
+    const transactionInventory = await archiveInventory(transaction);
+    await assertArchiveInventoryUnchanged(accepted, acceptedInventory, "accepted Full baseline");
+    await assertArchiveInventoryUnchanged(staging, stagedInventory, "Full staging");
+    await assertArchiveInventoryUnchanged(
+      transaction, transactionInventory, "accepted promotion transaction"
+    );
+    assertCleanGitStateUnchanged(startingGit);
     const result = spawnSync("xcrun", [
       "swift", path.join(toolDirectory, "atomic-promote.swift"), transaction, accepted,
     ], { stdio: "inherit" });

@@ -44,6 +44,29 @@ export async function resolveExternalOutputPath(input, { worktree = repositoryRo
   return destination;
 }
 
+export async function resolveCanonicalAcceptedDirectory(input, name, {
+  canonicalRoot = goldenDirectory,
+  base = repositoryRoot,
+} = {}) {
+  const candidate = path.resolve(base, input);
+  const expected = path.resolve(canonicalRoot, name);
+  if (candidate !== expected) {
+    throw new Error(`--accepted must be the canonical Golden/${name} directory`);
+  }
+  const info = await lstat(candidate);
+  if (info.isSymbolicLink() || !info.isDirectory()) {
+    throw new Error("--accepted must be a real canonical directory, not a symlink");
+  }
+  const [resolvedCandidate, resolvedRoot] = await Promise.all([
+    realpath(candidate), realpath(canonicalRoot),
+  ]);
+  if (resolvedCandidate !== candidate
+      || resolvedCandidate !== path.join(resolvedRoot, name)) {
+    throw new Error("--accepted path must not traverse symlinked ancestors");
+  }
+  return resolvedCandidate;
+}
+
 export async function createSameVolumeTransaction(target, label, {
   worktree = repositoryRoot,
 } = {}) {
@@ -84,6 +107,14 @@ export async function archiveInventory(root) {
   }
   await scan();
   return files;
+}
+
+export async function assertArchiveInventoryUnchanged(root, reviewed, label = "archive") {
+  const current = await archiveInventory(root);
+  if (JSON.stringify(current) !== JSON.stringify(reviewed)) {
+    throw new Error(`${label} bytes changed after admission`);
+  }
+  return current;
 }
 
 export function inventoryDigest(files) {
@@ -130,6 +161,14 @@ export function assertCleanGitState(state = gitState()) {
     throw new Error("release workflow requires a clean tree with no tracked or untracked changes");
   }
   return state;
+}
+
+export function assertCleanGitStateUnchanged(reviewed, current = gitState()) {
+  const checked = assertCleanGitState(current);
+  if (JSON.stringify(checked) !== JSON.stringify(reviewed)) {
+    throw new Error("release Git revision or clean worktree state changed during validation");
+  }
+  return checked;
 }
 
 async function acceptedDirectories() {

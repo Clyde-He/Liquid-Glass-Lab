@@ -31,7 +31,11 @@ test("macOS 26 explicitly downgrades Semantic to optional", async () => {
 test("Full validates complete staging integrity before promotion", () => {
   assert.match(runnerSource, /await recreateStagingPreservingTintCheckpoints\(staging\)/);
   assert.match(runnerSource, /const TINT_CHECKPOINT_FILES = FULL\.slice\(1, 4\)/);
-  assert.match(runnerSource, /await validateStagingIntegrity\(staging\);\n  const previous/);
+  assert.match(runnerSource, /const stagedAdmission = await validateStagingIntegrity\(staging\)/);
+  assert.match(
+    runnerSource,
+    /const acceptedAdmission = await validateFullDirectory\(accepted, \{ expectedStatus: "accepted" \}\)/
+  );
   assert.match(runnerSource, /validateFullDirectory/);
   assert.match(profileSource, /sha256 mismatch/);
   assert.match(profileSource, /on disk but unregistered/);
