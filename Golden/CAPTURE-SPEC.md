@@ -60,7 +60,7 @@ The archive contains 104 runs with the exact nine-sample lifecycle:
 preflight(0), trigger(0), sample(.125/.25/.5/.75/.875), endpoint(1), settled(1)
 ```
 
-Core insertion/removal pairs must agree in both stable directions. Backdrop and repeat sentinels retain their deliberate single-direction coverage. Elapsed time is finite and nondecreasing; observed progress remains scheduler-dependent.
+Each Core insertion/removal pair is one physical lifecycle on the same renderer tree: the exact recorded insertion settled sample becomes removal preflight before removal is triggered. The pair must agree in both stable directions without tolerance. Backdrop and repeat sentinels retain their deliberate single-direction coverage. Elapsed time is finite and nondecreasing; observed progress remains scheduler-dependent.
 
 ### Tint
 

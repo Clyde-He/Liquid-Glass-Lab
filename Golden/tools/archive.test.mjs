@@ -278,6 +278,13 @@ test("paired Tint evidence cannot pass with empty or partial planned coverage", 
     problem.includes("does not cover 8 unique cells")));
 });
 
+test("Dynamic removal must continue from the exact paired insertion endpoint", () => {
+  const candidate = archive();
+  candidate.dynamic.runs[1].samples[0].layerLines = ["independent warm-up endpoint"];
+  assert.ok(validateArchive(candidate).some((problem) =>
+    problem.includes("preflight does not match insertion run")));
+});
+
 test("whole-archive comparison reports value drift without inventing module gates", () => {
   const baseline = archive();
   const candidate = structuredClone(baseline);

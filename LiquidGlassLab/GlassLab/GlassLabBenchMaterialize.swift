@@ -1196,33 +1196,55 @@ extension GlassLabView {
         tintColor: NSColor?,
         appearance: GlassLabTestAppearance,
         backdrop: GlassLabBackdropMode,
-        glassSize: CGSize = CGSize(width: 480, height: 200)
+        glassSize: CGSize = CGSize(width: 480, height: 200),
+        continuingFrom insertion: GlassLabMaterializeCapture? = nil
     ) async throws -> GlassLabMaterializeCapture {
         materializeRequestedMain = requestedMain
         materializeRequestedAppearance = appearance
         materializeRequestedBackdrop = backdrop
-        requestMaterializeCaptureContext(
-            usage: usage,
-            requestedMain: requestedMain,
-            tintColor: tintColor,
-            appearance: appearance,
-            backdrop: backdrop,
-            glassSize: glassSize
-        )
-        guard try await waitForMaterializeCaptureContext() else {
-            throw TintStudyError.contextRejected(
-                "Panel · Main \(requestedMain ? "On" : "Off") · Key Off"
+        if insertion == nil {
+            requestMaterializeCaptureContext(
+                usage: usage,
+                requestedMain: requestedMain,
+                tintColor: tintColor,
+                appearance: appearance,
+                backdrop: backdrop,
+                glassSize: glassSize
             )
+            guard try await waitForMaterializeCaptureContext() else {
+                throw TintStudyError.contextRejected(
+                    "Panel · Main \(requestedMain ? "On" : "Off") · Key Off"
+                )
+            }
+        } else {
+            guard NSApp.isActive, materializeProbeContextIsReady else {
+                throw TintStudyError.transitionContextChanged
+            }
         }
 
         materializeCaptureStatus =
             "Settling \(direction.rawValue.lowercased()) start endpoint…"
         let initialPresented = direction.initialPresentedState
         let preflight: GlassLabSemanticTransitionSnapshot
-        if direction == .removal {
-            // Prepare removal through the real lifecycle: a fresh hidden
-            // subtree materializes in, then Materialize Out starts from the
-            // same settled insertion endpoint recorded by an insertion run.
+        if let insertion {
+            guard direction == .removal,
+                  insertion.direction == .insertion,
+                  insertion.samples.last?.phase == "settled",
+                  let settledInsertion = insertion.samples.last?.snapshot,
+                  materializePresented else {
+                throw TintStudyError.contextRejected(
+                    "paired removal without a live settled insertion endpoint"
+                )
+            }
+            // This is one physical lifecycle, not a second acquisition whose
+            // terminal scheduler state merely resembles the first. The exact
+            // sample recorded at insertion settle is removal's preflight, and
+            // the live tree is removed immediately afterward.
+            preflight = settledInsertion
+        } else if direction == .removal {
+            // A standalone removal capture still needs a real insertion
+            // history. Golden instead uses the paired path above so it never
+            // compares two independently scheduled terminal observations.
             // At shortSide 48 that endpoint has a different face grade from
             // the long-lived static Recipe, so waiting for general Recipe
             // stability here would silently replace the endpoint under study.

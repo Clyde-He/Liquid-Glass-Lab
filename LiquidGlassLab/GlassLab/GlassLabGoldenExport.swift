@@ -451,7 +451,9 @@ extension GlassLabView {
     // MARK: - Dynamic
 
     private func captureDynamicSection() async throws -> GoldenDynamicDocument {
-        let contexts = GlassLabGoldenPlan.dynamicContexts()
+        let contexts = GlassLabGoldenPlan.dynamicContexts().filter {
+            $0.direction == .insertion
+        }
         var runs: [GoldenDynamicRun] = []
 
         state.rendererMode = .semanticUsage
@@ -466,9 +468,9 @@ extension GlassLabView {
                 let preset: GlassLabTintPreset = context.tinted ? .coral50 : .none
                 state.reportOutput = "Golden dynamic: run \(runs.count + 1), "
                     + "context \(index + 1)/\(contexts.count) (\(context.slice))."
-                let capture = try await performMaterializeCapture(
+                let insertion = try await performMaterializeCapture(
                     usage: usage,
-                    direction: context.direction,
+                    direction: .insertion,
                     animationMode: GlassLabMaterializeAnimationMode.linear,
                     linearDuration: 1,
                     requestedMain: context.main,
@@ -481,7 +483,30 @@ extension GlassLabView {
                         height: context.shortSide
                     )
                 )
-                runs.append(GoldenDynamicRun(capture: capture, slice: context.slice))
+                runs.append(GoldenDynamicRun(capture: insertion, slice: context.slice))
+
+                if context.slice == "core" {
+                    state.reportOutput = "Golden dynamic: run \(runs.count + 1), "
+                        + "paired removal for context \(index + 1)/\(contexts.count) "
+                        + "(\(context.slice))."
+                    let removal = try await performMaterializeCapture(
+                        usage: usage,
+                        direction: .removal,
+                        animationMode: GlassLabMaterializeAnimationMode.linear,
+                        linearDuration: 1,
+                        requestedMain: context.main,
+                        tint: preset.descriptor,
+                        tintColor: preset.color,
+                        appearance: context.appearance,
+                        backdrop: context.backdrop,
+                        glassSize: CGSize(
+                            width: GlassLabGoldenPlan.referenceWidth,
+                            height: context.shortSide
+                        ),
+                        continuingFrom: insertion
+                    )
+                    runs.append(GoldenDynamicRun(capture: removal, slice: context.slice))
+                }
             }
         }
 
