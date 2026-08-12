@@ -14,6 +14,13 @@
       "reason": "cells where the tap alone humps — 0 available, need 1",
       "reviewedBy": "Golden workflow committee",
       "reviewedAt": "2026-08-11"
+    },
+    {
+      "os": "macOS-27",
+      "learning": "the-two-endpoints-diverge-below-a-size-threshold",
+      "reason": "sizes whose endpoints diverge — 0 available, need 1",
+      "reviewedBy": "Clyde",
+      "reviewedAt": "2026-08-12"
     }
   ]
 }
