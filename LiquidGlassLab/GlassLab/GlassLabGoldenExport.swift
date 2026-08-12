@@ -96,6 +96,9 @@ extension GlassLabView {
         for (label, count) in labels.sorted(by: { $0.key < $1.key }) {
             lines.append("  \(label)  \(count) observations")
         }
+        lines.append(
+            "drift: \(GlassLabGoldenPlan.driftContexts().count) sentinel observations"
+        )
 
         let dynamic = GlassLabGoldenPlan.dynamicContexts()
         var dynamicSlices: [String: Int] = [:]
@@ -157,6 +160,28 @@ extension GlassLabView {
     // MARK: - Driver
 
     func captureGoldenArchive(into directory: URL) async throws -> GoldenCaptureSummary {
+        try await captureGolden(
+            into: directory,
+            staticContexts: GlassLabGoldenPlan.staticContexts(),
+            capturesDynamic: true
+        )
+    }
+
+    func captureGoldenDriftArchive(
+        into directory: URL
+    ) async throws -> GoldenCaptureSummary {
+        try await captureGolden(
+            into: directory,
+            staticContexts: GlassLabGoldenPlan.driftContexts(),
+            capturesDynamic: false
+        )
+    }
+
+    private func captureGolden(
+        into directory: URL,
+        staticContexts: [GlassLabGoldenPlan.StaticContext],
+        capturesDynamic: Bool
+    ) async throws -> GoldenCaptureSummary {
         let originalRenderer = state.rendererMode
         let originalUsage = state.semanticUsage
         let originalSemanticPage = selectedSemanticPage
@@ -231,9 +256,11 @@ extension GlassLabView {
         // run through the same normal observation path as the accepted
         // Materialize studies it is meant to replace.
         state.isCapturingRecipeMatrix = true
-        let staticDocument = try await captureStaticSection()
+        let staticDocument = try await captureStaticSection(
+            contexts: staticContexts
+        )
         state.isCapturingRecipeMatrix = false
-        let dynamic = try await captureDynamicSection()
+        let dynamic = capturesDynamic ? try await captureDynamicSection() : nil
 
         #if arch(arm64)
         let architecture = "arm64"
@@ -339,8 +366,9 @@ extension GlassLabView {
 
     // MARK: - Static
 
-    private func captureStaticSection() async throws -> GoldenStaticDocument {
-        let contexts = GlassLabGoldenPlan.staticContexts()
+    private func captureStaticSection(
+        contexts: [GlassLabGoldenPlan.StaticContext]
+    ) async throws -> GoldenStaticDocument {
         var observations: [GoldenStaticObservation] = []
 
         for (index, context) in contexts.enumerated() {
@@ -425,7 +453,7 @@ extension GlassLabView {
         into directory: URL,
         capture: GoldenCaptureDocument,
         staticDocument: GoldenStaticDocument,
-        dynamic: GoldenDynamicDocument
+        dynamic: GoldenDynamicDocument?
     ) throws -> GoldenCaptureSummary {
         let fileManager = FileManager.default
         let parent = directory.deletingLastPathComponent()
@@ -476,7 +504,7 @@ extension GlassLabView {
         return GoldenCaptureSummary(
             capture: capture,
             staticObservations: staticDocument.observations.count,
-            dynamicRuns: dynamic.runs.count
+            dynamicRuns: dynamic?.runs.count ?? 0
         )
     }
 
@@ -484,7 +512,7 @@ extension GlassLabView {
         into directory: URL,
         capture: GoldenCaptureDocument,
         staticDocument: GoldenStaticDocument,
-        dynamic: GoldenDynamicDocument
+        dynamic: GoldenDynamicDocument?
     ) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -497,14 +525,16 @@ extension GlassLabView {
             encoder: encoder,
             allowsRepeats: false
         )
-        try write(
-            dynamic,
-            rows: dynamic.runs.map(\.cell),
-            named: "dynamic",
-            into: directory,
-            encoder: encoder,
-            allowsRepeats: true
-        )
+        if let dynamic {
+            try write(
+                dynamic,
+                rows: dynamic.runs.map(\.cell),
+                named: "dynamic",
+                into: directory,
+                encoder: encoder,
+                allowsRepeats: true
+            )
+        }
         try write(
             capture,
             rows: [],

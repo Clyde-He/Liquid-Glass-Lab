@@ -273,6 +273,25 @@ enum GlassLabGoldenPlan {
         staticContexts().filter(\.requiresCatalog)
     }
 
+    /// Fixed quick signal, captured by the same walker as Full. Twenty-four
+    /// product anchors cover both appearances, variants, and participation at
+    /// 48/200/320 points; Variant 4 and 6 add adaptive/alternate topology.
+    static func driftContexts() -> [StaticContext] {
+        let sizeSentinels = Set<Double>([48, 200, 320])
+        let product = catalogContexts().filter {
+            sizeSentinels.contains(min($0.width, $0.height))
+        }
+        let research = staticContexts().filter {
+            $0.label == "research-core"
+                && [4, 6].contains($0.variant)
+                && $0.subvariant == nil
+                && $0.appearance == .light
+                && $0.main
+                && !$0.key
+        }
+        return product + research
+    }
+
     // MARK: - Dynamic plan
 
     struct DynamicContext {

@@ -213,6 +213,9 @@ extension GlassLabView {
             of: "--verify-removal-warmup"
         )
         let goldenFlag = arguments.firstIndex(of: "--capture-golden")
+        let goldenDriftFlag = arguments.firstIndex(
+            of: "--capture-golden-drift"
+        )
         let semanticGoldenFlag = arguments.firstIndex(
             of: "--capture-semantic-usage-trees"
         )
@@ -241,6 +244,7 @@ extension GlassLabView {
             resizeFlag,
             removalWarmupFlag,
             goldenFlag,
+            goldenDriftFlag,
             semanticGoldenFlag,
             atlasFlag,
             tintWideGamutFlag,
@@ -457,10 +461,14 @@ extension GlassLabView {
             }
             let payload: Data
             let report: String
-            if goldenFlag != nil {
+            if goldenFlag != nil || goldenDriftFlag != nil {
                 // The Golden exporter writes a directory of its own, so it
                 // reports rather than handing back one payload to write.
-                let meta = try await captureGoldenArchive(into: destination)
+                let meta = if goldenDriftFlag != nil {
+                    try await captureGoldenDriftArchive(into: destination)
+                } else {
+                    try await captureGoldenArchive(into: destination)
+                }
                 FileHandle.standardError.write(Data(
                     (Self.goldenReport(meta) + "\nWrote \(destination.path)\n"
                         + "GLASS_LAB_ARTIFACT_PATH=\(destination.path)\n").utf8

@@ -88,14 +88,19 @@ function cellProblems(cell, label) {
   return problems;
 }
 
-function validateStatic(archive) {
+export function validateStaticDocument(document, {
+  expectedObservationCount = 776,
+  expectedConsumerCount = 56,
+} = {}) {
   const problems = [];
-  const document = archive.static;
   if (document?.schemaVersion !== 2 || !Array.isArray(document.observations)) {
     return ["static.json must be a schema-2 observation document"];
   }
-  if (document.observations.length !== 776) {
-    problems.push(`static.json must contain 776 observations; got ${document.observations.length}`);
+  if (document.observations.length !== expectedObservationCount) {
+    problems.push(
+      `static.json must contain ${expectedObservationCount} observations; `
+      + `got ${document.observations.length}`
+    );
   }
   const observations = new Map();
   for (const [index, observation] of document.observations.entries()) {
@@ -140,8 +145,12 @@ function validateStatic(archive) {
     }
   }
 
-  if (!Array.isArray(document.consumerCells) || document.consumerCells.length !== 56) {
-    problems.push(`static.json must declare 56 Consumer cells; got ${document.consumerCells?.length ?? 0}`);
+  if (!Array.isArray(document.consumerCells)
+      || document.consumerCells.length !== expectedConsumerCount) {
+    problems.push(
+      `static.json must declare ${expectedConsumerCount} Consumer cells; `
+      + `got ${document.consumerCells?.length ?? 0}`
+    );
     return problems;
   }
   const consumerKeys = new Set();
@@ -268,7 +277,7 @@ export function validateArchive(archive) {
       || !archive.platform.displaySignature || !archive.capture.capturedAt) {
     problems.push("capture.json lacks schema-2 OS/build/architecture/display provenance");
   }
-  problems.push(...validateStatic(archive));
+  problems.push(...validateStaticDocument(archive.static));
   problems.push(...validateDynamic(archive));
   for (const [id, key] of TINT_DOCUMENTS) problems.push(...validateTint(id, archive[key]));
   problems.push(...validateSemantic(archive));
@@ -316,12 +325,12 @@ function countDifferences(left, right, pathName = "", examples = [], options = {
   return 1;
 }
 
-export function compareArchives(baseline, candidate) {
+export function compareStaticDocuments(baseline, candidate) {
   const staticBaseline = new Map(
-    baseline.static.observations.map((observation) => [cellKey(observation.cell), observation])
+    baseline.observations.map((observation) => [cellKey(observation.cell), observation])
   );
   const staticCandidate = new Map(
-    candidate.static.observations.map((observation) => [cellKey(observation.cell), observation])
+    candidate.observations.map((observation) => [cellKey(observation.cell), observation])
   );
   const staticExamples = [];
   let staticChanged = 0;
@@ -337,8 +346,8 @@ export function compareArchives(baseline, candidate) {
     if (count) staticChanged += 1;
     staticDifferences += count;
   }
-  const baselineTree = projectStaticTree(baseline.static);
-  const candidateTree = projectStaticTree(candidate.static);
+  const baselineTree = projectStaticTree(baseline);
+  const candidateTree = projectStaticTree(candidate);
   const baselineTopology = new Map(
     baselineTree.rows.map((row) => [cellKey(row.cell), row.topologySignature])
   );
@@ -348,6 +357,17 @@ export function compareArchives(baseline, candidate) {
   const topologyChanged = [...new Set([
     ...baselineTopology.keys(), ...candidateTopology.keys(),
   ])].filter((key) => baselineTopology.get(key) !== candidateTopology.get(key)).length;
+  return {
+    equivalent: staticDifferences === 0 && topologyChanged === 0,
+    changedObservations: staticChanged,
+    changedFields: staticDifferences,
+    topologyChangedObservations: topologyChanged,
+    examples: [...new Set(staticExamples)].slice(0, 12),
+  };
+}
+
+export function compareArchives(baseline, candidate) {
+  const staticComparison = compareStaticDocuments(baseline.static, candidate.static);
 
   const dynamic = compareStableDynamicRuns(baseline.dynamic.runs, candidate.dynamic.runs);
   const documents = [];
@@ -359,19 +379,14 @@ export function compareArchives(baseline, candidate) {
     });
     documents.push({ file: ARCHIVE_FILES[key], differences, examples });
   }
-  const equivalent = staticDifferences === 0 && topologyChanged === 0
+  const equivalent = staticComparison.equivalent
     && dynamic.equivalent && documents.every(({ differences }) => differences === 0);
   return {
     schemaVersion: 1,
     equivalent,
     baseline: baseline.directory,
     candidate: candidate.directory,
-    static: {
-      changedObservations: staticChanged,
-      changedFields: staticDifferences,
-      topologyChangedObservations: topologyChanged,
-      examples: [...new Set(staticExamples)].slice(0, 12),
-    },
+    static: staticComparison,
     dynamic,
     documents,
   };
