@@ -108,7 +108,7 @@ node Golden/tools/capture-profile.mjs drift-scan \
 
 Use this immediately after installing a new macOS build to decide whether a Full capture is warranted. Compare or inspect the two reports, but do not file this directory under `Golden/macOS-N`.
 
-Every driver keeps the capture app active for its full run and returns its file or directory as a framed stdout artifact. The Node runner reconstructs that artifact in staging, so it never needs privacy access to the sandbox container; retained Tint checkpoints travel back to the app over stdin.
+Every driver keeps the capture app active for its full run and returns its file or directory as one bounded stdout artifact envelope (90 MiB decoded maximum). The Node runner reconstructs that artifact in staging, so it never needs privacy access to the sandbox container; retained Tint checkpoints travel back to the app over stdin.
 
 ### 2. Complete canonical capture
 
@@ -133,7 +133,7 @@ node Golden/tools/bootstrap-new-major.mjs \
   --accept
 ```
 
-Preview is the default. The report binds the manifest and complete file inventory, shared profile version, comparisons, Dynamic coverage, verifier outcomes, git revision, and clean worktree state including untracked files. Acceptance regenerates comparison evidence and structured verification from the copied transaction before creating `Golden/macOS-N` through a no-replace atomic rename, and preserves the original staging directory. If no lower accepted baseline exists, an explicit `--waive-baseline "reason"` is required. Refreshing an already accepted major continues to use `capture-profile.mjs full --accepted Golden/macOS-N --promote`; promotion substitutes staging into the complete accepted archive set and reruns both per-version and cross-version learnings before replacement. Bootstrap never replaces an existing major.
+Preview is the default. The report must live outside the repository and binds the manifest and complete file inventory, shared profile version, comparisons, Dynamic coverage, verifier outcomes, git revision, and clean worktree state including untracked files. Acceptance regenerates comparison evidence and structured verification from a same-filesystem transaction outside the worktree before creating `Golden/macOS-N` through a no-replace atomic rename, and preserves the original staging directory. If no lower accepted baseline exists, an explicit `--waive-baseline "reason"` is required. Refreshing an already accepted major continues to use `capture-profile.mjs full --accepted Golden/macOS-N --promote`; promotion substitutes staging into the complete accepted archive set and reruns both per-version and cross-version learnings before replacement. Bootstrap never replaces an existing major.
 
 ### 3. Package certification against Golden
 

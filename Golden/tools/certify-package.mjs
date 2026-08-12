@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
-  archiveInventory, assertCleanGitState, repositoryRoot,
+  archiveInventory, assertCleanGitState, repositoryRoot, resolveExternalOutputPath,
 } from "./lib/bootstrap.mjs";
 import { goldenDirectory } from "./lib/golden.mjs";
 import { validateCatalogFile, packageResourceProblems } from "./lib/catalog-certification.mjs";
@@ -22,7 +22,10 @@ function option(name) {
   const joined = args.find((argument) => argument.startsWith(`${name}=`));
   if (joined) return joined.slice(name.length + 1);
   const index = args.indexOf(name);
-  return index >= 0 ? args[index + 1] : null;
+  if (index < 0) return null;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) usage(`${name} requires a value`);
+  return value;
 }
 
 function usage(message) {
@@ -33,6 +36,7 @@ function usage(message) {
 
 const match = /^macOS-([0-9]+)$/.exec(osName ?? "");
 if (!match) usage("--os must use the exact macOS-N form");
+const reportDestination = reportPath ? await resolveExternalOutputPath(reportPath) : null;
 const major = Number(match[1]);
 const golden = path.join(goldenDirectory, osName);
 const catalog = path.join(repositoryRoot, `LiquidGlassLab/GlassMaterial/Catalog/glass-macos-${major}.json`);
@@ -103,14 +107,14 @@ try {
   });
   run("full Swift Package tests", "swift", ["test", "--scratch-path", swiftScratch]);
 
+  const swiftVersion = run("Swift toolchain identity", "swift", ["--version"]);
+  const goldenFiles = await archiveInventory(golden);
+  const catalogBytes = await readFile(catalog);
   const after = assertCleanGitState();
   if (JSON.stringify(before) !== JSON.stringify(after)) {
     throw new Error("certification changed tracked source or Golden files");
   }
   gates.push({ name: "read-only tracked tree", passed: true });
-  const swiftVersion = run("Swift toolchain identity", "swift", ["--version"]);
-  const goldenFiles = await archiveInventory(golden);
-  const catalogBytes = await readFile(catalog);
   const report = {
     schemaVersion: 1, workflow: "certify-package", generatedAt: new Date().toISOString(),
     os: osName, major, golden: { path: golden, files: goldenFiles },
@@ -121,7 +125,7 @@ try {
     git: after, toolchain: swiftVersion.trim(), gates,
   };
   const bytes = `${JSON.stringify(report, null, 2)}\n`;
-  if (reportPath) await writeFile(path.resolve(repositoryRoot, reportPath), bytes, { flag: "wx" });
+  if (reportDestination) await writeFile(reportDestination, bytes, { flag: "wx" });
   process.stdout.write(bytes);
 } finally {
   await rm(scratch, { recursive: true, force: true });

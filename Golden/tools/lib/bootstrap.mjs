@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { lstat, readFile, readdir, realpath } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import { goldenDirectory } from "./golden.mjs";
 import { PROFILE_DEFINITION_VERSION, sha256, validateFullDirectory } from "./profile.mjs";
@@ -31,11 +31,45 @@ export function pathsOverlap(lhs, rhs) {
   return left === right || left.startsWith(`${right}${path.sep}`) || right.startsWith(`${left}${path.sep}`);
 }
 
+export async function resolveExternalOutputPath(input, { worktree = repositoryRoot } = {}) {
+  const lexical = path.resolve(worktree, input);
+  const [parent, resolvedWorktree] = await Promise.all([
+    realpath(path.dirname(lexical)), realpath(worktree),
+  ]);
+  const destination = path.join(parent, path.basename(lexical));
+  if (destination === resolvedWorktree
+      || destination.startsWith(`${resolvedWorktree}${path.sep}`)) {
+    throw new Error("report must resolve outside the repository worktree");
+  }
+  return destination;
+}
+
+export async function createSameVolumeTransaction(target, label, {
+  worktree = repositoryRoot,
+} = {}) {
+  const safeLabel = String(label).replaceAll(/[^A-Za-z0-9._-]/g, "-");
+  const transactionRoot = await mkdtemp(path.join(
+    path.dirname(worktree), `.${path.basename(worktree)}-${safeLabel}.transaction-`
+  ));
+  try {
+    const [transactionInfo, targetParentInfo] = await Promise.all([
+      lstat(transactionRoot), lstat(path.dirname(target)),
+    ]);
+    if (transactionInfo.dev !== targetParentInfo.dev) {
+      throw new Error("transaction scratch and Golden target are not on the same filesystem");
+    }
+    return { transactionRoot, transaction: path.join(transactionRoot, label) };
+  } catch (error) {
+    await rm(transactionRoot, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 export async function archiveInventory(root) {
   const files = [];
   async function scan(relative = "") {
     const entries = await readdir(path.join(root, relative), { withFileTypes: true });
-    entries.sort((lhs, rhs) => lhs.name.localeCompare(rhs.name));
+    entries.sort((lhs, rhs) => lhs.name < rhs.name ? -1 : lhs.name > rhs.name ? 1 : 0);
     for (const entry of entries) {
       const file = path.posix.join(relative, entry.name);
       const info = await lstat(path.join(root, file));
@@ -112,27 +146,6 @@ async function acceptedDirectories() {
   return accepted.sort((lhs, rhs) => lhs.major - rhs.major);
 }
 
-function newMajorBuildProblems(manifest) {
-  const problems = [];
-  const required = new Set(manifest.profiles?.full?.required ?? []);
-  const modules = (manifest.modules ?? []).filter(({ id }) => required.has(id));
-  const builds = new Set();
-  for (const module of modules) {
-    builds.add(module.platform?.build);
-  }
-  if (builds.size !== 1 || builds.has(undefined) || builds.has("unknown")) {
-    problems.push(`Full modules must carry one concrete build; got ${[...builds].join(", ")}`);
-  } else {
-    const [build] = builds;
-    if (build !== manifest.platform?.build) problems.push("manifest build disagrees with Full modules");
-    if (manifest.profiles?.full?.captureBuildPolicy !== "single-build"
-        || JSON.stringify(manifest.profiles?.full?.builds) !== JSON.stringify([build])) {
-      problems.push("Full profile must declare its one captured build");
-    }
-  }
-  return problems;
-}
-
 export async function resolveBootstrapContext({ candidatePath, baselinePath = null, waiver = null }) {
   const input = path.resolve(repositoryRoot, candidatePath);
   const inputInfo = await lstat(input);
@@ -159,7 +172,7 @@ export async function resolveBootstrapContext({ candidatePath, baselinePath = nu
     if (error?.code !== "ENOENT") throw error;
   }
   const full = await validateFullDirectory(candidate, { expectedStatus: "staged" });
-  const problems = [...full.problems, ...newMajorBuildProblems(manifest)];
+  const problems = full.problems;
   if (problems.length) throw new Error(`candidate failed Full admission:\n${problems.join("\n")}`);
 
   const accepted = await acceptedDirectories();
@@ -285,7 +298,9 @@ export async function buildBootstrapReport(context) {
   };
 }
 
-export async function assertReportStillCurrent(report, context) {
+export async function assertReportStillCurrent(report, context, {
+  gitRoot = repositoryRoot,
+} = {}) {
   if (report.schemaVersion !== 1 || report.workflow !== "bootstrap-new-major") {
     throw new Error("review report is not a bootstrap-new-major v1 report");
   }
@@ -324,7 +339,7 @@ export async function assertReportStillCurrent(report, context) {
   } else if (!report.baseline?.waived || report.baseline.reason !== context.waiver) {
     throw new Error("review report baseline waiver does not match");
   }
-  if (JSON.stringify(assertCleanGitState()) !== JSON.stringify(report.git)) {
+  if (JSON.stringify(assertCleanGitState(gitState(gitRoot))) !== JSON.stringify(report.git)) {
     throw new Error("Golden tooling or git revision changed after review");
   }
 }

@@ -1,47 +1,60 @@
-const STABLE_PHASES = new Set(["settled"]);
+import {
+  DYNAMIC_STABLE_PHASES, dynamicPairingProblems, dynamicRunIdentity,
+  stableEndpointSamples,
+} from "./dynamic-contract.mjs";
 
-function stripRuntimeVolatileFields(value) {
-  if (!value || typeof value !== "object") return;
-  if (Array.isArray(value)) {
-    for (const item of value) stripRuntimeVolatileFields(item);
-    return;
-  }
-  delete value.elapsed;
-  delete value.inputMaxHeadroom;
-  for (const child of Object.values(value)) stripRuntimeVolatileFields(child);
-}
-
-function stableProjection(runs, side) {
-  const projected = structuredClone(runs ?? []);
-  const problems = [];
-  for (const [runIndex, run] of projected.entries()) {
+function stableProjection(runs, side, { requirePairing = true } = {}) {
+  const projected = [];
+  const durations = new Map();
+  const problems = requirePairing
+    ? [...dynamicPairingProblems(runs, side, { enforceCardinality: false })] : [];
+  const identities = new Set();
+  for (const [runIndex, source] of (runs ?? []).entries()) {
+    const identity = dynamicRunIdentity(source);
+    if (identities.has(identity)) problems.push(`${side} run ${runIndex}: duplicate identity`);
+    identities.add(identity);
+    durations.set(identity, source.maximumAttachedAnimationDuration);
+    const run = structuredClone(source);
     delete run.maximumAttachedAnimationDuration;
-    const stableSamples = (run.samples ?? []).filter(({ phase }) => STABLE_PHASES.has(phase));
-    const phases = stableSamples.map(({ phase }) => phase);
-    if (JSON.stringify(phases) !== JSON.stringify(["settled"])) {
-      problems.push(`${side} run ${runIndex}: expected one settled sample; got ${phases.join(", ")}`);
+    run.samples = stableEndpointSamples(run);
+    const phases = run.samples.map(({ phase }) => phase);
+    const expectedPhases = source?.slice === "core" ? ["settled"] : DYNAMIC_STABLE_PHASES;
+    if (JSON.stringify(phases) !== JSON.stringify(expectedPhases)) {
+      problems.push(
+        `${side} run ${runIndex}: expected stable phases `
+        + `${expectedPhases.join(", ")}; got ${phases.join(", ")}`
+      );
     }
-    run.samples = stableSamples;
-    stripRuntimeVolatileFields(run);
+    projected.push({ identity, run });
   }
-  return { projected, problems };
+  projected.sort((lhs, rhs) => lhs.identity < rhs.identity ? -1 : lhs.identity > rhs.identity ? 1 : 0);
+  return { projected: projected.map(({ run }) => run), durations, identities, problems };
 }
 
 function collectDifferences(lhs, rhs, pathName, output, outputLimit) {
   if (Object.is(lhs, rhs)) return 0;
   if (Array.isArray(lhs) || Array.isArray(rhs)) {
-    if (!Array.isArray(lhs) || !Array.isArray(rhs) || lhs.length !== rhs.length) {
+    if (!Array.isArray(lhs) || !Array.isArray(rhs)) {
       if (output.length < outputLimit) {
         output.push(`${pathName}: ${JSON.stringify(lhs)} != ${JSON.stringify(rhs)}`);
       }
       return 1;
     }
-    return lhs.reduce(
-      (count, value, index) => count + collectDifferences(
-        value, rhs[index], `${pathName}[${index}]`, output, outputLimit
-      ),
-      0
-    );
+    let count = 0;
+    const length = Math.max(lhs.length, rhs.length);
+    for (let index = 0; index < length; index += 1) {
+      if (index >= lhs.length || index >= rhs.length) {
+        if (output.length < outputLimit) {
+          output.push(`${pathName}[${index}]: ${JSON.stringify(lhs[index])} != ${JSON.stringify(rhs[index])}`);
+        }
+        count += 1;
+      } else {
+        count += collectDifferences(
+          lhs[index], rhs[index], `${pathName}[${index}]`, output, outputLimit
+        );
+      }
+    }
+    return count;
   }
   if (typeof lhs !== "object" || lhs === null || typeof rhs !== "object" || rhs === null) {
     if (output.length < outputLimit) {
@@ -69,15 +82,21 @@ function collectDifferences(lhs, rhs, pathName, output, outputLimit) {
 export function compareStableDynamicRuns(baselineRuns, candidateRuns, {
   durationTolerance = 0.05,
   reportedDifferenceLimit = 100,
+  requireBaselinePairing = true,
+  requireCandidatePairing = true,
 } = {}) {
-  const baseline = stableProjection(baselineRuns, "baseline");
-  const candidate = stableProjection(candidateRuns, "candidate");
+  const baseline = stableProjection(baselineRuns, "baseline", {
+    requirePairing: requireBaselinePairing,
+  });
+  const candidate = stableProjection(candidateRuns, "candidate", {
+    requirePairing: requireCandidatePairing,
+  });
   const problems = [...baseline.problems, ...candidate.problems];
-  const durationDeltas = (baselineRuns ?? []).map((run, index) => {
-    const before = run.maximumAttachedAnimationDuration;
-    const after = candidateRuns?.[index]?.maximumAttachedAnimationDuration;
+  const durationDeltas = [...new Set([...baseline.identities, ...candidate.identities])].map((identity) => {
+    const before = baseline.durations.get(identity);
+    const after = candidate.durations.get(identity);
     if (!Number.isFinite(before) || !Number.isFinite(after)) {
-      problems.push(`run ${index}: maximumAttachedAnimationDuration must be finite on both sides`);
+      problems.push(`run ${identity}: maximumAttachedAnimationDuration must be finite on both sides`);
       return Number.POSITIVE_INFINITY;
     }
     return Math.abs(before - after);
@@ -106,7 +125,13 @@ export function compareStableDynamicRuns(baselineRuns, candidateRuns, {
     equivalent: problems.length === 0,
     baselineRuns: baselineRuns?.length ?? null,
     candidateRuns: candidateRuns?.length ?? null,
-    stablePhases: [...STABLE_PHASES],
+    stablePhases: DYNAMIC_STABLE_PHASES,
+    baselineStableSamples: baseline.projected.reduce(
+      (count, run) => count + run.samples.length, 0
+    ),
+    candidateStableSamples: candidate.projected.reduce(
+      (count, run) => count + run.samples.length, 0
+    ),
     changedRuns,
     stableDifferenceCount,
     maximumAnimationDurationDelta,

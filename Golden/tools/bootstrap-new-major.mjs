@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertReportStillCurrent, assertReviewedComparisonEvidence, assertReviewedInventory,
   assertReviewedPayloadInventory, assertCleanGitState, buildBootstrapReport, repositoryRoot,
-  resolveBootstrapContext,
+  createSameVolumeTransaction, resolveBootstrapContext, resolveExternalOutputPath,
 } from "./lib/bootstrap.mjs";
 import { readDispositions, releaseVerificationProblems, verifyArchiveSet } from "./lib/verify-engine.mjs";
 import { sha256, validateFullDirectory } from "./lib/profile.mjs";
@@ -23,7 +23,10 @@ function option(name) {
   const joined = args.find((argument) => argument.startsWith(`${name}=`));
   if (joined) return joined.slice(name.length + 1);
   const index = args.indexOf(name);
-  return index >= 0 ? args[index + 1] : null;
+  if (index < 0) return null;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) usage(`${name} requires a value`);
+  return value;
 }
 
 function usage(message) {
@@ -33,31 +36,29 @@ function usage(message) {
 }
 
 if (!candidatePath || (accept && !reportPath)) usage();
+const reviewFile = reportPath ? await resolveExternalOutputPath(reportPath) : null;
 const context = await resolveBootstrapContext({ candidatePath, baselinePath, waiver });
 if (!accept) {
   const report = await buildBootstrapReport(context);
   const bytes = `${JSON.stringify(report, null, 2)}\n`;
-  if (reportPath) {
-    const destination = path.resolve(repositoryRoot, reportPath);
-    if (destination.startsWith(`${context.candidate}${path.sep}`)) {
+  if (reviewFile) {
+    if (reviewFile.startsWith(`${context.candidate}${path.sep}`)) {
       throw new Error("review report must be outside the candidate directory");
     }
-    await writeFile(destination, bytes, { flag: "wx" });
-    console.error(`Review report written to ${destination}`);
+    await writeFile(reviewFile, bytes, { flag: "wx" });
+    console.error(`Review report written to ${reviewFile}`);
   }
   process.stdout.write(bytes);
 } else {
-  const reviewFile = path.resolve(repositoryRoot, reportPath);
   if (reviewFile.startsWith(`${context.candidate}${path.sep}`)) {
     throw new Error("review report must be outside the candidate directory");
   }
   const reviewBytes = await readFile(reviewFile);
   const report = JSON.parse(reviewBytes);
   await assertReportStillCurrent(report, context);
-  const transactionRoot = await mkdtemp(
-    path.join(path.dirname(context.target), `.${context.name}.transaction-`)
+  const { transactionRoot, transaction } = await createSameVolumeTransaction(
+    context.target, context.name
   );
-  const transaction = path.join(transactionRoot, context.name);
   try {
     await cp(context.candidate, transaction, { recursive: true, force: false, errorOnExist: true });
     await assertReviewedInventory(transaction, report.candidate);

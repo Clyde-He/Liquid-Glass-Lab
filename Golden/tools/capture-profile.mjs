@@ -2,13 +2,16 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { importArtifactEnvelope } from "./lib/artifact-handoff.mjs";
+import { comparisonReportIsEquivalent } from "./lib/comparison-contract.mjs";
 import { compareStableDynamicRuns } from "./lib/dynamic-equivalence.mjs";
+import { DYNAMIC_CONTRACT_VERSION } from "./lib/dynamic-contract.mjs";
 import { validateManifestV2 } from "./lib/manifest.mjs";
 import { acceptedArchivesReplacing } from "./lib/golden.mjs";
+import { createSameVolumeTransaction } from "./lib/bootstrap.mjs";
 import {
   CLAIMS, FULL_DRIVERS as FULL, FULL_MODULE_IDS as REQUIRED,
   PROFILE_DEFINITION_VERSION, payloadModule, platformFrom, profileForMajor,
@@ -20,14 +23,21 @@ import {
 const TINT_CHECKPOINT_FILES = FULL.slice(1, 4).map(([, , file]) => file);
 const TINT_CHECKPOINT_FLAGS = new Set(FULL.slice(1, 4).map(([, flag]) => flag));
 const toolDirectory = path.dirname(fileURLToPath(import.meta.url));
+const args = process.argv.slice(2);
 
-function usage() {
+function usage(message) {
+  if (message) console.error(message);
   console.error("usage: capture-profile.mjs <full|drift-scan> --app APP --output DIR [--accepted DIR] [--promote]");
   process.exit(64);
 }
 function option(name) {
-  const index = process.argv.indexOf(name);
-  return index < 0 ? null : process.argv[index + 1];
+  const joined = args.find((argument) => argument.startsWith(`${name}=`));
+  if (joined) return joined.slice(name.length + 1);
+  const index = args.indexOf(name);
+  if (index < 0) return null;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) usage(`${name} requires a value`);
+  return value;
 }
 function run(app, flag, destination) {
   const handoff = `@temporary/${process.pid}-${path.basename(destination)}`;
@@ -40,18 +50,24 @@ function run(app, flag, destination) {
   });
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) throw result.error;
-  let handedOff = false;
-  if (result.stdout?.trim()) {
-    importArtifactEnvelope(result.stdout, destination);
-    handedOff = true;
-  }
   if (result.status !== 0) {
-    if (TINT_CHECKPOINT_FLAGS.has(flag) && handedOff) {
-      process.stderr.write(`Recovered Tint checkpoint after ${flag} failure\n`);
+    let recoveryError = null;
+    if (TINT_CHECKPOINT_FLAGS.has(flag) && result.stdout?.trim()) {
+      try {
+        importArtifactEnvelope(result.stdout, destination);
+        process.stderr.write(`Recovered Tint checkpoint after ${flag} failure\n`);
+      } catch (error) {
+        recoveryError = error;
+        process.stderr.write(`Tint checkpoint recovery failed: ${error.message}\n`);
+      }
     }
-    throw new Error(`${flag} exited ${result.status ?? "by signal"}`);
+    throw new Error(
+      `${flag} exited ${result.status ?? "by signal"}`
+      + (recoveryError ? `; checkpoint recovery failed: ${recoveryError.message}` : "")
+    );
   }
-  if (!handedOff) throw new Error(`${flag} did not hand off an artifact over stdout`);
+  if (!result.stdout?.trim()) throw new Error(`${flag} did not hand off an artifact over stdout`);
+  importArtifactEnvelope(result.stdout, destination);
 }
 async function buildManifest(root, accepted) {
   const metaBytes = await readFile(path.join(root, "unified/meta.json"));
@@ -109,6 +125,7 @@ async function buildManifest(root, accepted) {
     modules, profiles: { full: {
       required, optional, unsupported, carriedForward,
       captureBuildPolicy: "single-build", builds,
+      dynamicContractVersion: DYNAMIC_CONTRACT_VERSION,
     } },
   };
   const problems = validateManifestV2(manifest);
@@ -178,18 +195,17 @@ async function promote(staging, accepted) {
       const report = JSON.parse(result.stdout);
       comparisons.push({ id, slice, summary: report.summary });
       const summary = report.summary;
-      if ([
-        "missingRows", "addedRows", "missingPasses", "addedPasses",
-        "missingFields", "addedFields", "changedValues",
-        "topologyChangedRows", "valueChangedRows",
-      ].some((field) => (summary[field] ?? 0) !== 0)) equivalent = false;
+      if (!comparisonReportIsEquivalent(report)) equivalent = false;
     }
   }
   const oldDynamicFile = previous.modules.find(({ id }) => id === "core.dynamic")?.file;
   const newDynamicFile = staged.modules.find(({ id }) => id === "core.dynamic")?.file;
   const oldDynamic = JSON.parse(await readFile(path.join(accepted, oldDynamicFile)));
   const newDynamic = JSON.parse(await readFile(path.join(staging, newDynamicFile)));
-  const dynamicComparison = compareStableDynamicRuns(oldDynamic.runs, newDynamic.runs);
+  const dynamicComparison = compareStableDynamicRuns(oldDynamic.runs, newDynamic.runs, {
+    requireBaselinePairing:
+      previous.profiles?.full?.captureBuildPolicy !== "historical-mixed",
+  });
   if (!dynamicComparison.equivalent) equivalent = false;
   comparisons.push({ id: "core.dynamic", ...dynamicComparison });
   await writeFile(`${staging}.equivalence.json`, `${JSON.stringify({ equivalent, comparisons }, null, 2)}\n`);
@@ -207,13 +223,27 @@ async function promote(staging, accepted) {
   if (verificationProblems.length) {
     throw new Error(`promotion verification failed: ${verificationProblems.join("; ")}`);
   }
-  staged.status = "accepted";
-  await writeFile(stagedPath, `${JSON.stringify(staged, null, 2)}\n`);
-  const result = spawnSync("xcrun", [
-    "swift", path.join(toolDirectory, "atomic-promote.swift"), staging, accepted,
-  ], { stdio: "inherit" });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`atomic promotion exited ${result.status}`);
+  const { transactionRoot, transaction } = await createSameVolumeTransaction(
+    accepted, `${osDirectory}-promotion`
+  );
+  try {
+    await cp(staging, transaction, { recursive: true, force: false, errorOnExist: true });
+    const acceptedManifestPath = path.join(transaction, "manifest.json");
+    const acceptedManifest = JSON.parse(await readFile(acceptedManifestPath));
+    acceptedManifest.status = "accepted";
+    await writeFile(acceptedManifestPath, `${JSON.stringify(acceptedManifest, null, 2)}\n`);
+    const checked = await validateFullDirectory(transaction, { expectedStatus: "accepted" });
+    if (checked.problems.length) {
+      throw new Error(`accepted promotion transaction invalid: ${checked.problems.join("; ")}`);
+    }
+    const result = spawnSync("xcrun", [
+      "swift", path.join(toolDirectory, "atomic-promote.swift"), transaction, accepted,
+    ], { stdio: "inherit" });
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error(`atomic promotion exited ${result.status}`);
+  } finally {
+    await rm(transactionRoot, { recursive: true, force: true });
+  }
 }
 
 const profile = process.argv[2];

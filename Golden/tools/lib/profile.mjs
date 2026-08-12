@@ -3,6 +3,10 @@ import { lstat, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { validateManifestV2 } from "./manifest.mjs";
 import { tintDocumentGateProblems } from "./tint-compare.mjs";
+import {
+  DYNAMIC_CELL_FIELDS, DYNAMIC_CONTRACT_VERSION,
+  dynamicLifecycleProblems, dynamicPairingProblems,
+} from "./dynamic-contract.mjs";
 
 export const PROFILE_DEFINITION_VERSION = 1;
 
@@ -93,10 +97,7 @@ const TINT_SHAPES = {
   },
 };
 
-const CORE_CELL_FIELDS = [
-  "variant", "subvariant", "main", "key", "subdued", "appearance",
-  "backdrop", "tint", "width", "height", "cornerRadius", "host", "direction",
-];
+const CORE_CELL_FIELDS = DYNAMIC_CELL_FIELDS;
 
 export const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
@@ -134,7 +135,23 @@ function cellIdentity(row) {
   ]);
 }
 
-function coreAdmissionProblems(id, payload) {
+function computedTopologySignature(row) {
+  const layers = row.layers ?? {};
+  const passes = row.passes ?? {};
+  const topology = [
+    ...Object.keys(layers).sort().map((key) => {
+      const layer = layers[key] ?? {};
+      return `layer|${key}|${layer.layerClass}|mask=${layer.hasMask}`;
+    }),
+    ...Object.keys(passes).sort().map((key) => {
+      const pass = passes[key] ?? {};
+      return `pass|${key}|keys=${Object.keys(pass.properties ?? {}).sort().join(",")}`;
+    }),
+  ];
+  return sha256(Buffer.from(topology.join("\n")));
+}
+
+function coreAdmissionProblems(id, payload, { enforceDynamicPairing = true } = {}) {
   const shape = CORE_SHAPES[id];
   if (!shape) return [];
   const problems = [];
@@ -162,9 +179,8 @@ function coreAdmissionProblems(id, payload) {
       if (!Number.isFinite(item.maximumAttachedAnimationDuration)) {
         problems.push(`${id}: run ${index} has no finite maximumAttachedAnimationDuration`);
       }
-      if (!Array.isArray(item.samples) || item.samples.length !== shape.samplesPerRun) {
-        problems.push(`${id}: run ${index} must contain ${shape.samplesPerRun} samples`);
-      } else if (item.samples.some((sample) => !Number.isFinite(sample.requestedProgress)
+      problems.push(...dynamicLifecycleProblems(item, index, id));
+      if (Array.isArray(item.samples) && item.samples.some((sample) => !Number.isFinite(sample.requestedProgress)
           || !Number.isFinite(sample.elapsed)
           || (sample.progress != null && !Number.isFinite(sample.progress))
           || !Array.isArray(sample.effects) || !Array.isArray(sample.filters)
@@ -180,9 +196,12 @@ function coreAdmissionProblems(id, payload) {
     if (id === "core.static-tree"
         && (!item.layers || typeof item.layers !== "object"
           || !item.passes || typeof item.passes !== "object"
-          || typeof item.topologySignature !== "string" || item.topologySignature.length !== 64
-          || typeof item.valueSignature !== "string" || item.valueSignature.length !== 64)) {
+          || !/^[0-9a-f]{64}$/.test(item.topologySignature ?? "")
+          || !/^[0-9a-f]{64}$/.test(item.valueSignature ?? ""))) {
       problems.push(`${id}: row ${index} is missing captured tree payload fields`);
+    } else if (id === "core.static-tree"
+        && computedTopologySignature(item) !== item.topologySignature) {
+      problems.push(`${id}: row ${index} topology signature disagrees with layer/pass payload`);
     }
   }
   if (Object.keys(slices).length !== Object.keys(shape.slices).length
@@ -192,6 +211,9 @@ function coreAdmissionProblems(id, payload) {
   const identitySha256 = sha256(Buffer.from(JSON.stringify([...identities].sort())));
   if (identitySha256 !== shape.identitySha256) {
     problems.push(`${id}: captured axes do not match the registered Full coordinate set`);
+  }
+  if (id === "core.dynamic" && enforceDynamicPairing) {
+    problems.push(...dynamicPairingProblems(items, id));
   }
   return problems;
 }
@@ -288,7 +310,7 @@ export function moduleAdmissionProblems(id, payload, options = {}) {
       problems.push(`${id}: embedded operating system disagrees with module platform`);
     }
   }
-  if (id.startsWith("core.")) problems.push(...coreAdmissionProblems(id, payload));
+  if (id.startsWith("core.")) problems.push(...coreAdmissionProblems(id, payload, options));
   else if (id.startsWith("tint.")) problems.push(...tintAdmissionProblems(id, payload));
   else if (id === "semantic.usage-trees") {
     problems.push(...semanticAdmissionProblems(payload, { osMajor: options.osMajor }));
@@ -356,13 +378,46 @@ export async function validateFullDirectory(root, { expectedStatus = null } = {}
     problems.push("manifest platform version must be numeric dotted form");
   }
   const expected = profileForMajor(osMajor);
-  const declaredBuilds = new Set(manifest.profiles?.full?.builds ?? []);
+  const fullProfile = manifest.profiles?.full ?? {};
+  const declaredBuildList = fullProfile.builds ?? [];
+  const declaredBuilds = new Set(declaredBuildList);
   for (const field of ["required", "optional", "unsupported"]) {
     if (JSON.stringify(manifest.profiles?.full?.[field] ?? []) !== JSON.stringify(expected[field])) {
       problems.push(`full.${field} does not match profile definition v${PROFILE_DEFINITION_VERSION}`);
     }
   }
   const directIDs = new Set([...expected.required, ...expected.optional]);
+  const directModules = (manifest.modules ?? []).filter(({ id }) => directIDs.has(id));
+  const actualBuilds = new Set(directModules.map((module) => module.platform?.build));
+  if (!Array.isArray(declaredBuildList)
+      || declaredBuildList.length !== declaredBuilds.size
+      || declaredBuildList.some((build) => typeof build !== "string"
+        || build.length === 0 || build === "unknown")) {
+    problems.push("full.builds must list unique concrete captured builds");
+  }
+  if (actualBuilds.has(undefined) || actualBuilds.has("unknown")
+      || actualBuilds.size !== declaredBuilds.size
+      || [...actualBuilds].some((build) => !declaredBuilds.has(build))) {
+    problems.push("full.builds must exactly match the direct Full module builds");
+  }
+  if (fullProfile.captureBuildPolicy === "single-build") {
+    if (declaredBuildList.length !== 1 || declaredBuildList[0] !== manifest.platform?.build) {
+      problems.push("single-build Full must match the manifest platform build");
+    }
+    if (fullProfile.dynamicContractVersion !== DYNAMIC_CONTRACT_VERSION) {
+      problems.push(`single-build Full must use Dynamic contract v${DYNAMIC_CONTRACT_VERSION}`);
+    }
+  } else if (fullProfile.captureBuildPolicy === "historical-mixed") {
+    if (manifest.status !== "accepted" || declaredBuildList.length < 2
+        || !declaredBuilds.has(manifest.platform?.build)) {
+      problems.push("historical-mixed Full is only valid for accepted archives with explicit builds");
+    }
+  } else {
+    problems.push("full.captureBuildPolicy must be single-build or historical-mixed");
+  }
+  if (manifest.status === "staged" && fullProfile.captureBuildPolicy !== "single-build") {
+    problems.push("staged Full must use the single-build policy");
+  }
   const registeredPathKeys = new Set();
   for (const module of manifest.modules ?? []) {
     if (!safeModulePath(module.file)) problems.push(`${module.id}: unsafe module path ${module.file}`);
@@ -417,6 +472,8 @@ export async function validateFullDirectory(root, { expectedStatus = null } = {}
         osMajor,
         expectedPlatform: module.platform,
         expectedSchemaVersion: PAYLOAD_SCHEMA_VERSIONS[module.id],
+        enforceDynamicPairing: !(manifest.status === "accepted"
+          && fullProfile.captureBuildPolicy === "historical-mixed"),
       } : {}));
     } catch (error) {
       problems.push(`${module.file}: ${error instanceof SyntaxError ? "not valid JSON" : error.message}`);
