@@ -301,6 +301,7 @@ extension GlassLabView {
         _ context: GlassLabGoldenPlan.StaticContext,
         progress: String
     ) async throws -> GoldenResolvedSnapshot {
+        var lastFailure = "the live glass was unavailable"
         for _ in 1...5 {
             try Task.checkCancellation()
             try await waitUntilApplicationIsActive(progress: progress)
@@ -326,39 +327,42 @@ extension GlassLabView {
             state.testWindow.sync(with: state)
             state.testWindow.rebuildGlass(with: state)
             guard let glass = state.testWindow.liveGlass else {
+                lastFailure = "the live glass was unavailable"
                 try await Task.sleep(for: .milliseconds(180))
                 continue
             }
             GlassLabTuning.applyRecipe(from: state, to: glass)
             try await Task.sleep(for: .milliseconds(700))
 
-            guard NSApp.isActive else { continue }
-            guard state.testWindow.isActuallyMain == context.main,
-                  state.testWindow.isActuallyKey == context.key,
-                  context.appearance.matchesName(
-                      state.testWindow.effectiveAppearanceName ?? ""
-                  ), staticContextMatches(context, glass: glass) else {
+            guard NSApp.isActive else {
+                lastFailure = "the application was inactive"
+                continue
+            }
+            if let mismatch = staticContextMismatch(context, glass: glass) {
+                lastFailure = mismatch
                 continue
             }
             do {
                 let snapshot = try await GlassLabTuning.settledResolvedTreeSnapshot(
                     from: glass
                 )
-                let actualKey = glass.window.map { NSApp.keyWindow === $0 } ?? false
-                let actualMain = glass.window.map { NSApp.mainWindow === $0 } ?? false
-                guard NSApp.isActive else { continue }
-                guard actualMain == context.main, actualKey == context.key,
-                      context.appearance.matchesName(
-                          state.testWindow.effectiveAppearanceName ?? ""
-                      ), staticContextMatches(context, glass: glass) else {
+                guard NSApp.isActive else {
+                    lastFailure = "the application became inactive after settling"
+                    continue
+                }
+                if let mismatch = staticContextMismatch(context, glass: glass) {
+                    lastFailure = "after settling, \(mismatch)"
                     continue
                 }
                 return snapshot
             } catch GlassLabTuning.MatrixCaptureError.applicationInactive {
+                lastFailure = "the application became inactive while settling"
                 continue
             } catch GlassLabTuning.MatrixCaptureError.missingLayerTree {
+                lastFailure = "the resolved layer tree was incomplete"
                 continue
             } catch GlassLabTuning.MatrixCaptureError.unstableResolvedTree {
+                lastFailure = "the resolved layer tree did not settle"
                 continue
             }
         }
@@ -366,25 +370,45 @@ extension GlassLabView {
             context: context.cell.identity,
             detail: "five fresh rebuilds exhausted before a stable complete tree "
                 + "matched main=\(context.main), key=\(context.key), and "
-                + "appearance=\(context.appearance.rawValue)"
+                + "appearance=\(context.appearance.rawValue); last rejection: "
+                + lastFailure
         )
     }
 
-    private func staticContextMatches(
+    private func staticContextMismatch(
         _ context: GlassLabGoldenPlan.StaticContext,
         glass: NSGlassEffectView
-    ) -> Bool {
+    ) -> String? {
+        let actualMain = glass.window.map { NSApp.mainWindow === $0 } ?? false
+        let actualKey = glass.window.map { NSApp.keyWindow === $0 } ?? false
+        guard actualMain == context.main else {
+            return "main is \(actualMain), expected \(context.main)"
+        }
+        guard actualKey == context.key else {
+            return "key is \(actualKey), expected \(context.key)"
+        }
+        let actualAppearance = state.testWindow.effectiveAppearanceName ?? ""
+        guard context.appearance.matchesName(actualAppearance) else {
+            return "appearance is \(actualAppearance), expected \(context.appearance.rawValue)"
+        }
         let expectedPanel = context.host == .panel
-        return (glass.window is NSPanel) == expectedPanel
-            && abs(Double(glass.bounds.width) - context.width) < 0.001
-            && abs(Double(glass.bounds.height) - context.height) < 0.001
-            && abs(Double(glass.cornerRadius) - context.cornerRadius) < 0.001
-            && GlassLabTuning.resolvedRecipeMatches(
-                variant: context.variant,
-                subvariant: context.subvariant,
-                subdued: context.subdued,
-                on: glass
-            )
+        guard (glass.window is NSPanel) == expectedPanel else {
+            return "window host does not match \(context.host.rawValue)"
+        }
+        guard abs(Double(glass.bounds.width) - context.width) < 0.001,
+              abs(Double(glass.bounds.height) - context.height) < 0.001 else {
+            return "bounds are \(glass.bounds.width)×\(glass.bounds.height), expected "
+                + "\(context.width)×\(context.height)"
+        }
+        guard abs(Double(glass.cornerRadius) - context.cornerRadius) < 0.001 else {
+            return "cornerRadius is \(glass.cornerRadius), expected \(context.cornerRadius)"
+        }
+        return GlassLabTuning.resolvedRecipeMismatch(
+            variant: context.variant,
+            subvariant: context.subvariant,
+            subdued: context.subdued,
+            on: glass
+        )
     }
 
     // MARK: - Static

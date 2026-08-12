@@ -83,40 +83,80 @@ enum GlassLabTuning {
         applyOverrides(from: state, to: glass)
     }
 
-    /// Confirms the private recipe setters actually took effect. A missing
-    /// getter cannot verify the coordinate and therefore rejects the occurrence.
-    static func resolvedRecipeMatches(
+    /// Returns the first private Recipe value that did not take effect.
+    /// `_tintOpacityReduced` is absent as a capability on some systems; when
+    /// both accessors are absent, the canonical false request is already met.
+    static func resolvedRecipeMismatch(
         variant: Int,
         subvariant: String?,
         subdued: Bool,
         on glass: NSGlassEffectView
-    ) -> Bool {
+    ) -> String? {
         let object = glass as NSObject
         guard object.responds(to: NSSelectorFromString("_variant")),
-              let actualVariant = object.value(forKey: "_variant") as? NSNumber,
-              actualVariant.intValue == variant,
-              object.responds(to: NSSelectorFromString("_subvariant")),
-              (object.value(forKey: "_subvariant") as? String) == subvariant,
-              object.responds(to: NSSelectorFromString("_subduedState")),
-              let actualSubdued = object.value(forKey: "_subduedState") as? NSNumber,
-              actualSubdued.boolValue == subdued,
-              object.responds(to: NSSelectorFromString("_adaptiveAppearance")),
+              let actualVariant = object.value(forKey: "_variant") as? NSNumber else {
+            return "_variant is unavailable"
+        }
+        guard actualVariant.intValue == variant else {
+            return "_variant is \(actualVariant.intValue), expected \(variant)"
+        }
+        guard object.responds(to: NSSelectorFromString("_subvariant")) else {
+            return "_subvariant is unavailable"
+        }
+        let actualSubvariant = object.value(forKey: "_subvariant") as? String
+        guard actualSubvariant == subvariant else {
+            return "_subvariant is \(actualSubvariant ?? "nil"), expected \(subvariant ?? "nil")"
+        }
+        guard object.responds(to: NSSelectorFromString("_subduedState")),
+              let actualSubdued = object.value(forKey: "_subduedState") as? NSNumber else {
+            return "_subduedState is unavailable"
+        }
+        guard actualSubdued.boolValue == subdued else {
+            return "_subduedState is \(actualSubdued.boolValue), expected \(subdued)"
+        }
+        guard object.responds(to: NSSelectorFromString("_adaptiveAppearance")),
               let actualAdaptive = object.value(
                   forKey: "_adaptiveAppearance"
-              ) as? NSNumber,
-              actualAdaptive.intValue == 2,
-              object.responds(to: NSSelectorFromString("_scrimState")),
-              let actualScrim = object.value(forKey: "_scrimState") as? NSNumber,
-              !actualScrim.boolValue,
-              object.responds(to: NSSelectorFromString("_tintOpacityReduced")),
-              let actualReducedTint = object.value(
-                  forKey: "_tintOpacityReduced"
-              ) as? NSNumber,
-              !actualReducedTint.boolValue,
-              glass.tintColor == nil else {
-            return false
+              ) as? NSNumber else {
+            return "_adaptiveAppearance is unavailable"
         }
-        return true
+        guard actualAdaptive.intValue == 2 else {
+            return "_adaptiveAppearance is \(actualAdaptive.intValue), expected 2"
+        }
+        guard object.responds(to: NSSelectorFromString("_scrimState")),
+              let actualScrim = object.value(forKey: "_scrimState") as? NSNumber else {
+            return "_scrimState is unavailable"
+        }
+        guard !actualScrim.boolValue else {
+            return "_scrimState is true, expected false"
+        }
+
+        let reducedTintGetter = object.responds(
+            to: NSSelectorFromString("_tintOpacityReduced")
+        )
+        let reducedTintSetter = object.responds(
+            to: NSSelectorFromString("set_tintOpacityReduced:")
+        )
+        switch (reducedTintGetter, reducedTintSetter) {
+        case (false, false):
+            break
+        case (true, true):
+            guard let actualReducedTint = object.value(
+                forKey: "_tintOpacityReduced"
+            ) as? NSNumber else {
+                return "_tintOpacityReduced is unreadable"
+            }
+            guard !actualReducedTint.boolValue else {
+                return "_tintOpacityReduced is true, expected false"
+            }
+        default:
+            return "_tintOpacityReduced getter/setter availability differs"
+        }
+
+        guard glass.tintColor == nil else {
+            return "tintColor is non-nil, expected nil"
+        }
+        return nil
     }
 
     @MainActor
