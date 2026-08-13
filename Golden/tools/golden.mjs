@@ -127,21 +127,12 @@ async function capture() {
   console.error(`Golden capture complete: ${output}`);
 }
 
-async function admittedSetWith(staging, name) {
-  const archives = [];
-  const rejected = [];
-  for (const archive of await acceptedArchives(goldenDirectory)) {
-    if (archive.name === name) continue;
-    try {
-      await admitArchive(archive.directory);
-      archives.push(archive);
-    } catch {
-      rejected.push(archive.name);
-    }
-  }
+async function archiveSetWith(staging, name) {
+  const archives = (await acceptedArchives(goldenDirectory))
+    .filter((archive) => archive.name !== name);
   archives.push({ name, major: Number(name.slice("macOS-".length)), directory: staging });
   archives.sort((left, right) => left.major - right.major);
-  return { archives, rejected };
+  return archives;
 }
 
 async function promote() {
@@ -153,11 +144,9 @@ async function promote() {
   const installed = await acceptedArchives(goldenDirectory);
   const baselineEntry = installed.find((archive) => archive.name === name)
     ?? installed.filter(({ major }) => major < candidate.platform.major).at(-1);
-  if (baselineEntry) {
-    try { baseline = await admitArchive(baselineEntry.directory); } catch { baseline = null; }
-  }
+  if (baselineEntry) baseline = await admitArchive(baselineEntry.directory);
   const comparison = baseline ? compareArchives(baseline, candidate) : null;
-  const { archives, rejected } = await admittedSetWith(staging, name);
+  const archives = await archiveSetWith(staging, name);
   const verification = await verifyArchiveSet({
     archives,
     includeCrossVersion: archives.length > 1,
@@ -171,7 +160,6 @@ async function promote() {
       tally: verification.tally,
       undispositionedSkips: verification.undispositionedSkips,
       staleDispositions: verification.staleDispositions,
-      rejectedArchivesAwaitingRecapture: rejected,
     },
   };
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
@@ -182,8 +170,7 @@ async function promote() {
     return;
   }
 
-  // Re-read the same staging, then install a validated copy. Capture never runs here.
-  await admitArchive(staging);
+  // Install a validated copy of the reviewed staging. Capture never runs here.
   const transactionRoot = await mkdtemp(path.join(goldenDirectory, `.${name}.promote-`));
   const transaction = path.join(transactionRoot, name);
   try {
