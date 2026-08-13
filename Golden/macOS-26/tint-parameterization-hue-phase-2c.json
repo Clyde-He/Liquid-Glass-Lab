@@ -1,5 +1,5 @@
 {
-  "capturedAt" : "2026-07-30T10:09:33Z",
+  "capturedAt" : "2026-08-13T01:35:43Z",
   "complete" : true,
   "completedColorCount" : 136,
   "environment" : {
@@ -8,7 +8,7 @@
     "osMajorVersion" : 26
   },
   "formatVersion" : 1,
-  "operatingSystem" : "Version 26.6 (Build 25G70)",
+  "operatingSystem" : "Version 26.6.2 (Build 25G82)",
   "plan" : {
     "colors" : [
       {

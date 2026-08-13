@@ -1,13 +1,31 @@
 {
-  "capturedAt" : "2026-07-30T18:55:40Z",
+  "capturedAt" : "2026-08-13T01:37:33Z",
   "environment" : {
     "atlasSchemaVersion" : 2,
-    "displaySignature" : "Studio Display @2.0x",
+    "displaySignature" : "Built-in Retina Display @2.0x",
     "osMajorVersion" : 26
   },
-  "formatVersion" : 1,
-  "operatingSystem" : "Version 26.6 (Build 25G70)",
+  "formatVersion" : 2,
+  "operatingSystem" : "Version 26.6.2 (Build 25G82)",
   "passed" : true,
+  "plannedColorIDs" : [
+    "srgb-coral",
+    "srgb-teal",
+    "srgb-gray-500",
+    "p3-c7cd28",
+    "p3-pure-red",
+    "p3-vivid-green",
+    "alpha-p3-c7cd28-a15",
+    "alpha-p3-c7cd28-a40",
+    "alpha-p3-c7cd28-a60",
+    "alpha-p3-c7cd28-a80",
+    "alpha-p3-c7cd28-a100",
+    "alpha-p3-pure-red-a15",
+    "alpha-p3-pure-red-a40",
+    "alpha-p3-pure-red-a60",
+    "alpha-p3-pure-red-a80",
+    "alpha-p3-pure-red-a100"
+  ],
   "rows" : [
     {
       "cell" : {
@@ -8076,132 +8094,132 @@
   ],
   "timings" : [
     {
-      "clearFlushMilliseconds" : 0.264916,
+      "clearFlushMilliseconds" : 0.091542,
       "colorID" : "srgb-coral",
-      "matrixReadbackMilliseconds" : 0.442167,
-      "pairedProofMilliseconds" : 2.629542,
-      "setFlushMilliseconds" : 6.26625,
-      "totalMilliseconds" : 9.602875
+      "matrixReadbackMilliseconds" : 0.158,
+      "pairedProofMilliseconds" : 0.996833,
+      "setFlushMilliseconds" : 1.917125,
+      "totalMilliseconds" : 3.1635
     },
     {
-      "clearFlushMilliseconds" : 3.940375,
+      "clearFlushMilliseconds" : 3.54975,
       "colorID" : "srgb-teal",
-      "matrixReadbackMilliseconds" : 0.254542,
-      "pairedProofMilliseconds" : 2.068042,
-      "setFlushMilliseconds" : 4.257833,
-      "totalMilliseconds" : 10.520792
+      "matrixReadbackMilliseconds" : 0.200375,
+      "pairedProofMilliseconds" : 1.722375,
+      "setFlushMilliseconds" : 2.5325,
+      "totalMilliseconds" : 8.005
     },
     {
-      "clearFlushMilliseconds" : 4.8695,
+      "clearFlushMilliseconds" : 3.620333,
       "colorID" : "srgb-gray-500",
-      "matrixReadbackMilliseconds" : 0.256292,
-      "pairedProofMilliseconds" : 2.230417,
-      "setFlushMilliseconds" : 3.940916,
-      "totalMilliseconds" : 11.297125
+      "matrixReadbackMilliseconds" : 0.250792,
+      "pairedProofMilliseconds" : 2.029917,
+      "setFlushMilliseconds" : 3.490708,
+      "totalMilliseconds" : 9.39175
     },
     {
-      "clearFlushMilliseconds" : 4.866959,
+      "clearFlushMilliseconds" : 4.603084,
       "colorID" : "p3-c7cd28",
-      "matrixReadbackMilliseconds" : 0.235125,
-      "pairedProofMilliseconds" : 2.035834,
-      "setFlushMilliseconds" : 3.285541,
-      "totalMilliseconds" : 10.423459
+      "matrixReadbackMilliseconds" : 0.261292,
+      "pairedProofMilliseconds" : 1.954416,
+      "setFlushMilliseconds" : 2.869708,
+      "totalMilliseconds" : 9.6885
     },
     {
-      "clearFlushMilliseconds" : 5.372417,
+      "clearFlushMilliseconds" : 4.014083,
       "colorID" : "p3-pure-red",
-      "matrixReadbackMilliseconds" : 0.235666,
-      "pairedProofMilliseconds" : 2.054042,
-      "setFlushMilliseconds" : 3.587125,
-      "totalMilliseconds" : 11.24925
+      "matrixReadbackMilliseconds" : 0.245125,
+      "pairedProofMilliseconds" : 1.97725,
+      "setFlushMilliseconds" : 3.378583,
+      "totalMilliseconds" : 9.615041
     },
     {
-      "clearFlushMilliseconds" : 3.053792,
+      "clearFlushMilliseconds" : 2.761833,
       "colorID" : "p3-vivid-green",
-      "matrixReadbackMilliseconds" : 0.1135,
-      "pairedProofMilliseconds" : 0.962292,
-      "setFlushMilliseconds" : 2.245833,
-      "totalMilliseconds" : 6.375417
+      "matrixReadbackMilliseconds" : 0.160041,
+      "pairedProofMilliseconds" : 1.498292,
+      "setFlushMilliseconds" : 2.060334,
+      "totalMilliseconds" : 6.4805
     },
     {
-      "clearFlushMilliseconds" : 4.257916,
+      "clearFlushMilliseconds" : 3.388917,
       "colorID" : "alpha-p3-c7cd28-a15",
-      "matrixReadbackMilliseconds" : 0.14475,
-      "pairedProofMilliseconds" : 1.336209,
-      "setFlushMilliseconds" : 3.090375,
-      "totalMilliseconds" : 8.82925
+      "matrixReadbackMilliseconds" : 0.251125,
+      "pairedProofMilliseconds" : 1.976708,
+      "setFlushMilliseconds" : 3.81,
+      "totalMilliseconds" : 9.42675
     },
     {
-      "clearFlushMilliseconds" : 4.056917,
+      "clearFlushMilliseconds" : 3.04725,
       "colorID" : "alpha-p3-c7cd28-a40",
-      "matrixReadbackMilliseconds" : 0.258916,
-      "pairedProofMilliseconds" : 2.186875,
-      "setFlushMilliseconds" : 3.64625,
-      "totalMilliseconds" : 10.148958
+      "matrixReadbackMilliseconds" : 0.116666,
+      "pairedProofMilliseconds" : 0.953417,
+      "setFlushMilliseconds" : 2.223917,
+      "totalMilliseconds" : 6.34125
     },
     {
-      "clearFlushMilliseconds" : 3.94325,
+      "clearFlushMilliseconds" : 1.482333,
       "colorID" : "alpha-p3-c7cd28-a60",
-      "matrixReadbackMilliseconds" : 0.146334,
-      "pairedProofMilliseconds" : 1.218208,
-      "setFlushMilliseconds" : 3.502916,
-      "totalMilliseconds" : 8.810708
+      "matrixReadbackMilliseconds" : 0.090958,
+      "pairedProofMilliseconds" : 0.842375,
+      "setFlushMilliseconds" : 1.224417,
+      "totalMilliseconds" : 3.640083
     },
     {
-      "clearFlushMilliseconds" : 4.20375,
+      "clearFlushMilliseconds" : 4.05975,
       "colorID" : "alpha-p3-c7cd28-a80",
-      "matrixReadbackMilliseconds" : 0.236875,
-      "pairedProofMilliseconds" : 2.075542,
-      "setFlushMilliseconds" : 3.351375,
-      "totalMilliseconds" : 9.867542
+      "matrixReadbackMilliseconds" : 0.244792,
+      "pairedProofMilliseconds" : 1.958541,
+      "setFlushMilliseconds" : 4.203125,
+      "totalMilliseconds" : 10.466208
     },
     {
-      "clearFlushMilliseconds" : 4.404083,
+      "clearFlushMilliseconds" : 4.386542,
       "colorID" : "alpha-p3-c7cd28-a100",
-      "matrixReadbackMilliseconds" : 0.247708,
-      "pairedProofMilliseconds" : 2.023333,
-      "setFlushMilliseconds" : 3.523084,
-      "totalMilliseconds" : 10.198208
+      "matrixReadbackMilliseconds" : 0.279333,
+      "pairedProofMilliseconds" : 1.91975,
+      "setFlushMilliseconds" : 2.871042,
+      "totalMilliseconds" : 9.456667
     },
     {
-      "clearFlushMilliseconds" : 5.06975,
+      "clearFlushMilliseconds" : 4.288458,
       "colorID" : "alpha-p3-pure-red-a15",
-      "matrixReadbackMilliseconds" : 0.250917,
-      "pairedProofMilliseconds" : 2.106708,
-      "setFlushMilliseconds" : 3.702875,
-      "totalMilliseconds" : 11.13025
+      "matrixReadbackMilliseconds" : 0.244875,
+      "pairedProofMilliseconds" : 2.151417,
+      "setFlushMilliseconds" : 2.735875,
+      "totalMilliseconds" : 9.420625
     },
     {
-      "clearFlushMilliseconds" : 4.126667,
+      "clearFlushMilliseconds" : 3.725833,
       "colorID" : "alpha-p3-pure-red-a40",
-      "matrixReadbackMilliseconds" : 0.220791,
-      "pairedProofMilliseconds" : 1.851209,
-      "setFlushMilliseconds" : 2.6885,
-      "totalMilliseconds" : 8.887167
+      "matrixReadbackMilliseconds" : 0.254459,
+      "pairedProofMilliseconds" : 2.024208,
+      "setFlushMilliseconds" : 3.6045,
+      "totalMilliseconds" : 9.609
     },
     {
-      "clearFlushMilliseconds" : 3.128,
+      "clearFlushMilliseconds" : 3.046042,
       "colorID" : "alpha-p3-pure-red-a60",
-      "matrixReadbackMilliseconds" : 0.125958,
-      "pairedProofMilliseconds" : 0.923667,
-      "setFlushMilliseconds" : 3.221334,
-      "totalMilliseconds" : 7.398959
+      "matrixReadbackMilliseconds" : 0.18075,
+      "pairedProofMilliseconds" : 1.535291,
+      "setFlushMilliseconds" : 2.231917,
+      "totalMilliseconds" : 6.994
     },
     {
-      "clearFlushMilliseconds" : 3.150625,
+      "clearFlushMilliseconds" : 3.781167,
       "colorID" : "alpha-p3-pure-red-a80",
-      "matrixReadbackMilliseconds" : 0.108875,
-      "pairedProofMilliseconds" : 0.925166,
-      "setFlushMilliseconds" : 2.29675,
-      "totalMilliseconds" : 6.481416
+      "matrixReadbackMilliseconds" : 0.25,
+      "pairedProofMilliseconds" : 2.030667,
+      "setFlushMilliseconds" : 4.009583,
+      "totalMilliseconds" : 10.071417
     },
     {
-      "clearFlushMilliseconds" : 3.511333,
+      "clearFlushMilliseconds" : 4.261541,
       "colorID" : "alpha-p3-pure-red-a100",
-      "matrixReadbackMilliseconds" : 0.206666,
-      "pairedProofMilliseconds" : 1.957459,
-      "setFlushMilliseconds" : 2.606417,
-      "totalMilliseconds" : 8.281875
+      "matrixReadbackMilliseconds" : 0.237375,
+      "pairedProofMilliseconds" : 1.966708,
+      "setFlushMilliseconds" : 2.851459,
+      "totalMilliseconds" : 9.317083
     }
   ]
 }
