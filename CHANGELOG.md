@@ -6,6 +6,13 @@ The project follows [Semantic Versioning](https://semver.org/). While the packag
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-13
+
+### Fixed
+
+- Refreshed the bundled macOS 26 and macOS 27 Regular/Clear material Catalogs from accepted captures on builds `25G82` and `26A5406e`, correcting the resolved values served to Consumer applications without changing the public API.
+- Catalogs are now deterministic projections of the same typed Golden Snapshots used for release verification, eliminating the independent capture path that could let packaged values diverge from accepted evidence.
+
 ## [0.3.0] - 2026-08-03
 
 ### Added
@@ -69,7 +76,8 @@ The project follows [Semantic Versioning](https://semver.org/). While the packag
 - The package can be linked from a macOS 15 deployment target so consumers can retain an older-system fallback. `AdjustableGlassEffectView` itself is available on macOS 26 and later.
 - The implementation relies on private AppKit details and is intended for Direct Distribution, not the Mac App Store.
 
-[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.0...HEAD
+[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.1...HEAD
+[0.3.1]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.0...0.3.1
 [0.3.0]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.2...0.3.0
 [0.2.2]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.1...0.2.2
 [0.2.1]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.0...0.2.1

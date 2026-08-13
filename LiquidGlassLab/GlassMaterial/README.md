@@ -155,7 +155,7 @@ Copy this directory. It has no dependency on the rest of Liquid Glass Lab — ni
 | `GlassMaterialStrength.swift` | Internal strength writer plus the public `AdjustableGlassEffectView` |
 | `GlassEffectController.swift` | Internal ownership of active/inactive selection, provider, retries, Tint gating, and status |
 
-The current lab ships `Catalog/glass-macos-27.json`. Its raw JSON is about 199 KB and compresses to about 6.5 KB; adding one catalog per macOS major is therefore negligible compared with ordinary app assets. Arbitrary user tint colors remain runtime-calibrated and cached because they cannot be exhaustively pre-bundled.
+The package ships `Catalog/glass-macos-26.json` and `Catalog/glass-macos-27.json`. Together their raw JSON is about 380 KB and compresses to about 12 KB. Tint matrices are intentionally absent: Display P3 colors use the certified synchronous synthesizer, while colors outside the certified domain use verified runtime calibration and caching.
 
 ## How it works
 
@@ -187,7 +187,7 @@ clamp          (0.34g + 0.036g²) / 0.376    Clear's inputClamp
 
 Measured on **macOS 26** and **macOS 27** for public **Regular and Clear** in a panel, served by one table with no version branch. Each accepted direct archive contains 104 runs / 936 samples across appearance, backdrop, participation, tint, both directions, and `shortSide` 48/200/400. Evidence lives in `Golden/macOS-26/`, `Golden/macOS-27/`, and the P1.1 section of [Glass Research Roadmap](../../Documentation/GlassResearchRoadmap.md).
 
-The executable learnings currently pass 33/33 on macOS 26. At the 200pt reference size the single-endpoint curve replays the measured continuous channels; across 48/200/400 every remaining channel stays inside the documented geometry bound. A resize/rebuild test confirms the authored strength survives AppKit replacing the whole subtree.
+Release verification currently reports 54 passed learnings, 0 failures, and 3 reviewed skips across macOS 26, macOS 27, and their cross-version claims. At the 200pt reference size the single-endpoint curve replays the measured continuous channels; across 48/200/400 every remaining channel stays inside the documented geometry bound. A resize/rebuild test confirms the authored strength survives AppKit replacing the whole subtree.
 
 Targeted author visual acceptance of the compact product HUD path is complete on both macOS 26 and macOS 27, including size-dependent rendering and the platform-specific safety inset with Outer Shadow disabled.
 

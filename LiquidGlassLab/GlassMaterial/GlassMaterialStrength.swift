@@ -979,35 +979,80 @@ final class GlassMaterialStrength {
     /// `frozenInstallFailed` on an untested OS major named nothing. Name the
     /// broken invariant instead; the healthy path still logs zero lines.
     ///
-    /// A persistent break is re-checked by the pre-commit observer and the
-    /// 16 ms reassert cadence, so an identical reason is logged once and then
-    /// counted; recovery logs the count. A flicker therefore reads as
-    /// break/recovered pairs at its visible cadence, and a wedged state as
-    /// one line — not a flooded log on the exact main-thread path being
-    /// diagnosed.
-    private var lastFrozenBreakReason: String?
-    private var suppressedFrozenBreakCount = 0
+    /// A persistent drift is re-checked by the pre-commit observer and the
+    /// 16 ms reassert cadence, so an identical failure is logged once and then
+    /// counted. Recovery reports elapsed time and only mentions failed checks
+    /// when there was more than the initial detection. A flicker therefore
+    /// reads as detected/restored pairs at its visible cadence, and a wedged
+    /// state as one line — not a flooded log on the exact main-thread path
+    /// being diagnosed.
+    private struct FrozenStateDrift: Equatable {
+        var field: String
+        var actual: String
+        var expected: String?
+    }
 
-    private func frozenStateBroke(_ reason: String) -> Bool {
-        guard reason != lastFrozenBreakReason else {
-            suppressedFrozenBreakCount += 1
+    private var lastFrozenDrift: FrozenStateDrift?
+    private var frozenDriftStartedAt: UInt64?
+    private var additionalFrozenFailureCount = 0
+
+    private func frozenStateBroke(
+        field: String,
+        actual: String,
+        expected: String? = nil
+    ) -> Bool {
+        let drift = FrozenStateDrift(
+            field: field,
+            actual: actual,
+            expected: expected
+        )
+        guard drift != lastFrozenDrift else {
+            additionalFrozenFailureCount += 1
             return false
         }
-        lastFrozenBreakReason = reason
-        suppressedFrozenBreakCount = 0
-        GlassMaterialTintLog.signposts.notice(
-            "frozen state broke: \(reason, privacy: .public)"
-        )
+        lastFrozenDrift = drift
+        frozenDriftStartedAt = DispatchTime.now().uptimeNanoseconds
+        additionalFrozenFailureCount = 0
+        if let expected {
+            GlassMaterialTintLog.signposts.notice(
+                "material drift detected: field=\(field, privacy: .public) actual=\(actual, privacy: .public) expected=\(expected, privacy: .public) repair=scheduled"
+            )
+        } else {
+            GlassMaterialTintLog.signposts.notice(
+                "material drift detected: field=\(field, privacy: .public) actual=\(actual, privacy: .public) repair=scheduled"
+            )
+        }
         return false
     }
 
     private func noteFrozenStateHolds() {
-        guard let reason = lastFrozenBreakReason else { return }
-        GlassMaterialTintLog.signposts.notice(
-            "frozen state recovered from: \(reason, privacy: .public) (\(self.suppressedFrozenBreakCount, privacy: .public) repeats suppressed)"
-        )
-        lastFrozenBreakReason = nil
-        suppressedFrozenBreakCount = 0
+        guard let drift = lastFrozenDrift,
+              let startedAt = frozenDriftStartedAt
+        else { return }
+        let recoveryMilliseconds = Self.milliseconds(since: startedAt)
+        let failedChecks = additionalFrozenFailureCount + 1
+        if failedChecks > 1 {
+            GlassMaterialTintLog.signposts.notice(
+                "material restored: field=\(drift.field, privacy: .public) recovery=\(recoveryMilliseconds, format: .fixed(precision: 1), privacy: .public)ms failedChecks=\(failedChecks, privacy: .public)"
+            )
+        } else {
+            GlassMaterialTintLog.signposts.notice(
+                "material restored: field=\(drift.field, privacy: .public) recovery=\(recoveryMilliseconds, format: .fixed(precision: 1), privacy: .public)ms"
+            )
+        }
+        lastFrozenDrift = nil
+        frozenDriftStartedAt = nil
+        additionalFrozenFailureCount = 0
+    }
+
+    private static func diagnosticNumber<T: BinaryFloatingPoint>(
+        _ value: T
+    ) -> String {
+        String(format: "%.4f", Double(value))
+    }
+
+    private static func milliseconds(since start: UInt64) -> Double {
+        Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
     }
 
     private static func worstCoefficient(
@@ -1027,25 +1072,37 @@ final class GlassMaterialStrength {
         on glass: NSGlassEffectView
     ) -> Bool {
         guard let margin = GlassMaterialAccess.marginWidth(under: glass) else {
-            return frozenStateBroke("margin unreadable")
+            return frozenStateBroke(
+                field: "marginWidth",
+                actual: "unreadable",
+                expected: "readable"
+            )
         }
         guard abs(margin - sample.marginWidth) < 0.25 else {
             return frozenStateBroke(
-                "margin drifted: \(margin) vs \(sample.marginWidth)"
+                field: "marginWidth",
+                actual: Self.diagnosticNumber(margin),
+                expected: Self.diagnosticNumber(sample.marginWidth)
             )
         }
         guard let target = GlassMaterialAccess.glassBackgroundTarget(
             under: glass
         ) else {
-            return frozenStateBroke("no glassBackground target")
+            return frozenStateBroke(
+                field: "glassBackgroundTarget",
+                actual: "missing",
+                expected: "present"
+            )
         }
         let currentInputs = GlassMaterialAccess.readTypedInputs(from: target)
         for (key, written) in lastFrozenNumbers {
             let current = currentInputs.numeric[key]
             guard let current, abs(current - written) < 1e-3 else {
-                let read = current.map { "\($0)" } ?? "nil"
+                let read = current.map(Self.diagnosticNumber) ?? "missing"
                 return frozenStateBroke(
-                    "shader numeric \(key): \(read) vs \(written)"
+                    field: "shader.\(key)",
+                    actual: read,
+                    expected: Self.diagnosticNumber(written)
                 )
             }
         }
@@ -1053,7 +1110,14 @@ final class GlassMaterialStrength {
             guard let current = currentInputs.colors[key],
                   GlassMaterialAccess.colorsMatch(current, written)
             else {
-                return frozenStateBroke("shader color \(key) drifted")
+                let actual = currentInputs.colors[key] == nil
+                    ? "missing"
+                    : "differentValue"
+                return frozenStateBroke(
+                    field: "shader.\(key)",
+                    actual: actual,
+                    expected: "installedValue"
+                )
             }
         }
         let matrixLayersNow = GlassMaterialAccess.untintedMatrixLayers(
@@ -1061,8 +1125,9 @@ final class GlassMaterialStrength {
         )
         guard matrixLayersNow.count == sample.matrices.count else {
             return frozenStateBroke(
-                "untinted matrix layers: \(matrixLayersNow.count)"
-                    + " vs \(sample.matrices.count)"
+                field: "gradeLayerCount",
+                actual: "\(matrixLayersNow.count)",
+                expected: "\(sample.matrices.count)"
             )
         }
         for (slotIndex, (layer, slot)) in zip(
@@ -1073,7 +1138,9 @@ final class GlassMaterialStrength {
                   current.count == slot.matrix.count
             else {
                 return frozenStateBroke(
-                    "grade matrix \(slotIndex) unreadable"
+                    field: "gradeMatrix[\(slotIndex)]",
+                    actual: "unreadableOrWrongSize",
+                    expected: "\(slot.matrix.count)Coefficients"
                 )
             }
             guard zip(current, slot.matrix).allSatisfy({
@@ -1081,8 +1148,9 @@ final class GlassMaterialStrength {
             }) else {
                 let worst = Self.worstCoefficient(current, slot.matrix)
                 return frozenStateBroke(
-                    "grade matrix \(slotIndex) coefficient \(worst.index):"
-                        + " \(worst.current) vs \(worst.written)"
+                    field: "gradeMatrix[\(slotIndex)].coefficient[\(worst.index)]",
+                    actual: Self.diagnosticNumber(worst.current),
+                    expected: Self.diagnosticNumber(worst.written)
                 )
             }
         }
@@ -1090,26 +1158,37 @@ final class GlassMaterialStrength {
             guard let tintLayer = GlassMaterialAccess.tintMatrixLayer(
                 under: glass
             ) else {
-                return frozenStateBroke("tint layer missing")
+                return frozenStateBroke(
+                    field: "tintLayer",
+                    actual: "missing",
+                    expected: "present"
+                )
             }
             guard let current = GlassMaterialAccess.colorMatrix(on: tintLayer),
                   current.count == written.count
             else {
-                return frozenStateBroke("tint matrix unreadable")
+                return frozenStateBroke(
+                    field: "tintMatrix",
+                    actual: "unreadableOrWrongSize",
+                    expected: "\(written.count)Coefficients"
+                )
             }
             guard zip(current, written).allSatisfy({ abs($0 - $1) < 1e-3 })
             else {
                 let worst = Self.worstCoefficient(current, written)
                 return frozenStateBroke(
-                    "tint matrix coefficient \(worst.index):"
-                        + " \(worst.current) on layer vs \(worst.written) written"
+                    field: "tintMatrix.coefficient[\(worst.index)]",
+                    actual: Self.diagnosticNumber(worst.current),
+                    expected: Self.diagnosticNumber(worst.written)
                 )
             }
         }
         let rimLayers = GlassMaterialAccess.rimLayers(under: glass)
         guard rimLayers.count == sample.rims.count else {
             return frozenStateBroke(
-                "rim layers: \(rimLayers.count) vs \(sample.rims.count)"
+                field: "rimLayerCount",
+                actual: "\(rimLayers.count)",
+                expected: "\(sample.rims.count)"
             )
         }
         for (rimIndex, (layer, rim)) in zip(
@@ -1123,7 +1202,11 @@ final class GlassMaterialStrength {
                 colors: rimColors,
                 on: layer
             ) {
-                return frozenStateBroke("rim payload \(rimIndex) drifted")
+                return frozenStateBroke(
+                    field: "rim[\(rimIndex)].payload",
+                    actual: "differentValue",
+                    expected: "installedValue"
+                )
             }
         }
         noteFrozenStateHolds()

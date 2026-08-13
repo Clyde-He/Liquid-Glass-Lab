@@ -18,12 +18,11 @@
    node Golden/tools/golden.mjs catalog --os macOS-27 --check
    ```
 
-4. Run the Node and Swift suites, including the selected-major Golden-backed Tint checks:
+4. Run the Node and Swift suites. The Swift suite automatically checks the Golden-backed Tint model for every supported macOS major:
 
    ```sh
    node --test Golden/tools/*.test.mjs
-   CERTIFY_OS_MAJOR=26 swift test
-   CERTIFY_OS_MAJOR=27 swift test
+   swift test
    ```
 
 5. Confirm `swift package dump-package` exposes `Catalog` as the only processed product resource. Golden must remain repository-only.
