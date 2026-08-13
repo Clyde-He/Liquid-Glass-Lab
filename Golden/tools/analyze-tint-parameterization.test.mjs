@@ -163,6 +163,26 @@ test("macOS 27 Golden sweeps pass the complete parameterized matrix gate", async
   assert.ok(maximumResidual > 1.9e-4);
 });
 
+test("macOS 26 Golden sweeps classify the certified saturation-boost family", async () => {
+  const fixtures = [
+    "tint.parameterization.sweep",
+    "tint.parameterization.focused-2b",
+    "tint.parameterization.hue-2c",
+  ];
+  let rowCount = 0;
+  for (const moduleID of fixtures) {
+    const { document } = await loadEvidenceDocument(
+      `${goldenDirectory}/macOS-26`, moduleID
+    );
+    const result = analyzeTintParameterization(document);
+    assert.equal(result.parameterizationSupported, true);
+    assert.equal(result.unclassifiedRowCount, 0);
+    assert.ok(result.maximumParameterizedMatrixResidual <= 2e-4);
+    rowCount += result.rowCount;
+  }
+  assert.equal(rowCount, 3496);
+});
+
 test("accepts a complete eight-cell color group", () => {
   const result = analyzeTintParameterization(makeDocument());
   assert.equal(result.complete, true);

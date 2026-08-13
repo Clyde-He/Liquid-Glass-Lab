@@ -203,7 +203,7 @@ Three behaviors are discrete by measurement and cannot be smoothed: the rim gate
 
 Mid-transition accuracy degrades away from a ~200pt short side, bounded by `min(5%, 4 / shortSide)` — 5% at 48pt, 1% at 400pt, shrinking above that. The cause is that a channel pinned to a cap stops tracking the inflating geometry and reads as linear, and which channels are capped depends on size.
 
-There is one separate exception: at 48pt, removal traverses both the long-lived static Recipe and a different Materialized face grade. A single captured baseline therefore cannot exactly replay `inputFaceColorMatrixBlack` and `inputFaceColorMatrixWhite` for that path. The curve remains monotonic and exact at its chosen static endpoints, but matching that compact transition requires a future dual-endpoint adaptive face-grade model.
+There is one separate exception: at 48pt on macOS 26, face opacity reaches one before the Materialized face grade finishes settling, and the paired removal starts from that later grade rather than the long-lived static Recipe. A single captured baseline therefore cannot exactly replay `inputFaceColorMatrixBlack` and `inputFaceColorMatrixWhite` across the whole lifecycle. The curve remains monotonic and exact at its chosen endpoints, but matching that compact transition requires a future dual-endpoint adaptive face-grade model.
 
 Setting `value = 1` does not uninstall the override. Restoring the true system material requires a fresh `NSGlassEffectView`.
 

@@ -102,9 +102,10 @@ export default [
     claim:
       "Away from the reference geometry the two endpoints stop agreeing. A "
       + "small glass uses a different face grade at the Materialize animation "
-      + "endpoint than its long-lived static Recipe. It subsequently settles "
-      + "back to the static grade, so a single baseline cannot reproduce the "
-      + "whole small-size removal. The diverging sizes and channels are "
+      + "endpoint than its long-lived static Recipe. Face opacity reaches one "
+      + "before that compact grade finishes adapting, and the paired removal "
+      + "starts from the later settled grade, so a single baseline cannot "
+      + "reproduce the whole small-size lifecycle. The diverging sizes and channels are "
       + "reported rather than asserted: which ones they are is a measured "
       + "property of the release, but that some threshold exists is what a "
       + "consumer has to know",

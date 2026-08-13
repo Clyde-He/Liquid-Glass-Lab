@@ -63,6 +63,7 @@ enum GlassLabTintMatrixStructure: String, Codable, Sendable {
     case lumaEndpoints
     case neutralSuppression
     case achromaticChannelAffine
+    case achromaticSaturationBoost
     case unclassified
 }
 
@@ -459,7 +460,11 @@ enum GlassLabTintSweepError: LocalizedError {
 
 enum GlassLabTintMatrixGate {
     private static let luma = [0.2126, 0.7152, 0.0722]
+    private static let achromaticSaturationBoostLuma = [
+        0.2126134, 0.7152094, 0.0721772,
+    ]
     private static let tolerance = 0.0002
+    private static let achromaticChromaThreshold = 0.00035
 
     struct Result {
         var structure: GlassLabTintMatrixStructure
@@ -521,6 +526,10 @@ enum GlassLabTintMatrixGate {
             isLightAppearance: cell.isLightAppearance
         )
         let achromaticResidual = achromaticChannelAffineResidual(matrix)
+        let saturationBoostResidual = achromaticSaturationBoostResidual(
+            matrix,
+            color: expectedColor
+        )
         if rankOneResidual <= tolerance {
             return Result(
                 structure: .lumaEndpoints,
@@ -543,6 +552,19 @@ enum GlassLabTintMatrixGate {
             return Result(
                 structure: .achromaticChannelAffine,
                 maximumResidual: max(achromaticResidual, alphaRowResidual),
+                lumaEndpointResidual: rankOneResidual,
+                neutralSuppressionResidual: neutralResidual,
+                achromaticChannelAffineResidual: achromaticResidual
+            )
+        }
+        if cell.hasMainParticipation,
+           saturationBoostResidual <= tolerance {
+            return Result(
+                structure: .achromaticSaturationBoost,
+                maximumResidual: max(
+                    saturationBoostResidual,
+                    alphaRowResidual
+                ),
                 lumaEndpointResidual: rankOneResidual,
                 neutralSuppressionResidual: neutralResidual,
                 achromaticChannelAffineResidual: achromaticResidual
@@ -607,6 +629,32 @@ enum GlassLabTintMatrixGate {
         for row in 0..<3 {
             for column in 0..<3 {
                 let expected = row == column ? diagonal : 0
+                maximum = max(
+                    maximum,
+                    abs(matrix[row * 5 + column] - expected)
+                )
+            }
+            maximum = max(maximum, abs(matrix[row * 5 + 4] - bias))
+        }
+        return maximum
+    }
+
+    private static func achromaticSaturationBoostResidual(
+        _ matrix: [Double],
+        color: GlassLabTintSweepColor
+    ) -> Double {
+        let rgb = [color.red, color.green, color.blue]
+        let chroma = (rgb.max() ?? 0) - (rgb.min() ?? 0)
+        guard chroma <= achromaticChromaThreshold else { return .infinity }
+        let value = rgb.reduce(0, +) / 3
+        let strength = 0.9 + 0.05 * value
+        let bias = 0.95 * value
+        var maximum = 0.0
+        for row in 0..<3 {
+            for column in 0..<3 {
+                let identity = row == column ? 1.0 : 0.0
+                let expected = identity
+                    - strength * achromaticSaturationBoostLuma[column]
                 maximum = max(
                     maximum,
                     abs(matrix[row * 5 + column] - expected)
