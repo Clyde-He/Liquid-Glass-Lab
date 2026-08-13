@@ -30,36 +30,49 @@ const materializeLifecycleKey = (run) =>
   `${run.slice}\0${cellKey(run.cell, MATERIALIZE_LIFECYCLE_FIELDS)}`;
 
 /**
- * Channels that keep adapting after face opacity first reaches one. The same
- * insertion owns the later settled endpoint, so this detects a real two-stage
- * terminal state rather than comparing independent scheduler observations.
+ * Channels that need more than the settled endpoint to replay one paired
+ * lifecycle. The insertion can keep adapting after face opacity first reaches
+ * one, and the removal can briefly traverse the long-lived compact grade after
+ * starting from that insertion's exact settled payload.
  */
-export function terminalAdaptiveFaceGradeKeys(run) {
-  if (run.cell.direction !== "insertion" || run.cell.shortSide >= 200) {
+export function terminalAdaptiveFaceGradeKeys(insertion, removal = null) {
+  if (insertion.cell.direction !== "insertion"
+      || insertion.cell.shortSide >= 200) {
     return new Set();
   }
-  const firstEndpoint = (run.samples ?? []).find(({ phase }) => phase === "endpoint");
-  const finalEndpoint = endpointSample(run);
-  const inputs = glassBackground(firstEndpoint)?.inputs;
+  const firstEndpoint = (insertion.samples ?? [])
+    .find(({ phase }) => phase === "endpoint");
+  const finalEndpoint = endpointSample(insertion);
   const finalInputs = glassBackground(finalEndpoint)?.inputs;
-  const g = progressOf(firstEndpoint);
-  if (!inputs || !finalInputs || g === null) return new Set();
+  if (!finalInputs) return new Set();
+
+  const pairedRemoval = removal?.cell?.direction === "removal"
+      && materializeLifecycleKey(removal) === materializeLifecycleKey(insertion)
+    ? removal
+    : null;
+  const observations = [firstEndpoint, ...(pairedRemoval?.samples ?? [])]
+    .filter(Boolean);
 
   const table = channelTable({
-    clear: isClearCell(run.cell),
-    main: run.cell.main === true,
+    clear: isClearCell(insertion.cell),
+    main: insertion.cell.main === true,
   });
-  const inflation = geometryInflation(run.cell.shortSide);
-  const bound = Math.min(0.05, 4 / run.cell.shortSide) * 1.05;
+  const inflation = geometryInflation(insertion.cell.shortSide);
+  const bound = Math.min(0.05, 4 / insertion.cell.shortSide) * 1.05;
   const adaptive = new Set();
   for (const key of COMPACT_ADAPTIVE_FACE_GRADE_KEYS) {
     const channel = table[key];
     const end = numeric(finalInputs[key]);
-    const actual = numeric(inputs[key]);
-    if (!channel || end === null || actual === null) continue;
-    const predicted = resolveChannel(channel, g, end, inflation);
+    if (!channel || end === null) continue;
     const scale = Math.max(1, Math.abs(end - channel.start));
-    if (Math.abs(actual - predicted) / scale > bound) adaptive.add(key);
+    const exceedsReplayBound = observations.some((sample) => {
+      const actual = numeric(glassBackground(sample)?.inputs?.[key]);
+      const g = progressOf(sample);
+      if (actual === null || g === null) return false;
+      const predicted = resolveChannel(channel, g, end, inflation);
+      return Math.abs(actual - predicted) / scale > bound;
+    });
+    if (exceedsReplayBound) adaptive.add(key);
   }
   return adaptive;
 }
@@ -373,13 +386,22 @@ export default [
       const inertTransients = new Map();
       let comparisons = 0;
       let delegatedAdaptiveComparisons = 0;
+      const runsByLifecycle = new Map();
+      for (const run of runs) {
+        const key = materializeLifecycleKey(run);
+        if (!runsByLifecycle.has(key)) runsByLifecycle.set(key, {});
+        runsByLifecycle.get(key)[run.cell.direction] = run;
+      }
       const adaptiveByLifecycle = new Map(
-        runs
-          .filter((run) => run.cell.direction === "insertion")
-          .map((run) => [
-            materializeLifecycleKey(run),
-            terminalAdaptiveFaceGradeKeys(run),
-          ])
+        [...runsByLifecycle].map(([key, lifecycle]) => [
+          key,
+          lifecycle.insertion
+            ? terminalAdaptiveFaceGradeKeys(
+              lifecycle.insertion,
+              lifecycle.removal
+            )
+            : new Set(),
+        ])
       );
 
       for (const run of runs) {
