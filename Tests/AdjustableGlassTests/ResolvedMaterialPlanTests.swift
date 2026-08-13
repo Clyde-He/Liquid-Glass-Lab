@@ -548,8 +548,12 @@ final class ResolvedMaterialPlanTests: XCTestCase {
             at: directory,
             withIntermediateDirectories: true
         )
+        let currentMajor = ProcessInfo.processInfo.operatingSystemVersion
+            .majorVersion
         let bundledURL = try XCTUnwrap(
-            GlassMaterialAtlasCatalog.bundledAtlasURL(forMacOSMajor: 27)
+            GlassMaterialAtlasCatalog.bundledAtlasURL(
+                forMacOSMajor: currentMajor
+            )
         )
         var atlas = try JSONDecoder().decode(
             GlassMaterialStyleAtlas.self,
