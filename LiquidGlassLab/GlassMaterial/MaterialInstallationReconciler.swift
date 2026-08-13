@@ -208,7 +208,7 @@ final class MaterialInstallationReconciler {
         pendingIdentity = nil
         diagnostics.fullFreezeCount += 1
         GlassMaterialTintLog.signposts.notice(
-            "full freeze (base generation \(baseGeneration, privacy: .public))"
+            "material install started: mode=full generation=\(baseGeneration, privacy: .public)"
         )
         let installed = glassView.materialStrength.freeze(
             atlas: atlas,
@@ -220,15 +220,20 @@ final class MaterialInstallationReconciler {
             since: startedAt
         )
         diagnostics.lastInstallMilliseconds = freezeMilliseconds
-        GlassMaterialTintLog.signposts.notice(
-            "freeze install \(freezeMilliseconds, format: .fixed(precision: 1), privacy: .public)ms installed=\(installed, privacy: .public)"
-        )
 
         guard installed, frozenStyleIsCurrentlyApplied else {
+            let failedStage = installed ? "verification" : "write"
+            GlassMaterialTintLog.signposts.notice(
+                "material install failed: mode=full stage=\(failedStage, privacy: .public) duration=\(freezeMilliseconds, format: .fixed(precision: 1), privacy: .public)ms"
+            )
             setHealth(.failed)
             scheduleRetryIfNeeded()
             return .failed
         }
+
+        GlassMaterialTintLog.signposts.notice(
+            "material install succeeded: mode=full duration=\(freezeMilliseconds, format: .fixed(precision: 1), privacy: .public)ms"
+        )
 
         committedIdentity = Self.makeIdentity(
             for: plan,

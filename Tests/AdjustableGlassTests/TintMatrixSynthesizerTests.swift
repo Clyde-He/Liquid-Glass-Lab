@@ -37,20 +37,14 @@ final class TintMatrixSynthesizerTests: XCTestCase {
     }
 
     @MainActor
-    func testSelectedMajorGoldenBackedTintCertification() throws {
-        guard let rawMajor = ProcessInfo.processInfo.environment[
-            "CERTIFY_OS_MAJOR"
-        ] else {
-            throw XCTSkip(
-                "Set CERTIFY_OS_MAJOR to select an accepted Golden major"
-            )
+    func testEverySupportedMajorPassesGoldenBackedTintCertification() throws {
+        for major in GlassMaterialTintMatrixSynthesizer
+            .supportedOSMajorVersions.sorted() {
+            try assertGoldenBackedTintCertification(for: major)
         }
-        let major = try XCTUnwrap(Int(rawMajor))
-        XCTAssertTrue(
-            GlassMaterialTintMatrixSynthesizer.supportedOSMajorVersions
-                .contains(major),
-            "macOS \(major) is not in the synthesizer support set"
-        )
+    }
+
+    private func assertGoldenBackedTintCertification(for major: Int) throws {
         let directory = "Golden/macOS-\(major)"
         let requiredDocuments = [
             "tint.parameterization.sweep",
