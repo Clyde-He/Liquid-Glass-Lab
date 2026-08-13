@@ -2,7 +2,7 @@
 //  GlassLabGoldenExport.swift
 //  LiquidGlassLab
 //
-//  Drives the capture plan and writes the unified Golden archive.
+//  Drives the canonical Static Snapshot and Dynamic capture plan.
 //
 //  One command produces every section, because the sections have to agree on
 //  their environment to be comparable. Capturing them separately is how the
@@ -12,28 +12,31 @@
 
 #if os(macOS)
 import AppKit
-import CryptoKit
 import Foundation
 import SwiftUI
 
 enum GlassLabGoldenExportError: LocalizedError {
-    case contextRejected(slice: String, detail: String)
+    case contextRejected(context: String, detail: String)
     case emptySection(String)
     case duplicateRow(section: String, cell: String)
-    case incompleteProfile(missing: [String])
+    case invalidPlan(String)
+    case unprojectableCatalog(cell: String)
     case promotionFailed(String)
 
     var errorDescription: String? {
         switch self {
-        case let .contextRejected(slice, detail):
-            "The \(slice) slice could not establish its context: \(detail)."
+        case let .contextRejected(context, detail):
+            "Static context \(context) could not be captured: \(detail)."
         case let .emptySection(section):
             "Section \(section) captured no rows; the archive was not written."
         case let .duplicateRow(section, cell):
             "Section \(section) produced an unintended duplicate at \(cell). "
                 + "This section does not permit repeated cells."
-        case let .incompleteProfile(missing):
-            "Golden staging is incomplete; missing \(missing.joined(separator: ", "))."
+        case let .invalidPlan(detail):
+            "Golden capture plan is invalid: \(detail)"
+        case let .unprojectableCatalog(cell):
+            "Static context \(cell) is required by Consumer but cannot project "
+                + "a complete supported style sample."
         case let .promotionFailed(detail):
             "Golden staging could not be promoted atomically: \(detail)"
         }
@@ -55,7 +58,7 @@ extension GlassLabView {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Capture"
-        panel.message = "Choose the OS directory to write unified/ into."
+        panel.message = "Choose a directory for the Static and Dynamic capture."
         guard panel.runModal() == .OK, let base = panel.url else { return }
 
         isCapturingMatrix = true
@@ -66,7 +69,7 @@ extension GlassLabView {
             }
             do {
                 let meta = try await captureGoldenArchive(
-                    into: base.appendingPathComponent("unified", isDirectory: true)
+                    into: base.appendingPathComponent("golden-capture", isDirectory: true)
                 )
                 state.reportOutput = Self.goldenReport(meta)
             } catch is CancellationError {
@@ -84,50 +87,21 @@ extension GlassLabView {
     /// slice collides with the core product or sweeps nothing.
     static func goldenPlanReport() -> String {
         var lines = ["== Golden core capture plan =="]
-
-        func summarize(
-            _ title: String,
-            _ contexts: [GlassLabGoldenPlan.StaticContext]
-        ) {
-            var perSlice: [String: (contexts: Int, rows: Int)] = [:]
-            var identities: [String] = []
-            for context in contexts {
-                let rows = context.sweepsEveryVariant
-                    ? GlassLabTuning.variants.count
-                        * (GlassLabTuning.knownSubvariants.count + 1)
-                    : (context.variants?.count ?? 0)
-                perSlice[context.slice, default: (0, 0)].contexts += 1
-                perSlice[context.slice, default: (0, 0)].rows += rows
-                let subvariants: [String?] = context.sweepsEveryVariant
-                    ? [nil] + GlassLabTuning.knownSubvariants.map(Optional.some)
-                    : [nil]
-                for variant in context.variants ?? GlassLabTuning.variants {
-                    for subvariant in subvariants {
-                        identities.append(GoldenCell.staticCell(
-                            variant: variant,
-                            subvariant: subvariant,
-                            context: context,
-                            backdrop: GlassLabGoldenPlan.staticBackdrop
-                        ).identity)
-                    }
-                }
-            }
-            let total = perSlice.values.reduce(0) { $0 + $1.rows }
-            let repeated = identities.count - Set(identities).count
-            lines.append(
-                "\(title): \(contexts.count) contexts, \(total) rows"
-                + (repeated > 0 ? ", \(repeated) repeated cells" : "")
-            )
-            for (slice, counts) in perSlice.sorted(by: { $0.key < $1.key }) {
-                lines.append(
-                    "  \(slice.padding(toLength: 13, withPad: " ", startingAt: 0))"
-                    + " \(counts.contexts) contexts  \(counts.rows) rows"
-                )
-            }
+        let staticContexts = GlassLabGoldenPlan.staticContexts()
+        let repeated = staticContexts.count - Set(staticContexts.map(\.cell.identity)).count
+        lines.append(
+            "static: \(staticContexts.count) unique observations, "
+                + "\(GlassLabGoldenPlan.catalogContexts().count) Consumer anchors"
+                + (repeated > 0 ? ", \(repeated) duplicate coordinates" : "")
+        )
+        var labels: [String: Int] = [:]
+        for context in staticContexts { labels[context.label, default: 0] += 1 }
+        for (label, count) in labels.sorted(by: { $0.key < $1.key }) {
+            lines.append("  \(label)  \(count) observations")
         }
-
-        summarize("static-scalar", GlassLabGoldenPlan.staticContexts())
-        summarize("static-tree", GlassLabGoldenPlan.treeContexts())
+        lines.append(
+            "drift: \(GlassLabGoldenPlan.driftContexts().count) sentinel observations"
+        )
 
         let dynamic = GlassLabGoldenPlan.dynamicContexts()
         var dynamicSlices: [String: Int] = [:]
@@ -145,61 +119,52 @@ extension GlassLabView {
         return lines.joined(separator: "\n")
     }
 
-    static func goldenRegistryReport() -> String {
-        func report(_ profile: GlassLabGoldenCaptureRegistry.Profile) -> [String] {
-            var lines = [
-                "== \(profile.id) ==",
-                "Canonical: \(profile.canonical ? "yes" : "no")",
-                "Promotable: \(profile.promotable ? "yes" : "no")",
-            ]
-            for module in profile.modules {
-                lines.append(
-                    "  \(module.availability.rawValue)  \(module.id)"
-                    + "  driver=\(module.driver ?? "missing")"
-                    + "  resume=\(module.resumeScope)"
-                )
-            }
-            let problems = profile.validationProblems()
-            lines.append(
-                problems.isEmpty ? "Registry: valid" : "Registry: \(problems.joined(separator: "; "))"
-            )
-            return lines
-        }
-        return (
-            report(GlassLabGoldenCaptureRegistry.full(
-                forOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
-            ))
-                + [""]
-                + report(GlassLabGoldenCaptureRegistry.driftScan)
-        )
-            .joined(separator: "\n")
-    }
-
-    static func goldenReport(_ meta: GoldenMeta) -> String {
-        var lines = ["== Golden archive =="]
-        for name in ["static-scalar", "static-tree", "dynamic"] {
-            guard let section = meta.sections[name] else { continue }
-            let megabytes = Double(section.bytes) / 1_048_576
-            let slices = section.slices
-                .sorted { $0.key < $1.key }
-                .map { "\($0.key)=\($0.value)" }
-                .joined(separator: " ")
-            lines.append(
-                "\(name.padding(toLength: 14, withPad: " ", startingAt: 0)) "
-                + "\(section.rows) rows  \(String(format: "%.1f", megabytes)) MB"
-                + (section.repeatedCells > 0
-                    ? "  \(section.repeatedCells) repeated"
-                    : "")
-            )
-            lines.append("  slices: \(slices)")
-            lines.append("  swept: \(section.swept.joined(separator: ", "))")
-        }
-        return lines.joined(separator: "\n")
+    static func goldenReport(_ summary: GoldenCaptureSummary) -> String {
+        [
+            "== Golden capture ==",
+            "Static: \(summary.staticObservations) observations",
+            "Dynamic: \(summary.dynamicRuns) runs",
+            "OS: \(summary.capture.operatingSystem)",
+            "Architecture: \(summary.capture.architecture)",
+            "Display: \(summary.capture.displaySignature)",
+        ].joined(separator: "\n")
     }
 
     // MARK: - Driver
 
-    func captureGoldenArchive(into directory: URL) async throws -> GoldenMeta {
+    func captureGoldenArchive(into directory: URL) async throws -> GoldenCaptureSummary {
+        guard GlassLabGoldenPlan.fullPlanIsApproved() else {
+            throw GlassLabGoldenExportError.invalidPlan(
+                "Full must remain 776 unique observations with 56 Consumer anchors"
+            )
+        }
+        return try await captureGolden(
+            into: directory,
+            staticContexts: GlassLabGoldenPlan.staticContexts(),
+            capturesDynamic: true
+        )
+    }
+
+    func captureGoldenDriftArchive(
+        into directory: URL
+    ) async throws -> GoldenCaptureSummary {
+        guard GlassLabGoldenPlan.driftPlanIsApproved() else {
+            throw GlassLabGoldenExportError.invalidPlan(
+                "drift must remain 28 unique Full-plan sentinels with 24 Consumer anchors"
+            )
+        }
+        return try await captureGolden(
+            into: directory,
+            staticContexts: GlassLabGoldenPlan.driftContexts(),
+            capturesDynamic: false
+        )
+    }
+
+    private func captureGolden(
+        into directory: URL,
+        staticContexts: [GlassLabGoldenPlan.StaticContext],
+        capturesDynamic: Bool
+    ) async throws -> GoldenCaptureSummary {
         let originalRenderer = state.rendererMode
         let originalUsage = state.semanticUsage
         let originalSemanticPage = selectedSemanticPage
@@ -224,7 +189,7 @@ extension GlassLabView {
             options: [
                 .userInitiated, .idleSystemSleepDisabled, .idleDisplaySleepDisabled,
             ],
-            reason: "Capturing the unified Golden archive"
+            reason: "Capturing the Golden archive"
         )
         defer {
             ProcessInfo.processInfo.endActivity(activity)
@@ -253,10 +218,8 @@ extension GlassLabView {
             configureSemanticTransitionProbe()
         }
 
-        // The static sections are captured under one explicit appearance so a
-        // settled dynamic sample can be paired against its static endpoint.
-        // The historical sweeps recorded whatever the machine happened to be
-        // in, which is why that comparison was never expressible.
+        // Static product and research requirements share one canonical physical
+        // context and one complete typed tree per coordinate.
         let appearance = GlassLabGoldenPlan.staticAppearance
         state.hasScrim = false
         state.hasReducedTintOpacity = false
@@ -264,65 +227,82 @@ extension GlassLabView {
         state.tintColor = nil
         state.testAppearance = appearance
         state.testBackdrop = GlassLabGoldenPlan.staticBackdrop
-        state.windowPadding = 40
+        state.windowPadding = GlassLabGoldenPlan.staticWindowPadding
         state.isTestWindowKey = false
-        let environment = GoldenEnvironment(
-            windowMargin: 40,
-            scrim: false,
-            reducedTintOpacity: false,
-            adaptiveAppearance: 2,
-            overridesEnabled: false
-        )
         let capturedAt = ISO8601DateFormatter().string(from: Date())
         let operatingSystem = ProcessInfo.processInfo.operatingSystemVersionString
+        let captureEnvironment = GlassMaterialStyleAtlas.Environment.current(
+            for: state.testWindow.liveWindow?.screen
+        )
+        guard captureEnvironment.displaySignature != "unknown" else {
+            throw GlassLabGoldenExportError.contextRejected(
+                context: "Core",
+                detail: "the capture window has no identifiable display"
+            )
+        }
 
-        // Scoped to the static sections, and deliberately not held across the
+        // Scoped to Static, and deliberately not held across the
         // dynamic one. The flag stops the Recipe host and live readout from
         // reacting while the static sweeps stamp each context themselves.
         // The dynamic section uses the independent semantic host and should
         // run through the same normal observation path as the accepted
         // Materialize studies it is meant to replace.
         state.isCapturingRecipeMatrix = true
-        let scalar = try await captureStaticScalarSection(
-            environment: environment,
-            capturedAt: capturedAt,
-            operatingSystem: operatingSystem
-        )
-        let tree = try await captureStaticTreeSection(
-            environment: environment,
-            capturedAt: capturedAt,
-            operatingSystem: operatingSystem
+        let staticDocument = try await captureStaticSection(
+            contexts: staticContexts
         )
         state.isCapturingRecipeMatrix = false
-        let dynamic = try await captureDynamicSection(
-            environment: environment,
-            capturedAt: capturedAt,
-            operatingSystem: operatingSystem
+        guard GlassMaterialStyleAtlas.Environment.current(
+            for: state.testWindow.liveWindow?.screen
+        ).displaySignature == captureEnvironment.displaySignature else {
+            throw GlassLabGoldenExportError.contextRejected(
+                context: "Static",
+                detail: "the capture window moved to another display"
+            )
+        }
+        let dynamic = capturesDynamic ? try await captureDynamicSection() : nil
+        guard GlassMaterialStyleAtlas.Environment.current(
+            for: state.testWindow.liveWindow?.screen
+        ).displaySignature == captureEnvironment.displaySignature else {
+            throw GlassLabGoldenExportError.contextRejected(
+                context: "Dynamic",
+                detail: "the capture window moved to another display"
+            )
+        }
+
+        #if arch(arm64)
+        let architecture = "arm64"
+        #elseif arch(x86_64)
+        let architecture = "x86_64"
+        #else
+        let architecture = "unknown"
+        #endif
+        let capture = GoldenCaptureDocument(
+            schemaVersion: goldenSchemaVersion,
+            operatingSystem: operatingSystem,
+            architecture: architecture,
+            displaySignature: captureEnvironment.displaySignature,
+            capturedAt: capturedAt
         )
 
         return try Self.writeGoldenArchive(
             into: directory,
-            capturedAt: capturedAt,
-            operatingSystem: operatingSystem,
-            scalar: scalar,
-            tree: tree,
+            capture: capture,
+            staticDocument: staticDocument,
             dynamic: dynamic
         )
     }
 
     // MARK: - Static context settling
 
-    /// Establishes one static context and runs `body` against the live glass,
-    /// retrying the whole context when the application deactivates or AppKit
-    /// moves participation mid-sweep. A partial batch is never retained: a
-    /// half-swept context would look like a complete one to a reader.
-    private func withStaticContext<Row>(
+    /// Rebuilds and settles one exact coordinate. All 16 polls observe the same
+    /// fresh glass; failure after five bounded attempts aborts the whole archive.
+    private func captureStaticSnapshot(
         _ context: GlassLabGoldenPlan.StaticContext,
-        progress: String,
-        body: (NSGlassEffectView, String) async throws -> [Row]
-    ) async throws -> [Row] {
-        var attempts = 0
-        while true {
+        progress: String
+    ) async throws -> GoldenResolvedSnapshot {
+        var lastFailure = "the live glass was unavailable"
+        for _ in 1...5 {
             try Task.checkCancellation()
             try await waitUntilApplicationIsActive(progress: progress)
 
@@ -330,7 +310,7 @@ extension GlassLabView {
             state.windowHostType = context.host
             state.testAppearance = context.appearance
             state.testBackdrop = GlassLabGoldenPlan.staticBackdrop
-            state.windowPadding = 40
+            state.windowPadding = GlassLabGoldenPlan.staticWindowPadding
             state.hasScrim = false
             state.hasReducedTintOpacity = false
             state.adaptiveAppearance = 2
@@ -338,186 +318,142 @@ extension GlassLabView {
             state.glassWidth = context.width
             state.glassHeight = context.height
             state.cornerRadius = context.cornerRadius
+            state.variant = context.variant
+            state.subvariant = context.subvariant ?? ""
             state.isTestWindowMain = context.main
             state.isTestWindowKey = context.key
             state.isSubdued = context.subdued
             state.isTestWindowVisible = true
             state.testWindow.sync(with: state)
-            if let glass = state.testWindow.liveGlass {
-                GlassLabTuning.applyRecipe(from: state, to: glass)
-            }
-            try await Task.sleep(for: .milliseconds(300))
-
-            guard NSApp.isActive else { continue }
-            guard state.testWindow.isActuallyMain == context.main,
-                  state.testWindow.isActuallyKey == context.key,
-                  context.appearance.matchesName(
-                      state.testWindow.effectiveAppearanceName ?? ""
-                  ),
-                  let glass = state.testWindow.liveGlass else {
-                attempts += 1
-                guard attempts < 4 else {
-                    throw GlassLabGoldenExportError.contextRejected(
-                        slice: context.slice,
-                        detail: "wanted main=\(context.main) key=\(context.key), "
-                            + "got main=\(state.testWindow.isActuallyMain) "
-                            + "key=\(state.testWindow.isActuallyKey) "
-                            + "appearance="
-                            + "\(state.testWindow.effectiveAppearanceName ?? "unknown")"
-                    )
-                }
+            state.testWindow.rebuildGlass(with: state)
+            guard let glass = state.testWindow.liveGlass else {
+                lastFailure = "the live glass was unavailable"
+                try await Task.sleep(for: .milliseconds(180))
                 continue
             }
+            GlassLabTuning.applyRecipe(from: state, to: glass)
+            try await Task.sleep(for: .milliseconds(700))
 
-            let label = "\(context.host.contextID)-\(context.slice)"
-                + (context.key ? "-key" : (context.main ? "-main" : "-neither"))
-                + (context.subdued ? "-subdued" : "-standard")
+            guard NSApp.isActive else {
+                lastFailure = "the application was inactive"
+                continue
+            }
+            if let mismatch = staticContextMismatch(context, glass: glass) {
+                lastFailure = mismatch
+                continue
+            }
             do {
-                return try await body(glass, label)
-            } catch GlassLabTuning.MatrixCaptureError.applicationInactive {
-                continue
-            } catch GlassLabTuning.MatrixCaptureError.participationChanged {
-                attempts += 1
-                guard attempts < 4 else {
-                    throw GlassLabGoldenExportError.contextRejected(
-                        slice: context.slice,
-                        detail: "participation changed during the sweep"
-                    )
+                let snapshot = try await GlassLabTuning.settledResolvedTreeSnapshot(
+                    from: glass
+                )
+                guard NSApp.isActive else {
+                    lastFailure = "the application became inactive after settling"
+                    continue
                 }
+                if let mismatch = staticContextMismatch(context, glass: glass) {
+                    lastFailure = "after settling, \(mismatch)"
+                    continue
+                }
+                return snapshot
+            } catch GlassLabTuning.MatrixCaptureError.applicationInactive {
+                lastFailure = "the application became inactive while settling"
+                continue
+            } catch GlassLabTuning.MatrixCaptureError.missingLayerTree {
+                lastFailure = "the resolved layer tree was incomplete"
+                continue
+            } catch GlassLabTuning.MatrixCaptureError.unstableResolvedTree {
+                lastFailure = "the resolved layer tree did not settle"
                 continue
             }
         }
-    }
-
-    // MARK: - Section 1
-
-    private func captureStaticScalarSection(
-        environment: GoldenEnvironment,
-        capturedAt: String,
-        operatingSystem: String
-    ) async throws -> GoldenStaticScalarDocument {
-        let contexts = GlassLabGoldenPlan.staticContexts()
-        var rows: [GoldenStaticScalarRow] = []
-        var capability: GoldenStaticScalarDocument.Capability?
-
-        for (index, context) in contexts.enumerated() {
-            let batch = try await withStaticContext(
-                context,
-                progress: "static-scalar \(index + 1)/\(contexts.count) "
-                    + "(\(context.slice)) · \(rows.count) rows"
-            ) { glass, label in
-                try await GlassLabTuning.captureMatrix(
-                    on: glass,
-                    context: label,
-                    requestedMain: context.main,
-                    requestedKey: context.key,
-                    subdued: context.subdued,
-                    variants: context.variants,
-                    restoring: state
-                )
-            }
-            if capability == nil, let first = batch.first {
-                capability = .init(
-                    shaderInputKeys: first.shaderInputKeys,
-                    highlightInputKeys: first.highlightInputKeys,
-                    geometryKeys: first.geometryKeys
-                )
-            }
-            rows += batch.map { entry in
-                GoldenStaticScalarRow(
-                    entry: entry,
-                    cell: .staticCell(
-                        variant: entry.variant,
-                        subvariant: entry.subvariant,
-                        context: context,
-                        backdrop: GlassLabGoldenPlan.staticBackdrop
-                    ),
-                    slice: context.slice
-                )
-            }
-            state.reportOutput = "Golden static-scalar: \(rows.count) rows, "
-                + "context \(index + 1)/\(contexts.count)."
-        }
-
-        guard !rows.isEmpty else {
-            throw GlassLabGoldenExportError.emptySection("static-scalar")
-        }
-        return GoldenStaticScalarDocument(
-            schemaVersion: goldenSchemaVersion,
-            section: "static-scalar",
-            capturedAt: capturedAt,
-            operatingSystem: operatingSystem,
-            environment: environment,
-            capability: capability ?? .init(
-                shaderInputKeys: [], highlightInputKeys: [], geometryKeys: []
-            ),
-            rows: rows
+        throw GlassLabGoldenExportError.contextRejected(
+            context: context.cell.identity,
+            detail: "five fresh rebuilds exhausted before a stable complete tree "
+                + "matched main=\(context.main), key=\(context.key), and "
+                + "appearance=\(context.appearance.rawValue); last rejection: "
+                + lastFailure
         )
     }
 
-    // MARK: - Section 2
-
-    private func captureStaticTreeSection(
-        environment: GoldenEnvironment,
-        capturedAt: String,
-        operatingSystem: String
-    ) async throws -> GoldenStaticTreeDocument {
-        let contexts = GlassLabGoldenPlan.treeContexts()
-        var rows: [GoldenStaticTreeRow] = []
-
-        for (index, context) in contexts.enumerated() {
-            let batch = try await withStaticContext(
-                context,
-                progress: "static-tree \(index + 1)/\(contexts.count) "
-                    + "(\(context.slice)) · \(rows.count) rows"
-            ) { glass, label in
-                try await GlassLabTuning.capturePassAudit(
-                    on: glass,
-                    context: label,
-                    requestedMain: context.main,
-                    requestedKey: context.key,
-                    subdued: context.subdued,
-                    variants: context.variants,
-                    restoring: state
-                )
-            }
-            rows += batch.map { entry in
-                GoldenStaticTreeRow(
-                    entry: entry,
-                    cell: .staticCell(
-                        variant: entry.variant,
-                        subvariant: entry.subvariant,
-                        context: context,
-                        backdrop: GlassLabGoldenPlan.staticBackdrop
-                    ),
-                    slice: context.slice
-                )
-            }
-            state.reportOutput = "Golden static-tree: \(rows.count) rows, "
-                + "context \(index + 1)/\(contexts.count)."
+    private func staticContextMismatch(
+        _ context: GlassLabGoldenPlan.StaticContext,
+        glass: NSGlassEffectView
+    ) -> String? {
+        let actualMain = glass.window.map { NSApp.mainWindow === $0 } ?? false
+        let actualKey = glass.window.map { NSApp.keyWindow === $0 } ?? false
+        guard actualMain == context.main else {
+            return "main is \(actualMain), expected \(context.main)"
         }
-
-        guard !rows.isEmpty else {
-            throw GlassLabGoldenExportError.emptySection("static-tree")
+        guard actualKey == context.key else {
+            return "key is \(actualKey), expected \(context.key)"
         }
-        return GoldenStaticTreeDocument(
-            schemaVersion: goldenSchemaVersion,
-            section: "static-tree",
-            capturedAt: capturedAt,
-            operatingSystem: operatingSystem,
-            environment: environment,
-            rows: rows
+        let actualAppearance = state.testWindow.effectiveAppearanceName ?? ""
+        guard context.appearance.matchesName(actualAppearance) else {
+            return "appearance is \(actualAppearance), expected \(context.appearance.rawValue)"
+        }
+        let expectedPanel = context.host == .panel
+        guard (glass.window is NSPanel) == expectedPanel else {
+            return "window host does not match \(context.host.rawValue)"
+        }
+        guard abs(Double(glass.bounds.width) - context.width) < 0.001,
+              abs(Double(glass.bounds.height) - context.height) < 0.001 else {
+            return "bounds are \(glass.bounds.width)×\(glass.bounds.height), expected "
+                + "\(context.width)×\(context.height)"
+        }
+        guard abs(Double(glass.cornerRadius) - context.cornerRadius) < 0.001 else {
+            return "cornerRadius is \(glass.cornerRadius), expected \(context.cornerRadius)"
+        }
+        return GlassLabTuning.resolvedRecipeMismatch(
+            variant: context.variant,
+            subvariant: context.subvariant,
+            subdued: context.subdued,
+            on: glass
         )
     }
 
-    // MARK: - Section 3
+    // MARK: - Static
 
-    private func captureDynamicSection(
-        environment: GoldenEnvironment,
-        capturedAt: String,
-        operatingSystem: String
-    ) async throws -> GoldenDynamicDocument {
-        let contexts = GlassLabGoldenPlan.dynamicContexts()
+    private func captureStaticSection(
+        contexts: [GlassLabGoldenPlan.StaticContext]
+    ) async throws -> GoldenStaticDocument {
+        var observations: [GoldenStaticObservation] = []
+
+        for (index, context) in contexts.enumerated() {
+            let snapshot = try await captureStaticSnapshot(
+                context,
+                progress: "static \(index + 1)/\(contexts.count) "
+                    + "(\(context.label))"
+            )
+            if context.requiresCatalog,
+               GlassLabTuning.styleSampleProjection(of: snapshot) == nil {
+                throw GlassLabGoldenExportError.unprojectableCatalog(
+                    cell: context.cell.identity
+                )
+            }
+            observations.append(GoldenStaticObservation(
+                cell: context.cell,
+                snapshot: snapshot
+            ))
+            state.reportOutput = "Golden static: \(observations.count)/"
+                + "\(contexts.count) observations."
+        }
+
+        guard !observations.isEmpty else {
+            throw GlassLabGoldenExportError.emptySection("static")
+        }
+        return GoldenStaticDocument(
+            schemaVersion: goldenSchemaVersion,
+            consumerCells: contexts.filter(\.requiresCatalog).map(\.cell),
+            observations: observations
+        )
+    }
+
+    // MARK: - Dynamic
+
+    private func captureDynamicSection() async throws -> GoldenDynamicDocument {
+        let contexts = GlassLabGoldenPlan.dynamicContexts().filter {
+            $0.direction == .insertion
+        }
         var runs: [GoldenDynamicRun] = []
 
         state.rendererMode = .semanticUsage
@@ -532,9 +468,9 @@ extension GlassLabView {
                 let preset: GlassLabTintPreset = context.tinted ? .coral50 : .none
                 state.reportOutput = "Golden dynamic: run \(runs.count + 1), "
                     + "context \(index + 1)/\(contexts.count) (\(context.slice))."
-                let capture = try await performMaterializeCapture(
+                let insertion = try await performMaterializeCapture(
                     usage: usage,
-                    direction: context.direction,
+                    direction: .insertion,
                     animationMode: GlassLabMaterializeAnimationMode.linear,
                     linearDuration: 1,
                     requestedMain: context.main,
@@ -547,7 +483,30 @@ extension GlassLabView {
                         height: context.shortSide
                     )
                 )
-                runs.append(GoldenDynamicRun(capture: capture, slice: context.slice))
+                runs.append(GoldenDynamicRun(capture: insertion, slice: context.slice))
+
+                if context.slice == "core" {
+                    state.reportOutput = "Golden dynamic: run \(runs.count + 1), "
+                        + "paired removal for context \(index + 1)/\(contexts.count) "
+                        + "(\(context.slice))."
+                    let removal = try await performMaterializeCapture(
+                        usage: usage,
+                        direction: .removal,
+                        animationMode: GlassLabMaterializeAnimationMode.linear,
+                        linearDuration: 1,
+                        requestedMain: context.main,
+                        tint: preset.descriptor,
+                        tintColor: preset.color,
+                        appearance: context.appearance,
+                        backdrop: context.backdrop,
+                        glassSize: CGSize(
+                            width: GlassLabGoldenPlan.referenceWidth,
+                            height: context.shortSide
+                        ),
+                        continuingFrom: insertion
+                    )
+                    runs.append(GoldenDynamicRun(capture: removal, slice: context.slice))
+                }
             }
         }
 
@@ -556,10 +515,6 @@ extension GlassLabView {
         }
         return GoldenDynamicDocument(
             schemaVersion: goldenSchemaVersion,
-            section: "dynamic",
-            capturedAt: capturedAt,
-            operatingSystem: operatingSystem,
-            environment: environment,
             runs: runs
         )
     }
@@ -568,12 +523,10 @@ extension GlassLabView {
 
     private static func writeGoldenArchive(
         into directory: URL,
-        capturedAt: String,
-        operatingSystem: String,
-        scalar: GoldenStaticScalarDocument,
-        tree: GoldenStaticTreeDocument,
-        dynamic: GoldenDynamicDocument
-    ) throws -> GoldenMeta {
+        capture: GoldenCaptureDocument,
+        staticDocument: GoldenStaticDocument,
+        dynamic: GoldenDynamicDocument?
+    ) throws -> GoldenCaptureSummary {
         let fileManager = FileManager.default
         let parent = directory.deletingLastPathComponent()
         try fileManager.createDirectory(
@@ -598,19 +551,12 @@ extension GlassLabView {
         )
         defer { try? fileManager.removeItem(at: staging) }
 
-        let meta = try writeGoldenArchivePayload(
+        try writeGoldenArchivePayload(
             into: staging,
-            capturedAt: capturedAt,
-            operatingSystem: operatingSystem,
-            scalar: scalar,
-            tree: tree,
+            capture: capture,
+            staticDocument: staticDocument,
             dynamic: dynamic
         )
-        let required = Set(["static-scalar", "static-tree", "dynamic"])
-        let missing = required.subtracting(meta.sections.keys).sorted()
-        guard missing.isEmpty else {
-            throw GlassLabGoldenExportError.incompleteProfile(missing: missing)
-        }
         do {
             if fileManager.fileExists(atPath: directory.path) {
                 _ = try fileManager.replaceItemAt(
@@ -627,76 +573,58 @@ extension GlassLabView {
                 error.localizedDescription
             )
         }
-        return meta
+        return GoldenCaptureSummary(
+            capture: capture,
+            staticObservations: staticDocument.observations.count,
+            dynamicRuns: dynamic?.runs.count ?? 0
+        )
     }
 
     private static func writeGoldenArchivePayload(
         into directory: URL,
-        capturedAt: String,
-        operatingSystem: String,
-        scalar: GoldenStaticScalarDocument,
-        tree: GoldenStaticTreeDocument,
-        dynamic: GoldenDynamicDocument
-    ) throws -> GoldenMeta {
+        capture: GoldenCaptureDocument,
+        staticDocument: GoldenStaticDocument,
+        dynamic: GoldenDynamicDocument?
+    ) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
 
-        var sections: [String: GoldenMeta.Section] = [:]
-        sections["static-scalar"] = try write(
-            scalar,
-            rows: scalar.rows.map(\.cell),
-            slices: scalar.rows.map(\.slice),
-            named: "static-scalar",
+        try write(
+            staticDocument,
+            rows: staticDocument.observations.map(\.cell),
+            named: "static",
             into: directory,
             encoder: encoder,
             allowsRepeats: false
         )
-        sections["static-tree"] = try write(
-            tree,
-            rows: tree.rows.map(\.cell),
-            slices: tree.rows.map(\.slice),
-            named: "static-tree",
+        if let dynamic {
+            try write(
+                dynamic,
+                rows: dynamic.runs.map(\.cell),
+                named: "dynamic",
+                into: directory,
+                encoder: encoder,
+                allowsRepeats: true
+            )
+        }
+        try write(
+            capture,
+            rows: [],
+            named: "capture",
             into: directory,
             encoder: encoder,
-            // The repeat pass deliberately re-captures cells that already
-            // exist; that overlap is the stability evidence.
-            allowsRepeats: true
+            allowsRepeats: false
         )
-        sections["dynamic"] = try write(
-            dynamic,
-            rows: dynamic.runs.map(\.cell),
-            slices: dynamic.runs.map(\.slice),
-            named: "dynamic",
-            into: directory,
-            encoder: encoder,
-            allowsRepeats: true
-        )
-
-        let meta = GoldenMeta(
-            schemaVersion: goldenSchemaVersion,
-            operatingSystem: operatingSystem,
-            capturedAt: capturedAt,
-            role: "canonical",
-            sections: sections
-        )
-        let metaEncoder = JSONEncoder()
-        metaEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try metaEncoder.encode(meta).write(
-            to: directory.appendingPathComponent("meta.json"),
-            options: .atomic
-        )
-        return meta
     }
 
     private static func write<Document: Encodable>(
         _ document: Document,
         rows: [GoldenCell],
-        slices: [String],
         named name: String,
         into directory: URL,
         encoder: JSONEncoder,
         allowsRepeats: Bool
-    ) throws -> GoldenMeta.Section {
+    ) throws {
         let identities = rows.map(\.identity)
         let repeated = identities.count - Set(identities).count
         if !allowsRepeats, repeated > 0 {
@@ -715,47 +643,6 @@ extension GlassLabView {
             options: .atomic
         )
 
-        var sliceCounts: [String: Int] = [:]
-        for slice in slices { sliceCounts[slice, default: 0] += 1 }
-
-        return GoldenMeta.Section(
-            file: file,
-            rows: rows.count,
-            repeatedCells: repeated,
-            bytes: bytes.count,
-            sha256: SHA256.hash(data: bytes)
-                .map { String(format: "%02x", $0) }
-                .joined(),
-            swept: GoldenCell.sweptAxes(in: rows),
-            slices: sliceCounts
-        )
-    }
-}
-
-extension GoldenCell {
-    /// Axes that actually take more than one non-nil value. Recorded so a
-    /// reader can tell "this axis was held constant" from "this axis was never
-    /// controlled" without inspecting every row.
-    static func sweptAxes(in cells: [GoldenCell]) -> [String] {
-        var axes: [String] = []
-        func check(_ name: String, _ values: [AnyHashable?]) {
-            let distinct = Set(values.compactMap { $0 })
-            if distinct.count > 1 { axes.append(name) }
-        }
-        check("variant", cells.map { $0.variant.map(AnyHashable.init) })
-        check("subvariant", cells.map { $0.subvariant.map(AnyHashable.init) })
-        check("main", cells.map { $0.main.map(AnyHashable.init) })
-        check("key", cells.map { $0.key.map(AnyHashable.init) })
-        check("subdued", cells.map { $0.subdued.map(AnyHashable.init) })
-        check("appearance", cells.map { $0.appearance.map(AnyHashable.init) })
-        check("backdrop", cells.map { $0.backdrop.map(AnyHashable.init) })
-        check("tint", cells.map { $0.tint.map(AnyHashable.init) })
-        check("width", cells.map { $0.width.map(AnyHashable.init) })
-        check("height", cells.map { $0.height.map(AnyHashable.init) })
-        check("cornerRadius", cells.map { $0.cornerRadius.map(AnyHashable.init) })
-        check("host", cells.map { $0.host.map(AnyHashable.init) })
-        check("direction", cells.map { $0.direction.map(AnyHashable.init) })
-        return axes
     }
 }
 #endif

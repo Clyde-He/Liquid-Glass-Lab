@@ -1,12 +1,10 @@
-// Static behaviour of all 21 Variants and 4 Subvariants, from the recursive
-// layer/pass inventory.
+// Static behaviour of all 21 Variants and 4 Subvariants, projected from the
+// canonical typed renderer Snapshot.
 //
 // Source: Documentation/AppKitGlassReverseEngineering.md — Recipe topology.
 //
-// The 336-row tree has been in the archive since the first macOS 27 capture
-// with no executable assertion on it; it was only ever fed to compare.mjs as
-// diff material. These learnings are what pin the variant vocabulary down, and
-// writing them is what surfaced the Variant 6 / Subdued interaction below.
+// These learnings pin the variant vocabulary down and surfaced the Variant 6 /
+// Subdued interaction below.
 
 import { cellKey } from "../tools/lib/cell.mjs";
 
@@ -19,51 +17,17 @@ const family = (pass) =>
 const inventory = (row) =>
   Object.values(row.passes ?? {}).map(family).sort().join(" | ");
 
-const ADAPTIVE_VARIANT_FOUR_FIELDS = new Set([
-  "inputFaceColorMatrixBlack",
-  "inputFaceColorMatrixFillColor",
-  "inputShadowColorMatrixFillColor",
-]);
-
-function canonical(value) {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.keys(value).sort().map((key) => [key, canonical(value[key])])
-    );
-  }
-  return value;
-}
-
-/**
- * Variant 4 continuously adapts three color fields even under a controlled
- * backdrop. Remove only those measured fields; every other layer and pass
- * value remains part of the repeatability contract.
- */
-function repeatValueSignature(row) {
-  const passes = structuredClone(row.passes ?? {});
-  if (row.cell.variant === 4) {
-    for (const pass of Object.values(passes)) {
-      if (pass.name !== "glassBackground") continue;
-      for (const key of ADAPTIVE_VARIANT_FOUR_FIELDS) {
-        delete pass.properties?.[key];
-      }
-    }
-  }
-  return JSON.stringify(canonical({ layers: row.layers ?? {}, passes }));
-}
-
-/**
- * Only the core product. Repeat and appearance rows are evidence *about* that
- * product — a second observation of a cell, and a Dark counterpart — so letting
- * them into a product-shaped assertion inflates counts and mixes appearances
- * into groups that are supposed to isolate one axis.
- *
- * A transcoded archive has no slices at all — its rows are one product — so a
- * missing `slice` reads as core rather than as something to exclude.
- */
+/** The complete research core within the larger sparse coordinate union. */
 const coreRows = (document) =>
-  (document.rows ?? []).filter((row) => (row.slice ?? "core") === "core");
+  (document.rows ?? []).filter((row) =>
+    row.cell.width === 480
+      && row.cell.height === 200
+      && row.cell.cornerRadius === 16
+      && row.cell.key === false
+      && row.cell.tint === "None"
+      && row.cell.backdrop === "Light"
+      && row.cell.host === "Panel"
+  );
 
 /** Groups rows by a subset of cell fields. */
 function groupBy(rows, fields) {
@@ -89,8 +53,8 @@ export default [
   {
     id: "static-tree-covers-the-variant-product",
     claim:
-      "The tree covers 21 Variants × 4 Subvariants × Main × Subdued as 336 "
-      + "distinct, context-accepted cells",
+      "The Snapshot plan covers 21 Variants × 4 Subvariants × Main × Subdued "
+      + "× Appearance as 672 distinct, context-accepted research cells",
     source: "AppKitGlassReverseEngineering.md — Recipe topology",
     sections: [SECTION],
     verify({ sections, expect }) {
@@ -100,7 +64,8 @@ export default [
       expect.equal(axes.subvariant.length, 3, "non-nil subvariants swept");
       expect.equal(axes.main.length, 2, "main values swept");
       expect.equal(axes.subdued.length, 2, "subdued values swept");
-      expect.equal(rows.length, 21 * 4 * 2 * 2, "rows");
+      expect.equal(axes.appearance.length, 2, "appearances swept");
+      expect.equal(rows.length, 21 * 4 * 2 * 2 * 2, "rows");
       expect.equal(
         new Set(rows.map((row) => cellKey(row.cell))).size,
         rows.length,
@@ -111,45 +76,6 @@ export default [
         0,
         "context-rejected rows"
       );
-    },
-  },
-
-  {
-    id: "static-tree-repeat-agrees-with-core",
-    claim:
-      "The repeat sweep re-captures one nil-subvariant Main-On row per Variant "
-      + "and agrees with the core sweep on topology and resolved values, "
-      + "excluding Variant 4's three measured adaptive color fields",
-    source: "Golden/CAPTURE-SPEC.md — static-tree repeat",
-    sections: [SECTION],
-    verify({ sections, expect }) {
-      const document = sections[SECTION];
-      const repeats = (document.rows ?? []).filter((row) => row.slice === "repeat");
-      if (repeats.length === 0) {
-        expect.unverifiable(
-          "no static-tree repeat slice — capture with the direct Golden exporter"
-        );
-      }
-      expect.equal(repeats.length, 21, "repeat rows");
-
-      const core = new Map(coreRows(document).map((row) => [cellKey(row.cell), row]));
-      const missing = [];
-      const differing = [];
-      for (const repeat of repeats) {
-        const original = core.get(cellKey(repeat.cell));
-        if (!original) {
-          missing.push(cellKey(repeat.cell));
-          continue;
-        }
-        if (original.topologySignature !== repeat.topologySignature) {
-          differing.push(`${repeat.cell.variant}:topology`);
-        }
-        if (repeatValueSignature(original) !== repeatValueSignature(repeat)) {
-          differing.push(`${repeat.cell.variant}:value`);
-        }
-      }
-      expect.equal(missing.length, 0, "repeat cells missing from core");
-      expect.equal(differing.length, 0, "repeat signature differences");
     },
   },
 
@@ -173,7 +99,10 @@ export default [
       );
 
       // Main-invariance stated as its own check so a regression names the axis.
-      const perMain = groupBy(rows, ["variant", "subvariant", "subdued"]);
+      const perMain = groupBy(
+        rows,
+        ["variant", "subvariant", "subdued", "appearance"]
+      );
       let compared = 0;
       const mainSensitive = [];
       for (const [key, members] of perMain) {
@@ -183,7 +112,7 @@ export default [
           mainSensitive.push(key);
         }
       }
-      expect.equal(compared, 21 * 4 * 2, "Main pairs compared");
+      expect.equal(compared, 21 * 4 * 2 * 2, "Main pairs compared");
       expect.equal(mainSensitive.length, 0, "cells whose topology follows Main");
     },
   },
@@ -220,7 +149,7 @@ export default [
       }
       expect.equal([...counts.standard].join(","), "7", "Variant 6 standard passes");
       expect.equal([...counts.subdued].join(","), "5", "Variant 6 subdued passes");
-      expect.equal(gradient.standard, 8, "standard rows carrying the gradient");
+      expect.equal(gradient.standard, 16, "standard rows carrying the gradient");
       expect.equal(gradient.subdued, 0, "subdued rows carrying the gradient");
     },
   },
@@ -309,48 +238,34 @@ export default [
   {
     id: "topology-does-not-follow-appearance",
     claim:
-      "Appearance moves resolved values but never the pass inventory. That is "
-      + "what lets the tree be captured under one appearance and still describe "
-      + "the whole variant vocabulary — and it is asserted rather than assumed, "
-      + "because the dynamic section can only answer it for Variants 1 and 2",
+      "Appearance moves resolved values but never the pass inventory. The full "
+      + "Snapshot plan observes both appearances rather than inferring one from "
+      + "the other",
     source: "AppKitGlassReverseEngineering.md — Recipe topology",
     sections: [SECTION],
     verify({ sections, expect }) {
       const rows = sections[SECTION].rows ?? [];
-      const slice = rows.filter((row) => row.slice === "appearance");
-      if (slice.length === 0) {
-        expect.unverifiable(
-          "no appearance slice in the tree — capture one DarkAqua row per "
-          + "Variant before this can be re-derived"
-        );
-      }
-
-      const reference = new Map();
-      for (const row of coreRows(sections[SECTION])) {
-        if (row.cell.subvariant !== null) continue;
-        if (row.cell.main !== true || row.cell.subdued !== false) continue;
-        reference.set(row.cell.variant, row);
-      }
-
-      const missing = [];
+      const candidates = coreRows(sections[SECTION]).filter(
+        (row) => row.cell.subvariant === null
+          && row.cell.main === true
+          && row.cell.subdued === false
+      );
+      const groups = groupBy(candidates, ["variant"]);
       const differing = [];
-      for (const row of slice) {
-        const other = reference.get(row.cell.variant);
-        if (!other) { missing.push(row.cell.variant); continue; }
-        expect.ok(
-          row.cell.appearance !== other.cell.appearance,
-          `Variant ${row.cell.variant} pairs across appearance`,
-          `${other.cell.appearance} vs ${row.cell.appearance}`
-        );
-        if (row.topologySignature !== other.topologySignature) {
-          differing.push(`v${row.cell.variant}:topology`);
+      for (const [variant, members] of groups) {
+        if (members.length !== 2) {
+          differing.push(`v${variant}:missing appearance`);
+          continue;
         }
-        if (inventory(row) !== inventory(other)) {
-          differing.push(`v${row.cell.variant}:inventory`);
+        const [first, second] = members;
+        if (first.topologySignature !== second.topologySignature) {
+          differing.push(`v${variant}:topology`);
+        }
+        if (inventory(first) !== inventory(second)) {
+          differing.push(`v${variant}:inventory`);
         }
       }
-      expect.equal(missing.join(",") || "none", "none", "slice rows with no core counterpart");
-      expect.equal(slice.length, 21, "Variants covered by the appearance slice");
+      expect.equal(groups.size, 21, "Variants covered across appearance");
       expect.equal(differing.join(",") || "none", "none", "Variants whose topology follows appearance");
     },
   },

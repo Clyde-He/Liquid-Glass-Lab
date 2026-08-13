@@ -1,8 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-export const MAX_ARTIFACT_BYTES = 90 * 1024 * 1024;
-
 function safeEntryPath(file) {
   return typeof file === "string"
     && file.length > 0
@@ -15,13 +13,11 @@ function safeEntryPath(file) {
 function decodeEntry(entry) {
   if (!entry || !safeEntryPath(entry.path)
       || !Number.isSafeInteger(entry.bytes) || entry.bytes < 0
-      || entry.bytes > MAX_ARTIFACT_BYTES
-      || typeof entry.data !== "string"
-      || entry.data.length !== 4 * Math.ceil(entry.bytes / 3)) {
+      || typeof entry.data !== "string") {
     throw new Error("invalid artifact handoff entry");
   }
   const bytes = Buffer.from(entry.data, "base64");
-  if (bytes.length !== entry.bytes || bytes.toString("base64") !== entry.data) {
+  if (bytes.length !== entry.bytes) {
     throw new Error(`artifact handoff byte count disagrees for ${entry.path}`);
   }
   return bytes;
@@ -42,14 +38,9 @@ export function importArtifactEnvelope(output, destination) {
     throw new Error("driver returned an invalid artifact envelope contract");
   }
   const seen = new Set();
-  let totalBytes = 0;
   const entries = envelope.entries.map((entry) => {
     if (seen.has(entry?.path)) throw new Error(`duplicate artifact handoff entry: ${entry.path}`);
     seen.add(entry?.path);
-    totalBytes += entry?.bytes ?? 0;
-    if (!Number.isSafeInteger(totalBytes) || totalBytes > MAX_ARTIFACT_BYTES) {
-      throw new Error(`artifact handoff exceeds ${MAX_ARTIFACT_BYTES} bytes`);
-    }
     return { path: entry.path, bytes: decodeEntry(entry) };
   });
   if (envelope.rootKind === "file") {

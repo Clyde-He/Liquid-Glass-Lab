@@ -123,7 +123,7 @@ The control window first selects `NSGlass`, `SwiftUI`, or `Bench` in Navigation,
 
 - Recipe: `General` and `Passes` — the NSGlass tweaking surface;
 - Semantic Usage: `General` and `Layer Inspector` — the SwiftUI tweaking surface;
-- Bench: `Atlas`, `Exports`, `Materialize`, `Tint Study`, `Transition`, and `Probes` — every capture, study, probe, and export lives here, off the tweaking pages. Atlas is the frozen-baseline acceptance page: it captures a separate visible reference sweep and the product Provider calibration. The Provider pairs every hidden Main-On sample with a same-context Main-Off witness, commits only after full payload proof plus frozen-destination readback for both product semantics, and persists to a file isolated from the reference artifact. The page then drives a real non-activating HUD panel through Normal (verified Main-On) and Muted (verified Main-Off), as well as appearance, variant, visibility, tint, and size. It also quantifies the size-interpolation error against live resolutions (`--verify-style-atlas` runs its automatable core headless). `Export Major Catalog` writes the verified atlas using the `glass-macos-<major>.json` convention. Product loading shares that snapshot across minor/beta builds and displays within the major, while complete frozen readback remains the structural compatibility gate.
+- Bench: `Atlas`, `Exports`, `Materialize`, `Tint Study`, `Transition`, and `Probes` — capture and diagnostic surfaces live here, off the tweaking pages. Atlas exercises the runtime Provider, loads the bundled Catalog derived from accepted Golden, drives a real non-activating HUD through Normal/Muted and appearance/material/tint/size changes, and measures interpolation against live resolutions. Provider calibration remains a transient product fallback; this page neither captures release evidence nor exports Catalogs.
 
 Bench is not a renderer: each Bench page steers `rendererMode` (and the hidden context pages the capture drivers still key on) to whatever its instrumentation needs, and leaving Bench hands the renderer back to the sidebar selection.
 
@@ -382,9 +382,9 @@ The former Recursive Pass Audit was the structural complement to the compact Rec
 
 For every cell, the audit traverses ordinary sublayers plus mask-owned layer trees. Stable paths key layer and pass dictionaries so an inserted pass appears as one added structural record instead of shifting every later array index. It records direct `filters`, `backgroundFilters`, `compositingFilter`, and any object-backed `effect`. CAFilter `inputKeys` and effect `CA_attributes` are captured as capabilities; every property is independently marked `value`, `nil`, or `unreadable`, with metadata and stable color/value descriptions.
 
-Each snapshot carried SHA-256 topology and resolved-value signatures. The standalone canonical files are retired; their product coverage now belongs to `core.static-tree`. The separate display-context control remains registered because its contrast claim is absent from the direct capture.
+The old exporter stored topology and value signatures beside its string-valued tree. The current Golden stores one complete typed Snapshot and derives scalar, recursive, signature, and Consumer views at read time. Display/build identity remains visible as capture provenance so cross-version value changes are not overstated as OS-only causality.
 
-Accepted OS baselines, their build manifests, and the semantic comparison tool live in [`Golden`](../Golden/README.md).
+Accepted OS baselines and the semantic comparison tool live in [`Golden`](../Golden/README.md).
 
 ## Range and control policy
 

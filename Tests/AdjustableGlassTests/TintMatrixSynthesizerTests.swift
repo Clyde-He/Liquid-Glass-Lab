@@ -42,7 +42,7 @@ final class TintMatrixSynthesizerTests: XCTestCase {
             "CERTIFY_OS_MAJOR"
         ] else {
             throw XCTSkip(
-                "Run through certify-package.mjs to select a Golden major"
+                "Set CERTIFY_OS_MAJOR to select an accepted Golden major"
             )
         }
         let major = try XCTUnwrap(Int(rawMajor))
@@ -52,18 +52,22 @@ final class TintMatrixSynthesizerTests: XCTestCase {
             "macOS \(major) is not in the synthesizer support set"
         )
         let directory = "Golden/macOS-\(major)"
-        let requiredModules = [
+        let requiredDocuments = [
             "tint.parameterization.sweep",
             "tint.parameterization.focused-2b",
             "tint.parameterization.hue-2c",
             "tint.sync-resolution",
             "tint.wide-gamut",
         ]
-        let manifest = try loadManifest(directory: directory)
-        for moduleID in requiredModules {
+        for documentID in requiredDocuments {
             XCTAssertTrue(
-                manifest.modules.contains { $0.id == moduleID },
-                "Missing required Golden module \(moduleID)"
+                FileManager.default.fileExists(
+                    atPath: try documentURL(
+                        documentID,
+                        directory: directory
+                    ).path
+                ),
+                "Missing required Golden document \(documentID)"
             )
         }
 
@@ -74,7 +78,7 @@ final class TintMatrixSynthesizerTests: XCTestCase {
             fixture: ""
         )
         var rowCount = 0
-        for moduleID in requiredModules.prefix(3) {
+        for moduleID in requiredDocuments.prefix(3) {
             let document = try loadSweep(
                 moduleID: moduleID,
                 directory: directory
@@ -949,50 +953,30 @@ final class TintMatrixSynthesizerTests: XCTestCase {
         }
     }
 
-    private struct GoldenManifest: Decodable {
-        struct Module: Decodable {
-            var id: String
-            var file: String
-        }
-
-        var modules: [Module]
-    }
-
-    private func loadManifest(directory: String) throws -> GoldenManifest {
-        let repositoryRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        return try JSONDecoder().decode(
-            GoldenManifest.self,
-            from: Data(
-                contentsOf: repositoryRoot
-                    .appendingPathComponent(directory)
-                    .appendingPathComponent("manifest.json")
-            )
-        )
-    }
-
-    private func moduleURL(
+    private func documentURL(
         _ moduleID: String,
         directory: String
     ) throws -> URL {
+        let files = [
+            "tint.parameterization.sweep":
+                "tint-parameterization-sweep.json",
+            "tint.parameterization.focused-2b":
+                "tint-parameterization-focused-phase-2b.json",
+            "tint.parameterization.hue-2c":
+                "tint-parameterization-hue-phase-2c.json",
+            "tint.sync-resolution": "tint-sync-resolution.json",
+            "tint.wide-gamut": "tint-wide-gamut-model.json",
+        ]
+        let file = try XCTUnwrap(
+            files[moduleID],
+            "Unknown Golden document \(moduleID)"
+        )
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let osDirectory = repositoryRoot.appendingPathComponent(directory)
-        let manifest = try JSONDecoder().decode(
-            GoldenManifest.self,
-            from: Data(
-                contentsOf: osDirectory.appendingPathComponent("manifest.json")
-            )
-        )
-        let module = try XCTUnwrap(
-            manifest.modules.first { $0.id == moduleID },
-            "Golden module \(moduleID) is not registered in \(directory)"
-        )
-        return osDirectory.appendingPathComponent(module.file)
+        return repositoryRoot.appendingPathComponent(directory)
+            .appendingPathComponent(file)
     }
 
     private func loadSweep(
@@ -1002,7 +986,7 @@ final class TintMatrixSynthesizerTests: XCTestCase {
         return try JSONDecoder().decode(
             SweepDocument.self,
             from: Data(
-                contentsOf: try moduleURL(moduleID, directory: directory)
+                contentsOf: try documentURL(moduleID, directory: directory)
             )
         )
     }
@@ -1014,7 +998,7 @@ final class TintMatrixSynthesizerTests: XCTestCase {
         return try JSONDecoder().decode(
             WideGamutDocument.self,
             from: Data(
-                contentsOf: try moduleURL(moduleID, directory: directory)
+                contentsOf: try documentURL(moduleID, directory: directory)
             )
         )
     }

@@ -68,7 +68,7 @@ completely independent of the requested RGB. Consequences: (a) the product decis
 | Regular · Main-Off (both appearances) | neutral suppression | neutral suppression |
 | Clear · Main-Off (both appearances) | neutral suppression | **standard, = Main-On** ← changed |
 
-Two independent capture pipelines agree on the 27 behavior (the Golden reference sweep and the PR #3 provider catalog), so the 27 rows are not a capture artifact. The AppKit RE doc statements "Regular and Clear use the same Tint matrix" and "Main Off suppresses tested hues into one neutral matrix" were measured on 26.6 and are **stale for 27** (dark appearance splits the variants; Clear no longer suppresses).
+Two independently acquired 27 datasets agreed on this behavior, so the rows are not a single-capture artifact. The AppKit RE doc statements "Regular and Clear use the same Tint matrix" and "Main Off suppresses tested hues into one neutral matrix" were measured on 26.6 and are **stale for 27** (dark appearance splits the variants; Clear no longer suppresses).
 
 ### 6. The endpoint functions themselves appear stable across majors
 
@@ -88,7 +88,7 @@ Suggestive (not established): in HSB terms the standard dark endpoint looks hue-
 ## Data provenance (all existing evidence)
 
 - **salmon endpoints, all 8 cells**: the pre-strip PR #3 catalog — `git show a2499e3:LiquidGlassLab/GlassMaterial/Catalog/glass-macos-27.json`, `tintMatrices` (source (1.0, 0.45, 0.35, α 0.6), flat `[cellKey, entries]` pairs). Stripped from the shipped catalog on purpose; the history copy is the data.
-- **coral endpoints, cross-version**: `Golden/macOS-26/unified/dynamic.json` and `Golden/macOS-27/unified/dynamic.json` — rows with `tint == "Coral · 50%"` (48 per version) carry resolved `ColorMatrix4x5` strings; parse with the regex in `Golden/tools/analyze-tint-study.mjs`. Rank-1 check: divide each RGB row by Rec.709 weights, require ratio spread < 1e-2, endpoints are `(k+bias, bias)`.
+- **coral endpoints, cross-version**: `Golden/macOS-26/dynamic.json` and `Golden/macOS-27/dynamic.json` — rows with `tint == "Coral · 50%"` (48 per version) carry resolved `ColorMatrix4x5` strings; parse with the regex in `Golden/tools/analyze-tint-study.mjs`. Rank-1 check: divide each RGB row by Rec.709 weights, require ratio spread < 1e-2, endpoints are `(k+bias, bias)`.
 - **multi-alpha / Cyan presets**: `GlassLabTintPreset` in `LiquidGlassLab/GlassLab/GlassLabTintStudy.swift` (Coral 25/50/100%, Cyan 50%, Reduced variants). The historical `glass-tint-study.json` exports were never checked in and are lost — **persist every new dataset under `Golden/`** so this does not happen again.
 
 ## The study
@@ -97,7 +97,7 @@ Suggestive (not established): in HSB terms the standard dark endpoint looks hue-
 
 The existing Bench `Tint Study` page now includes a `Parameterization Sweep` section rather than exposing a second Atlas-side study. Its full-grid v1 plan captures 170 colors × 8 paired cells = 1,360 compact rows in one long-lived probe session, writes an atomic checkpoint after every completed color, and can resume the same OS-build/display-bound checkpoint. It does not call the product's color-lock path or mutate the runtime Tint cache.
 
-The plan contains the required 12 × 4 × 3 HSV grid, achromatic and very-dark slices, exact Coral/Cyan historical anchors, and a fixed-RGB alpha sweep. Each row is rejected unless the paired style samples prove genuine Main-On participation and the source, alpha row, and 20 coefficients are complete. Structure is evidence, not admission: luma-endpoint and neutral-suppression rows are classified alongside the achromatic channel-affine family, while any unfamiliar matrix is retained verbatim as `unclassified` with its residuals. Legacy full-grid checkpoints that called the gray family `unclassified` remain valid and are reclassified during analysis. Use `Golden/tools/analyze-tint-parameterization.mjs` to re-run those gates and summarize per-cell transform selection. No fitted RGB→matrix model is claimed until a complete dataset has been captured and analyzed.
+The plan contains the required 12 × 4 × 3 HSV grid, achromatic and very-dark slices, exact Coral/Cyan historical anchors, and a fixed-RGB alpha sweep. Each row is rejected unless the paired style samples prove genuine Main-On participation and the source, alpha row, and 20 coefficients are complete. Structure is evidence, not admission: luma-endpoint and neutral-suppression rows are classified alongside the achromatic channel-affine family, while any unfamiliar matrix is retained verbatim as `unclassified` with its residuals. Use `Golden/tools/analyze-tint-parameterization.mjs` to re-run those gates and summarize per-cell transform selection. No fitted RGB→matrix model is claimed until a complete dataset has been captured and analyzed.
 
 ### macOS 27 full-grid result
 
@@ -148,7 +148,7 @@ Product runtime behavior is now switched on macOS 26 and 27. `GlassEffectControl
 
 The original grid capture, structure classification, and endpoint fitting steps are complete. The cross-version check has since been executed in full: the complete Full Grid, Phase 2b, and Phase 2c plans were re-captured on a macOS 26.6 host (`Golden/macOS-26/tint-parameterization-*.json`, 3,496 rows).
 
-**macOS 26 certification result.** The chromatic transforms were fitted on macOS 27 data only, so every 26 row is out-of-sample — and the standard and pastel closed forms hold at float precision (worst chromatic residual 3.9e-7; reserved rgb-holdouts 2.4e-7). The achromatic/chromatic boundary is identical (chroma 0.0003 achromatic, 0.0004 chromatic), and the neutral suppression coefficients are bit-identical to 27's. The majors differ only in:
+**macOS 26 certification result.** The chromatic transforms were fitted on macOS 27 data only, so every 26 row is out-of-sample — and the standard and pastel closed forms hold at float precision (worst chromatic residual 3.9e-7; reserved rgb-holdouts 2.4e-7). The achromatic/chromatic boundary is identical (chroma 0.0003 achromatic, 0.0004 chromatic), and the neutral suppression coefficients are bit-identical to 27's. The analyzer recognizes the distinct macOS 26 `achromaticSaturationBoost` structure directly; the former `24/28/8` unclassified counts were a missing analyzer label, not unknown matrices. The majors differ only in:
 
 - **Context selection**: on 26 both Dark Main-On variants are pastel and all four Main-Off cells suppress; 27 moved Dark Clear Main-On to standard and stopped suppressing Clear Main-Off.
 - **Achromatic family**: 26 resolves `I − s(x)·(1⊗w)` with `s(x) = 0.9 + 0.05x`, `bias = 0.95x`, and a color-space-adjusted `w` (fitted residual 6.6e-5, held by the reserved gray-holdouts); 27 replaced it with the channel-affine rational form.
@@ -161,7 +161,7 @@ The original grid capture, structure classification, and endpoint fitting steps 
 - `NSColor` equality and colorspace conversions: capture stamps `GlassMaterialColorValue` in extended sRGB; keep the fit in that space or convert explicitly.
 - The witness-pair proof (`verifiesMainOn`) must keep gating every capture row: a contaminated Main-On sample poisons the fit silently.
 - Dark-Regular pastel rows verify participation too — do not assume the standard transform when validating dark cells.
-- All sweep output goes to `Golden/` with a manifest entry (sha256, entryCount, axes, notes), matching `Golden/CAPTURE-SPEC.md`.
+- All sweep output is captured and admitted with the other Golden evidence, matching `Golden/CAPTURE-SPEC.md`.
 
 ## macOS 26 resolver investigation (symbol route)
 

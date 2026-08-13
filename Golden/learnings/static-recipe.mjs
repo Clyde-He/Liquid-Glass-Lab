@@ -1,4 +1,4 @@
-// Static Recipe resolution, from the scalar shader-input sweep.
+// Static Recipe resolution, from the scalar projection of typed Snapshots.
 //
 // Source: Documentation/AppKitGlassReverseEngineering.md — "Geometry input is
 // the shortest side".
@@ -20,7 +20,9 @@ const baseRows = (rows) =>
 
 const regularMain = (rows) =>
   baseRows(rows).filter(
-    (row) => row.cell.variant === 1 && row.cell.main === true
+    (row) => row.cell.variant === 1
+      && row.cell.main === true
+      && row.cell.appearance === "Light"
   );
 
 const payloadSignature = (row) =>
@@ -99,8 +101,8 @@ export default [
         groups.get(key).push(row);
       }
       // The claim needs two rows that share a short side while differing in
-      // width or height. The sweep is 480 × {24, 200, 600}, so every short side
-      // occurs exactly once and no such pair exists.
+      // width or height. The plan includes an explicit transposed pair for
+      // that comparison.
       const testable = [...groups.values()].filter((members) => {
         const shapes = new Set(
           members.map((row) => `${row.cell.width}x${row.cell.height}`)
@@ -110,8 +112,7 @@ export default [
       if (testable.length === 0) {
         expect.unverifiable(
           "no two rows share a short side with different width/height — the "
-          + "sweep varies height at a fixed width 480. One transposed size pair "
-          + "(200×480 beside 480×200) would make this decidable"
+          + "declared transposed comparison is missing"
         );
       }
       const differing = [];
@@ -302,7 +303,10 @@ export default [
       // Pair rows that differ in appearance and nothing else.
       const groups = new Map();
       for (const row of sections[SECTION].rows ?? []) {
-        if (row.slice !== "core") continue;
+        if (row.cell.width !== 480 || row.cell.height !== 200
+            || row.cell.cornerRadius !== 16 || row.cell.key !== false
+            || row.cell.backdrop !== "Light" || row.cell.tint !== "None"
+            || row.cell.host !== "Panel") continue;
         const key = [
           row.cell.variant, row.cell.subvariant, row.cell.main,
           row.cell.key, row.cell.subdued, row.cell.width, row.cell.height,

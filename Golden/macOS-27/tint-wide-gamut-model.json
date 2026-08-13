@@ -1,13 +1,66 @@
 {
-  "capturedAt" : "2026-08-02T05:25:38Z",
+  "capturedAt" : "2026-08-12T19:10:49Z",
   "environment" : {
     "atlasSchemaVersion" : 2,
-    "displaySignature" : "Studio Display XDR @2.0x",
+    "displaySignature" : "Screen Sharing Virtual Display @2.0x",
     "osMajorVersion" : 27
   },
-  "formatVersion" : 1,
-  "operatingSystem" : "Version 27.0 (Build 26A5388g)",
+  "formatVersion" : 2,
+  "operatingSystem" : "Version 27.0 (Build 26A5406e)",
   "passed" : true,
+  "plannedColorIDs" : [
+    "boundary-p3-r000-g000-b000",
+    "boundary-p3-r000-g000-b050",
+    "boundary-p3-r000-g000-b100",
+    "boundary-p3-r000-g050-b000",
+    "boundary-p3-r000-g050-b050",
+    "boundary-p3-r000-g050-b100",
+    "boundary-p3-r000-g100-b000",
+    "boundary-p3-r000-g100-b050",
+    "boundary-p3-r000-g100-b100",
+    "boundary-p3-r050-g000-b000",
+    "boundary-p3-r050-g000-b050",
+    "boundary-p3-r050-g000-b100",
+    "boundary-p3-r050-g050-b000",
+    "boundary-p3-r050-g050-b050",
+    "boundary-p3-r050-g050-b100",
+    "boundary-p3-r050-g100-b000",
+    "boundary-p3-r050-g100-b050",
+    "boundary-p3-r050-g100-b100",
+    "boundary-p3-r100-g000-b000",
+    "boundary-p3-r100-g000-b050",
+    "boundary-p3-r100-g000-b100",
+    "boundary-p3-r100-g050-b000",
+    "boundary-p3-r100-g050-b050",
+    "boundary-p3-r100-g050-b100",
+    "boundary-p3-r100-g100-b000",
+    "boundary-p3-r100-g100-b050",
+    "boundary-p3-r100-g100-b100",
+    "holdout-p3-001",
+    "holdout-p3-002",
+    "holdout-p3-003",
+    "holdout-p3-004",
+    "holdout-p3-005",
+    "holdout-p3-006",
+    "holdout-p3-007",
+    "holdout-p3-008",
+    "holdout-p3-009",
+    "holdout-p3-010",
+    "holdout-p3-011",
+    "holdout-p3-012",
+    "holdout-p3-013",
+    "holdout-p3-014",
+    "holdout-p3-015",
+    "holdout-p3-016",
+    "holdout-p3-017",
+    "holdout-p3-018",
+    "holdout-p3-019",
+    "holdout-p3-020",
+    "holdout-p3-021",
+    "holdout-p3-022",
+    "holdout-p3-023",
+    "holdout-p3-024"
+  ],
   "rows" : [
     {
       "cell" : {
@@ -25716,412 +25769,412 @@
   ],
   "timings" : [
     {
-      "clearFlushMilliseconds" : 0.206458,
+      "clearFlushMilliseconds" : 0.289417,
       "colorID" : "boundary-p3-r000-g000-b000",
-      "matrixReadbackMilliseconds" : 0.445333,
-      "pairedProofMilliseconds" : 3.787792,
-      "setFlushMilliseconds" : 18.222042,
-      "totalMilliseconds" : 22.661625
+      "matrixReadbackMilliseconds" : 0.387375,
+      "pairedProofMilliseconds" : 3.0565,
+      "setFlushMilliseconds" : 15.555791,
+      "totalMilliseconds" : 19.289083
     },
     {
-      "clearFlushMilliseconds" : 8.047042,
+      "clearFlushMilliseconds" : 13.098625,
       "colorID" : "boundary-p3-r000-g000-b050",
-      "matrixReadbackMilliseconds" : 0.17675,
-      "pairedProofMilliseconds" : 1.819333,
-      "setFlushMilliseconds" : 6.087167,
-      "totalMilliseconds" : 16.130292
+      "matrixReadbackMilliseconds" : 0.278667,
+      "pairedProofMilliseconds" : 2.888083,
+      "setFlushMilliseconds" : 10.199667,
+      "totalMilliseconds" : 26.465042
     },
     {
-      "clearFlushMilliseconds" : 6.587458,
+      "clearFlushMilliseconds" : 12.585834,
       "colorID" : "boundary-p3-r000-g000-b100",
-      "matrixReadbackMilliseconds" : 0.222,
-      "pairedProofMilliseconds" : 2.004709,
-      "setFlushMilliseconds" : 6.057625,
-      "totalMilliseconds" : 14.871792
+      "matrixReadbackMilliseconds" : 0.291292,
+      "pairedProofMilliseconds" : 2.915375,
+      "setFlushMilliseconds" : 10.424791,
+      "totalMilliseconds" : 26.217292
     },
     {
-      "clearFlushMilliseconds" : 12.975875,
+      "clearFlushMilliseconds" : 6.238458,
       "colorID" : "boundary-p3-r000-g050-b000",
-      "matrixReadbackMilliseconds" : 0.278375,
-      "pairedProofMilliseconds" : 2.921125,
-      "setFlushMilliseconds" : 9.522917,
-      "totalMilliseconds" : 25.698292
+      "matrixReadbackMilliseconds" : 0.198792,
+      "pairedProofMilliseconds" : 1.799708,
+      "setFlushMilliseconds" : 5.963375,
+      "totalMilliseconds" : 14.200333
     },
     {
-      "clearFlushMilliseconds" : 15.040041,
+      "clearFlushMilliseconds" : 12.471542,
       "colorID" : "boundary-p3-r000-g050-b050",
-      "matrixReadbackMilliseconds" : 0.291792,
-      "pairedProofMilliseconds" : 3.05375,
-      "setFlushMilliseconds" : 10.201417,
-      "totalMilliseconds" : 28.587
+      "matrixReadbackMilliseconds" : 0.272542,
+      "pairedProofMilliseconds" : 2.871042,
+      "setFlushMilliseconds" : 9.631166,
+      "totalMilliseconds" : 25.246292
     },
     {
-      "clearFlushMilliseconds" : 13.932542,
+      "clearFlushMilliseconds" : 13.293958,
       "colorID" : "boundary-p3-r000-g050-b100",
-      "matrixReadbackMilliseconds" : 0.275375,
-      "pairedProofMilliseconds" : 3.279166,
-      "setFlushMilliseconds" : 9.6105,
-      "totalMilliseconds" : 27.097583
+      "matrixReadbackMilliseconds" : 0.294375,
+      "pairedProofMilliseconds" : 2.912334,
+      "setFlushMilliseconds" : 10.325333,
+      "totalMilliseconds" : 26.826
     },
     {
-      "clearFlushMilliseconds" : 12.927291,
+      "clearFlushMilliseconds" : 12.718792,
       "colorID" : "boundary-p3-r000-g100-b000",
-      "matrixReadbackMilliseconds" : 0.271958,
-      "pairedProofMilliseconds" : 2.958083,
-      "setFlushMilliseconds" : 9.716334,
-      "totalMilliseconds" : 25.873666
+      "matrixReadbackMilliseconds" : 0.288375,
+      "pairedProofMilliseconds" : 2.902416,
+      "setFlushMilliseconds" : 10.00775,
+      "totalMilliseconds" : 25.917333
     },
     {
-      "clearFlushMilliseconds" : 11.653583,
+      "clearFlushMilliseconds" : 12.543584,
       "colorID" : "boundary-p3-r000-g100-b050",
-      "matrixReadbackMilliseconds" : 0.255666,
-      "pairedProofMilliseconds" : 2.620125,
-      "setFlushMilliseconds" : 8.961292,
-      "totalMilliseconds" : 23.490666
+      "matrixReadbackMilliseconds" : 0.278084,
+      "pairedProofMilliseconds" : 2.884416,
+      "setFlushMilliseconds" : 9.872916,
+      "totalMilliseconds" : 25.579
     },
     {
-      "clearFlushMilliseconds" : 6.5745,
+      "clearFlushMilliseconds" : 11.985291,
       "colorID" : "boundary-p3-r000-g100-b100",
-      "matrixReadbackMilliseconds" : 0.182291,
-      "pairedProofMilliseconds" : 1.884625,
-      "setFlushMilliseconds" : 5.653334,
-      "totalMilliseconds" : 14.29475
+      "matrixReadbackMilliseconds" : 0.283875,
+      "pairedProofMilliseconds" : 2.919,
+      "setFlushMilliseconds" : 10.014042,
+      "totalMilliseconds" : 25.202208
     },
     {
-      "clearFlushMilliseconds" : 7.083125,
+      "clearFlushMilliseconds" : 7.937209,
       "colorID" : "boundary-p3-r050-g000-b000",
-      "matrixReadbackMilliseconds" : 0.181,
-      "pairedProofMilliseconds" : 2.042209,
-      "setFlushMilliseconds" : 6.652666,
-      "totalMilliseconds" : 15.959
+      "matrixReadbackMilliseconds" : 0.186292,
+      "pairedProofMilliseconds" : 1.889083,
+      "setFlushMilliseconds" : 5.740916,
+      "totalMilliseconds" : 15.7535
     },
     {
-      "clearFlushMilliseconds" : 7.573458,
+      "clearFlushMilliseconds" : 13.103417,
       "colorID" : "boundary-p3-r050-g000-b050",
-      "matrixReadbackMilliseconds" : 0.21775,
-      "pairedProofMilliseconds" : 1.955125,
-      "setFlushMilliseconds" : 6.514125,
-      "totalMilliseconds" : 16.260458
+      "matrixReadbackMilliseconds" : 0.282042,
+      "pairedProofMilliseconds" : 2.87475,
+      "setFlushMilliseconds" : 9.849541,
+      "totalMilliseconds" : 26.10975
     },
     {
-      "clearFlushMilliseconds" : 6.820584,
+      "clearFlushMilliseconds" : 14.348917,
       "colorID" : "boundary-p3-r050-g000-b100",
-      "matrixReadbackMilliseconds" : 0.188417,
-      "pairedProofMilliseconds" : 1.874583,
-      "setFlushMilliseconds" : 5.934083,
-      "totalMilliseconds" : 14.817667
+      "matrixReadbackMilliseconds" : 0.34575,
+      "pairedProofMilliseconds" : 2.932542,
+      "setFlushMilliseconds" : 10.943541,
+      "totalMilliseconds" : 28.57075
     },
     {
-      "clearFlushMilliseconds" : 9.914333,
+      "clearFlushMilliseconds" : 5.953167,
       "colorID" : "boundary-p3-r050-g050-b000",
-      "matrixReadbackMilliseconds" : 0.219,
-      "pairedProofMilliseconds" : 2.643333,
-      "setFlushMilliseconds" : 8.157292,
-      "totalMilliseconds" : 20.933958
+      "matrixReadbackMilliseconds" : 0.180375,
+      "pairedProofMilliseconds" : 1.838167,
+      "setFlushMilliseconds" : 5.571583,
+      "totalMilliseconds" : 13.543292
     },
     {
-      "clearFlushMilliseconds" : 6.877125,
+      "clearFlushMilliseconds" : 12.437167,
       "colorID" : "boundary-p3-r050-g050-b050",
-      "matrixReadbackMilliseconds" : 0.228916,
-      "pairedProofMilliseconds" : 2.088542,
-      "setFlushMilliseconds" : 7.101292,
-      "totalMilliseconds" : 16.295875
+      "matrixReadbackMilliseconds" : 0.289208,
+      "pairedProofMilliseconds" : 2.914958,
+      "setFlushMilliseconds" : 10.190792,
+      "totalMilliseconds" : 25.832125
     },
     {
-      "clearFlushMilliseconds" : 12.230292,
+      "clearFlushMilliseconds" : 11.931416,
       "colorID" : "boundary-p3-r050-g050-b100",
-      "matrixReadbackMilliseconds" : 0.198833,
-      "pairedProofMilliseconds" : 1.968667,
-      "setFlushMilliseconds" : 8.046917,
-      "totalMilliseconds" : 22.444709
+      "matrixReadbackMilliseconds" : 0.284459,
+      "pairedProofMilliseconds" : 2.903083,
+      "setFlushMilliseconds" : 9.431375,
+      "totalMilliseconds" : 24.550333
     },
     {
-      "clearFlushMilliseconds" : 14.610333,
+      "clearFlushMilliseconds" : 12.230083,
       "colorID" : "boundary-p3-r050-g100-b000",
-      "matrixReadbackMilliseconds" : 0.3245,
-      "pairedProofMilliseconds" : 2.974375,
-      "setFlushMilliseconds" : 10.848584,
-      "totalMilliseconds" : 28.757792
+      "matrixReadbackMilliseconds" : 0.287708,
+      "pairedProofMilliseconds" : 2.866125,
+      "setFlushMilliseconds" : 9.475459,
+      "totalMilliseconds" : 24.859375
     },
     {
-      "clearFlushMilliseconds" : 7.459208,
+      "clearFlushMilliseconds" : 12.699917,
       "colorID" : "boundary-p3-r050-g100-b050",
-      "matrixReadbackMilliseconds" : 0.184333,
-      "pairedProofMilliseconds" : 1.874042,
-      "setFlushMilliseconds" : 6.627834,
-      "totalMilliseconds" : 16.145417
+      "matrixReadbackMilliseconds" : 0.284334,
+      "pairedProofMilliseconds" : 2.889,
+      "setFlushMilliseconds" : 10.099583,
+      "totalMilliseconds" : 25.972834
     },
     {
-      "clearFlushMilliseconds" : 9.642875,
+      "clearFlushMilliseconds" : 11.04125,
       "colorID" : "boundary-p3-r050-g100-b100",
-      "matrixReadbackMilliseconds" : 0.203541,
-      "pairedProofMilliseconds" : 1.945,
-      "setFlushMilliseconds" : 6.776875,
-      "totalMilliseconds" : 18.568291
+      "matrixReadbackMilliseconds" : 0.393375,
+      "pairedProofMilliseconds" : 2.801625,
+      "setFlushMilliseconds" : 9.372958,
+      "totalMilliseconds" : 23.609208
     },
     {
-      "clearFlushMilliseconds" : 7.194417,
+      "clearFlushMilliseconds" : 6.419959,
       "colorID" : "boundary-p3-r100-g000-b000",
-      "matrixReadbackMilliseconds" : 0.196625,
-      "pairedProofMilliseconds" : 1.911666,
-      "setFlushMilliseconds" : 6.011,
-      "totalMilliseconds" : 15.313708
+      "matrixReadbackMilliseconds" : 0.20525,
+      "pairedProofMilliseconds" : 1.987167,
+      "setFlushMilliseconds" : 6.589208,
+      "totalMilliseconds" : 15.201584
     },
     {
-      "clearFlushMilliseconds" : 6.3425,
+      "clearFlushMilliseconds" : 10.206958,
       "colorID" : "boundary-p3-r100-g000-b050",
-      "matrixReadbackMilliseconds" : 0.201917,
-      "pairedProofMilliseconds" : 2.374333,
-      "setFlushMilliseconds" : 7.965875,
-      "totalMilliseconds" : 16.884625
+      "matrixReadbackMilliseconds" : 0.199958,
+      "pairedProofMilliseconds" : 1.900584,
+      "setFlushMilliseconds" : 8.296167,
+      "totalMilliseconds" : 20.603667
     },
     {
-      "clearFlushMilliseconds" : 7.299417,
+      "clearFlushMilliseconds" : 8.256959,
       "colorID" : "boundary-p3-r100-g000-b100",
-      "matrixReadbackMilliseconds" : 0.187625,
-      "pairedProofMilliseconds" : 1.951542,
-      "setFlushMilliseconds" : 6.589541,
-      "totalMilliseconds" : 16.028125
+      "matrixReadbackMilliseconds" : 0.215917,
+      "pairedProofMilliseconds" : 1.819833,
+      "setFlushMilliseconds" : 6.031958,
+      "totalMilliseconds" : 16.324667
     },
     {
-      "clearFlushMilliseconds" : 7.084041,
+      "clearFlushMilliseconds" : 6.411041,
       "colorID" : "boundary-p3-r100-g050-b000",
-      "matrixReadbackMilliseconds" : 0.191375,
-      "pairedProofMilliseconds" : 3.248958,
-      "setFlushMilliseconds" : 6.482334,
-      "totalMilliseconds" : 17.006708
+      "matrixReadbackMilliseconds" : 0.203208,
+      "pairedProofMilliseconds" : 1.931958,
+      "setFlushMilliseconds" : 7.434334,
+      "totalMilliseconds" : 15.980541
     },
     {
-      "clearFlushMilliseconds" : 10.577167,
+      "clearFlushMilliseconds" : 9.460958,
       "colorID" : "boundary-p3-r100-g050-b050",
-      "matrixReadbackMilliseconds" : 0.217917,
-      "pairedProofMilliseconds" : 2.191875,
-      "setFlushMilliseconds" : 7.307583,
-      "totalMilliseconds" : 20.294542
+      "matrixReadbackMilliseconds" : 0.208125,
+      "pairedProofMilliseconds" : 2.330708,
+      "setFlushMilliseconds" : 7.056292,
+      "totalMilliseconds" : 19.056083
     },
     {
-      "clearFlushMilliseconds" : 12.846875,
+      "clearFlushMilliseconds" : 6.23675,
       "colorID" : "boundary-p3-r100-g050-b100",
-      "matrixReadbackMilliseconds" : 0.458125,
-      "pairedProofMilliseconds" : 3.053875,
-      "setFlushMilliseconds" : 8.873708,
-      "totalMilliseconds" : 25.232583
+      "matrixReadbackMilliseconds" : 0.196958,
+      "pairedProofMilliseconds" : 1.879459,
+      "setFlushMilliseconds" : 6.839708,
+      "totalMilliseconds" : 15.152875
     },
     {
-      "clearFlushMilliseconds" : 6.423208,
+      "clearFlushMilliseconds" : 7.977458,
       "colorID" : "boundary-p3-r100-g100-b000",
-      "matrixReadbackMilliseconds" : 0.1965,
-      "pairedProofMilliseconds" : 1.991,
-      "setFlushMilliseconds" : 7.12625,
-      "totalMilliseconds" : 15.736958
+      "matrixReadbackMilliseconds" : 0.230542,
+      "pairedProofMilliseconds" : 2.128916,
+      "setFlushMilliseconds" : 10.863875,
+      "totalMilliseconds" : 21.200791
     },
     {
-      "clearFlushMilliseconds" : 13.969208,
+      "clearFlushMilliseconds" : 9.149125,
       "colorID" : "boundary-p3-r100-g100-b050",
-      "matrixReadbackMilliseconds" : 0.283042,
-      "pairedProofMilliseconds" : 2.941958,
-      "setFlushMilliseconds" : 9.974625,
-      "totalMilliseconds" : 27.168833
+      "matrixReadbackMilliseconds" : 0.219708,
+      "pairedProofMilliseconds" : 2.018917,
+      "setFlushMilliseconds" : 7.221417,
+      "totalMilliseconds" : 18.609167
     },
     {
-      "clearFlushMilliseconds" : 6.246375,
+      "clearFlushMilliseconds" : 7.612833,
       "colorID" : "boundary-p3-r100-g100-b100",
-      "matrixReadbackMilliseconds" : 0.186625,
-      "pairedProofMilliseconds" : 1.916167,
-      "setFlushMilliseconds" : 5.961291,
-      "totalMilliseconds" : 14.310458
+      "matrixReadbackMilliseconds" : 0.195375,
+      "pairedProofMilliseconds" : 1.803375,
+      "setFlushMilliseconds" : 6.433167,
+      "totalMilliseconds" : 16.04475
     },
     {
-      "clearFlushMilliseconds" : 7.396667,
+      "clearFlushMilliseconds" : 6.38625,
       "colorID" : "holdout-p3-001",
-      "matrixReadbackMilliseconds" : 0.182333,
-      "pairedProofMilliseconds" : 1.877959,
-      "setFlushMilliseconds" : 5.536125,
-      "totalMilliseconds" : 14.993084
+      "matrixReadbackMilliseconds" : 0.214541,
+      "pairedProofMilliseconds" : 1.896042,
+      "setFlushMilliseconds" : 5.89725,
+      "totalMilliseconds" : 14.394083
     },
     {
-      "clearFlushMilliseconds" : 7.798542,
+      "clearFlushMilliseconds" : 6.699334,
       "colorID" : "holdout-p3-002",
-      "matrixReadbackMilliseconds" : 0.194541,
-      "pairedProofMilliseconds" : 1.997084,
-      "setFlushMilliseconds" : 6.604167,
-      "totalMilliseconds" : 16.594334
+      "matrixReadbackMilliseconds" : 0.195583,
+      "pairedProofMilliseconds" : 1.956875,
+      "setFlushMilliseconds" : 5.840833,
+      "totalMilliseconds" : 14.692625
     },
     {
-      "clearFlushMilliseconds" : 13.985708,
+      "clearFlushMilliseconds" : 8.884041,
       "colorID" : "holdout-p3-003",
-      "matrixReadbackMilliseconds" : 0.278875,
-      "pairedProofMilliseconds" : 2.956667,
-      "setFlushMilliseconds" : 10.277708,
-      "totalMilliseconds" : 27.498958
+      "matrixReadbackMilliseconds" : 0.202917,
+      "pairedProofMilliseconds" : 1.945666,
+      "setFlushMilliseconds" : 6.364542,
+      "totalMilliseconds" : 17.397166
     },
     {
-      "clearFlushMilliseconds" : 13.245667,
+      "clearFlushMilliseconds" : 7.1605,
       "colorID" : "holdout-p3-004",
-      "matrixReadbackMilliseconds" : 0.308334,
-      "pairedProofMilliseconds" : 2.957708,
-      "setFlushMilliseconds" : 11.268083,
-      "totalMilliseconds" : 27.779792
+      "matrixReadbackMilliseconds" : 0.195916,
+      "pairedProofMilliseconds" : 1.917125,
+      "setFlushMilliseconds" : 6.199209,
+      "totalMilliseconds" : 15.47275
     },
     {
-      "clearFlushMilliseconds" : 6.44025,
+      "clearFlushMilliseconds" : 6.557875,
       "colorID" : "holdout-p3-005",
-      "matrixReadbackMilliseconds" : 0.178792,
-      "pairedProofMilliseconds" : 1.891291,
-      "setFlushMilliseconds" : 5.619,
-      "totalMilliseconds" : 14.129333
+      "matrixReadbackMilliseconds" : 0.207042,
+      "pairedProofMilliseconds" : 2.113416,
+      "setFlushMilliseconds" : 6.9175,
+      "totalMilliseconds" : 15.795833
     },
     {
-      "clearFlushMilliseconds" : 13.344792,
+      "clearFlushMilliseconds" : 8.471416,
       "colorID" : "holdout-p3-006",
-      "matrixReadbackMilliseconds" : 0.287375,
-      "pairedProofMilliseconds" : 3.028166,
-      "setFlushMilliseconds" : 9.968917,
-      "totalMilliseconds" : 26.62925
+      "matrixReadbackMilliseconds" : 0.205792,
+      "pairedProofMilliseconds" : 1.929041,
+      "setFlushMilliseconds" : 9.189167,
+      "totalMilliseconds" : 19.795416
     },
     {
-      "clearFlushMilliseconds" : 7.815417,
+      "clearFlushMilliseconds" : 7.523209,
       "colorID" : "holdout-p3-007",
-      "matrixReadbackMilliseconds" : 0.251125,
-      "pairedProofMilliseconds" : 2.654708,
-      "setFlushMilliseconds" : 8.07425,
-      "totalMilliseconds" : 18.7955
+      "matrixReadbackMilliseconds" : 0.206666,
+      "pairedProofMilliseconds" : 2.0345,
+      "setFlushMilliseconds" : 6.967125,
+      "totalMilliseconds" : 16.7315
     },
     {
-      "clearFlushMilliseconds" : 7.379417,
+      "clearFlushMilliseconds" : 6.543125,
       "colorID" : "holdout-p3-008",
-      "matrixReadbackMilliseconds" : 0.177458,
-      "pairedProofMilliseconds" : 1.858042,
-      "setFlushMilliseconds" : 5.563583,
-      "totalMilliseconds" : 14.9785
+      "matrixReadbackMilliseconds" : 0.328333,
+      "pairedProofMilliseconds" : 3.154042,
+      "setFlushMilliseconds" : 10.495334,
+      "totalMilliseconds" : 20.520834
     },
     {
-      "clearFlushMilliseconds" : 6.207084,
+      "clearFlushMilliseconds" : 6.633875,
       "colorID" : "holdout-p3-009",
-      "matrixReadbackMilliseconds" : 0.282542,
-      "pairedProofMilliseconds" : 1.895917,
-      "setFlushMilliseconds" : 5.812791,
-      "totalMilliseconds" : 14.198334
+      "matrixReadbackMilliseconds" : 0.215167,
+      "pairedProofMilliseconds" : 2.005875,
+      "setFlushMilliseconds" : 7.226458,
+      "totalMilliseconds" : 16.081375
     },
     {
-      "clearFlushMilliseconds" : 6.319542,
+      "clearFlushMilliseconds" : 6.824125,
       "colorID" : "holdout-p3-010",
-      "matrixReadbackMilliseconds" : 0.187583,
-      "pairedProofMilliseconds" : 1.840459,
-      "setFlushMilliseconds" : 6.099958,
-      "totalMilliseconds" : 14.447542
+      "matrixReadbackMilliseconds" : 0.312292,
+      "pairedProofMilliseconds" : 3.274208,
+      "setFlushMilliseconds" : 8.505458,
+      "totalMilliseconds" : 18.916083
     },
     {
-      "clearFlushMilliseconds" : 13.3785,
+      "clearFlushMilliseconds" : 6.495792,
       "colorID" : "holdout-p3-011",
-      "matrixReadbackMilliseconds" : 0.280125,
-      "pairedProofMilliseconds" : 2.980125,
-      "setFlushMilliseconds" : 9.717375,
-      "totalMilliseconds" : 26.356125
+      "matrixReadbackMilliseconds" : 0.205709,
+      "pairedProofMilliseconds" : 2.066625,
+      "setFlushMilliseconds" : 6.852666,
+      "totalMilliseconds" : 15.620792
     },
     {
-      "clearFlushMilliseconds" : 9.229958,
+      "clearFlushMilliseconds" : 10.526208,
       "colorID" : "holdout-p3-012",
-      "matrixReadbackMilliseconds" : 0.253125,
-      "pairedProofMilliseconds" : 2.6965,
-      "setFlushMilliseconds" : 8.281292,
-      "totalMilliseconds" : 20.460875
+      "matrixReadbackMilliseconds" : 0.220375,
+      "pairedProofMilliseconds" : 2.140375,
+      "setFlushMilliseconds" : 8.827583,
+      "totalMilliseconds" : 21.714541
     },
     {
-      "clearFlushMilliseconds" : 13.599792,
+      "clearFlushMilliseconds" : 6.674,
       "colorID" : "holdout-p3-013",
-      "matrixReadbackMilliseconds" : 0.277417,
-      "pairedProofMilliseconds" : 2.956208,
-      "setFlushMilliseconds" : 9.868083,
-      "totalMilliseconds" : 26.7015
+      "matrixReadbackMilliseconds" : 0.1905,
+      "pairedProofMilliseconds" : 2.340417,
+      "setFlushMilliseconds" : 7.363708,
+      "totalMilliseconds" : 16.568625
     },
     {
-      "clearFlushMilliseconds" : 14.2345,
+      "clearFlushMilliseconds" : 6.995292,
       "colorID" : "holdout-p3-014",
-      "matrixReadbackMilliseconds" : 0.280834,
-      "pairedProofMilliseconds" : 2.943125,
-      "setFlushMilliseconds" : 10.15725,
-      "totalMilliseconds" : 27.615709
+      "matrixReadbackMilliseconds" : 0.214708,
+      "pairedProofMilliseconds" : 1.836625,
+      "setFlushMilliseconds" : 11.6955,
+      "totalMilliseconds" : 20.742125
     },
     {
-      "clearFlushMilliseconds" : 13.388459,
+      "clearFlushMilliseconds" : 6.3775,
       "colorID" : "holdout-p3-015",
-      "matrixReadbackMilliseconds" : 0.2725,
-      "pairedProofMilliseconds" : 2.944917,
-      "setFlushMilliseconds" : 9.667458,
-      "totalMilliseconds" : 26.273334
+      "matrixReadbackMilliseconds" : 0.202375,
+      "pairedProofMilliseconds" : 2.036334,
+      "setFlushMilliseconds" : 6.244958,
+      "totalMilliseconds" : 14.861167
     },
     {
-      "clearFlushMilliseconds" : 6.256834,
+      "clearFlushMilliseconds" : 9.107875,
       "colorID" : "holdout-p3-016",
-      "matrixReadbackMilliseconds" : 0.189,
-      "pairedProofMilliseconds" : 1.865583,
-      "setFlushMilliseconds" : 5.864708,
-      "totalMilliseconds" : 14.176125
+      "matrixReadbackMilliseconds" : 0.209541,
+      "pairedProofMilliseconds" : 2.08825,
+      "setFlushMilliseconds" : 6.957334,
+      "totalMilliseconds" : 18.363
     },
     {
-      "clearFlushMilliseconds" : 6.470334,
+      "clearFlushMilliseconds" : 6.224625,
       "colorID" : "holdout-p3-017",
-      "matrixReadbackMilliseconds" : 0.183833,
-      "pairedProofMilliseconds" : 1.836709,
-      "setFlushMilliseconds" : 5.794208,
-      "totalMilliseconds" : 14.285084
+      "matrixReadbackMilliseconds" : 0.368375,
+      "pairedProofMilliseconds" : 2.059042,
+      "setFlushMilliseconds" : 7.961833,
+      "totalMilliseconds" : 16.613875
     },
     {
-      "clearFlushMilliseconds" : 6.639417,
+      "clearFlushMilliseconds" : 7.849916,
       "colorID" : "holdout-p3-018",
-      "matrixReadbackMilliseconds" : 0.186709,
-      "pairedProofMilliseconds" : 1.895541,
-      "setFlushMilliseconds" : 5.650083,
-      "totalMilliseconds" : 14.37175
+      "matrixReadbackMilliseconds" : 0.202791,
+      "pairedProofMilliseconds" : 2.092042,
+      "setFlushMilliseconds" : 7.402834,
+      "totalMilliseconds" : 17.547583
     },
     {
-      "clearFlushMilliseconds" : 13.131375,
+      "clearFlushMilliseconds" : 6.350125,
       "colorID" : "holdout-p3-019",
-      "matrixReadbackMilliseconds" : 0.2815,
-      "pairedProofMilliseconds" : 2.94625,
-      "setFlushMilliseconds" : 9.991666,
-      "totalMilliseconds" : 26.350791
+      "matrixReadbackMilliseconds" : 0.193916,
+      "pairedProofMilliseconds" : 1.92975,
+      "setFlushMilliseconds" : 5.708459,
+      "totalMilliseconds" : 14.18225
     },
     {
-      "clearFlushMilliseconds" : 9.958416,
+      "clearFlushMilliseconds" : 13.114583,
       "colorID" : "holdout-p3-020",
-      "matrixReadbackMilliseconds" : 0.254958,
-      "pairedProofMilliseconds" : 2.614084,
-      "setFlushMilliseconds" : 8.590792,
-      "totalMilliseconds" : 21.41825
+      "matrixReadbackMilliseconds" : 0.207,
+      "pairedProofMilliseconds" : 1.998333,
+      "setFlushMilliseconds" : 6.720834,
+      "totalMilliseconds" : 22.04075
     },
     {
-      "clearFlushMilliseconds" : 8.822667,
+      "clearFlushMilliseconds" : 9.0375,
       "colorID" : "holdout-p3-021",
-      "matrixReadbackMilliseconds" : 0.248,
-      "pairedProofMilliseconds" : 2.628667,
-      "setFlushMilliseconds" : 8.061083,
-      "totalMilliseconds" : 19.760417
+      "matrixReadbackMilliseconds" : 0.237291,
+      "pairedProofMilliseconds" : 2.240209,
+      "setFlushMilliseconds" : 8.9075,
+      "totalMilliseconds" : 20.4225
     },
     {
-      "clearFlushMilliseconds" : 11.3715,
+      "clearFlushMilliseconds" : 8.747667,
       "colorID" : "holdout-p3-022",
-      "matrixReadbackMilliseconds" : 0.239292,
-      "pairedProofMilliseconds" : 2.6255,
-      "setFlushMilliseconds" : 9.023375,
-      "totalMilliseconds" : 23.259667
+      "matrixReadbackMilliseconds" : 0.208542,
+      "pairedProofMilliseconds" : 1.977375,
+      "setFlushMilliseconds" : 8.876875,
+      "totalMilliseconds" : 19.810459
     },
     {
-      "clearFlushMilliseconds" : 10.778834,
+      "clearFlushMilliseconds" : 6.40875,
       "colorID" : "holdout-p3-023",
-      "matrixReadbackMilliseconds" : 0.316667,
-      "pairedProofMilliseconds" : 2.660833,
-      "setFlushMilliseconds" : 8.310083,
-      "totalMilliseconds" : 22.066417
+      "matrixReadbackMilliseconds" : 0.193792,
+      "pairedProofMilliseconds" : 1.93575,
+      "setFlushMilliseconds" : 6.323417,
+      "totalMilliseconds" : 14.861709
     },
     {
-      "clearFlushMilliseconds" : 6.199333,
+      "clearFlushMilliseconds" : 6.214709,
       "colorID" : "holdout-p3-024",
-      "matrixReadbackMilliseconds" : 0.175959,
-      "pairedProofMilliseconds" : 1.861291,
-      "setFlushMilliseconds" : 5.637208,
-      "totalMilliseconds" : 13.873791
+      "matrixReadbackMilliseconds" : 0.201458,
+      "pairedProofMilliseconds" : 3.652667,
+      "setFlushMilliseconds" : 6.103125,
+      "totalMilliseconds" : 16.171959
     }
   ]
 }

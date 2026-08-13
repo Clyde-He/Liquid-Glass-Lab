@@ -6,7 +6,7 @@
 // that turn a version bump into a work list instead of a re-read.
 //
 // They receive every loaded OS archive at once, keyed by directory name, and
-// pair rows by the unified cell coordinate.
+// pair rows by the shared Golden cell coordinate.
 
 import { ALL_CHANNELS, glassBackground, numeric } from "../tools/lib/golden.mjs";
 import { cellKey } from "../tools/lib/cell.mjs";
@@ -22,6 +22,16 @@ function versionsWith(archives, section) {
 /** Rows of a section indexed by full cell key. */
 const indexByCell = (document) =>
   new Map((document.rows ?? document.runs ?? []).map((row) => [cellKey(row.cell), row]));
+
+const staticCoreRows = (document) => (document.rows ?? []).filter((row) =>
+  row.cell.width === 480
+    && row.cell.height === 200
+    && row.cell.cornerRadius === 16
+    && row.cell.key === false
+    && row.cell.backdrop === "Light"
+    && row.cell.tint === "None"
+    && row.cell.host === "Panel"
+);
 
 /** Every property name any glassBackground pass exposes in a static tree. */
 function glassVocabulary(document) {
@@ -49,15 +59,6 @@ export default [
         const versions = versionsWith(archives, section);
         if (versions.length < 2) {
           expect.unverifiable(`${section} present on fewer than two versions`);
-        }
-        const roles = new Set(
-          versions.map(({ document }) => document.archiveRole ?? "unknown")
-        );
-        if (roles.size > 1) {
-          expect.unverifiable(
-            `${section} mixes ${[...roles].join(" and ")} archives — capture `
-              + "both versions directly before asserting exact cell parity"
-          );
         }
         const [base, ...rest] = versions;
         const baseCells = indexByCell(base.document);
@@ -96,7 +97,7 @@ export default [
         expect.unverifiable("static-tree present on fewer than two versions");
       }
       for (const { name, document } of versions) {
-        const rows = document.rows ?? [];
+        const rows = staticCoreRows(document);
         const groups = new Map();
         for (const row of rows) {
           const key = cellKey(row.cell, ["variant", "subvariant", "main"]);
@@ -253,7 +254,10 @@ export default [
 
       for (const { name, document } of versions) {
         const rows = (document.rows ?? []).filter(
-          (row) => !row.cell.subvariant && row.cell.subdued === false && row.cell.main
+          (row) => !row.cell.subvariant
+            && row.cell.subdued === false
+            && row.cell.main
+            && row.cell.appearance === "Light"
         );
         const perVariant = new Map();
         for (const row of rows) {
@@ -332,6 +336,7 @@ export default [
               && row.cell.main === true
               && !row.cell.subvariant
               && row.cell.subdued === false
+              && row.cell.appearance === "Light"
           )
           .sort((a, b) => a.cell.shortSide - b.cell.shortSide);
         if (rows.length < 2) continue;

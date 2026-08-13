@@ -155,11 +155,13 @@ private extension GlassMaterialStyleSample {
 /// `the-blur-taps-crossfade-so-perceived-blur-stays-monotonic`.
 ///
 /// One measured exception remains, and it is **macOS 26 only**. Below 200pt the
-/// bound holds for everything except two face color-grade channels while fading
-/// *out*: `inputFaceColorMatrixBlack` and `inputFaceColorMatrixWhite` reach
+/// bound holds for everything except two face color-grade channels while the
+/// insertion finishes settling and the paired removal begins:
+/// `inputFaceColorMatrixBlack` and `inputFaceColorMatrixWhite` reach
 /// about 17% at a 48pt short side. The cause is measured rather than guessed —
-/// at small sizes a long-lived glass and one that has just completed a
-/// Materialize In resolve *different* face grades (0.49 versus 0.80 at 48pt), so
+/// at small sizes face opacity reaches one before the Materialized grade finishes
+/// adapting, and the settled glass differs from the long-lived static Recipe
+/// (0.49 versus 0.80 at 48pt), so
 /// "full strength" is not a single value there and no single read endpoint can
 /// replay the whole fade. Both endpoints themselves stay exact, geometry, blur,
 /// refraction, and shadow stay inside the ordinary bound, and the visible effect
@@ -1408,9 +1410,9 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
 
     /// Gives an internal Lab harness sole ownership of `materialStrength`.
     ///
-    /// The Style Atlas verifier installs the atlas it just captured directly;
+    /// The Style Atlas verifier installs the bundled Catalog directly;
     /// leaving the product controller attached would let its bundled catalog
-    /// replace that reference atlas on the next configuration change. This is
+    /// replace that Catalog on the next configuration change. This is
     /// intentionally internal so product consumers retain the single managed
     /// controller path.
     func useExternallyManagedMaterialStrength() {

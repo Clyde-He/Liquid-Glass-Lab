@@ -5,24 +5,20 @@
 // whole body of knowledge on a new OS becomes one command instead of a manual
 // reread.
 //
-// Learnings read the unified archive under `<os>/unified/`, whose three
-// sections all address rows by the same cell coordinate (see cell.mjs). A
-// learning declares the sections it needs and, if it is a `cross-version` one,
-// receives every OS at once.
+// Learnings keep their scalar/tree section vocabulary, but those sections are
+// now read-time projections of the one typed static.json Snapshot store.
 
-import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CELL_FIELDS, axisValues, sweptAxes } from "./cell.mjs";
-import { normalizeManifest, resolveModule } from "./manifest.mjs";
+import { ARCHIVE_FILES } from "./archive.mjs";
+import { projectStaticScalar, projectStaticTree } from "./snapshot-projections.mjs";
 
 // .../Golden/tools/lib/golden.mjs -> .../Golden
 export const goldenDirectory = path.dirname(
   path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 );
-
-export const SECTIONS = ["static-scalar", "static-tree", "dynamic"];
 
 /** OS directories present in the archive, e.g. ["macOS-26", "macOS-27"]. */
 export async function osDirectories() {
@@ -33,87 +29,60 @@ export async function osDirectories() {
     .sort((lhs, rhs) => Number(lhs.slice(6)) - Number(rhs.slice(6)));
 }
 
-/** Canonical accepted archives, with one same-major staging replacement when requested. */
-export async function acceptedArchivesReplacing(replacement = null) {
-  const archives = [];
-  for (const name of await osDirectories()) {
-    const directory = path.join(goldenDirectory, name);
-    const manifest = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8"));
-    if (manifest.status === "accepted") archives.push({ name, directory });
+const EVIDENCE_FILES = {
+  "core.dynamic": ARCHIVE_FILES.dynamic,
+  "tint.parameterization.sweep": ARCHIVE_FILES.tintSweep,
+  "tint.parameterization.focused-2b": ARCHIVE_FILES.tintFocused,
+  "tint.parameterization.hue-2c": ARCHIVE_FILES.tintHue,
+  "tint.sync-resolution": ARCHIVE_FILES.tintSync,
+  "tint.wide-gamut": ARCHIVE_FILES.tintWideGamut,
+  "semantic.usage-trees": ARCHIVE_FILES.semantic,
+};
+
+export async function loadEvidenceDocument(directory, idOrAlias) {
+  if (["core.static-scalar", "static-scalar", "core.static-tree", "static-tree"].includes(idOrAlias)) {
+    const file = path.join(directory, ARCHIVE_FILES.static);
+    const source = JSON.parse(await readFile(file, "utf8"));
+    const tree = idOrAlias.includes("tree");
+    return {
+      file,
+      document: tree ? projectStaticTree(source) : projectStaticScalar(source),
+    };
   }
-  if (replacement) {
-    const index = archives.findIndex(({ name }) => name === replacement.name);
-    if (index < 0) throw new Error(`no accepted archive to replace for ${replacement.name}`);
-    archives[index] = replacement;
-  }
-  return archives;
-}
-
-export async function readManifest(osDirectory) {
-  return readManifestAt(path.join(goldenDirectory, osDirectory));
-}
-
-export async function readManifestAt(directory) {
-  const raw = await readFile(path.join(directory, "manifest.json"), "utf8");
-  return normalizeManifest(JSON.parse(raw), {
-    osDirectory: path.basename(directory),
-    goldenDirectory: path.dirname(directory),
-  });
-}
-
-export async function resolveModulePath(directory, idOrAlias) {
-  const manifest = await readManifestAt(directory);
-  const module = resolveModule(manifest, idOrAlias);
-  if (!module) throw new Error(`Unknown Golden module or alias: ${idOrAlias}`);
-  return { manifest, module, file: path.join(directory, module.file) };
-}
-
-export async function loadModuleDocument(directory, idOrAlias) {
-  const resolved = await resolveModulePath(directory, idOrAlias);
+  const canonical = idOrAlias === "dynamic" ? "core.dynamic" : idOrAlias;
+  const relative = EVIDENCE_FILES[canonical];
+  if (!relative) throw new Error(`Unknown Golden evidence document: ${idOrAlias}`);
+  const file = path.join(directory, relative);
   return {
-    ...resolved,
-    document: JSON.parse(await readFile(resolved.file, "utf8")),
+    file,
+    document: JSON.parse(await readFile(file, "utf8")),
+  };
+}
+
+/** Materializes the projection sections consumed by existing learnings. */
+export async function loadLearningSections(archiveDirectory) {
+  const staticDocument = JSON.parse(
+    await readFile(path.join(archiveDirectory, "static.json"), "utf8")
+  );
+  let dynamic = null;
+  try {
+    dynamic = normalizeLearningDocument(JSON.parse(
+      await readFile(path.join(archiveDirectory, "dynamic.json"), "utf8")
+    ));
+  } catch {
+    // Learnings report an absent domain as unverifiable.
+  }
+  return {
+    "static-scalar": normalizeLearningDocument(projectStaticScalar(staticDocument)),
+    "static-tree": normalizeLearningDocument(projectStaticTree(staticDocument)),
+    dynamic,
   };
 }
 
 /**
- * Loads the unified sections of one OS directory. A section this OS has not
- * captured resolves to null, which is how a learning reports "not applicable
- * here" rather than failing.
+ * Projections do not duplicate their cell axes. Derive them from rows.
  */
-export async function loadUnified(osDirectory) {
-  return loadUnifiedAt(path.join(goldenDirectory, osDirectory));
-}
-
-/** Loads unified sections from an arbitrary candidate directory. */
-export async function loadUnifiedAt(archiveDirectory) {
-  const directory = path.join(archiveDirectory, "unified");
-  const manifest = await readManifestAt(archiveDirectory);
-  const sections = {};
-  for (const name of SECTIONS) {
-    const module = manifest.modules.find((entry) => entry.id === `core.${name}`);
-    try {
-      const document = normalizeUnifiedDocument(JSON.parse(
-        await readFile(
-          module ? path.join(archiveDirectory, module.file)
-            : path.join(directory, `${name}.json`),
-          "utf8"
-        )
-      ));
-      sections[name] = { ...document, archiveRole: module?.role ?? null };
-    } catch {
-      sections[name] = null;
-    }
-  }
-  return sections;
-}
-
-/**
- * Direct captures do not duplicate their cell axes into every section. Derive
- * them at read time from the authoritative rows while retaining any declared
- * values written by the historical unifier.
- */
-export function normalizeUnifiedDocument(document) {
+export function normalizeLearningDocument(document) {
   const rows = document?.rows ?? document?.runs ?? [];
   const cells = rows.map((row) => row.cell ?? {});
   const derivedValues = Object.fromEntries(
@@ -127,10 +96,6 @@ export function normalizeUnifiedDocument(document) {
       swept: document?.axes?.swept ?? sweptAxes(cells),
     },
   };
-}
-
-export function sha256(bytes) {
-  return createHash("sha256").update(bytes).digest("hex");
 }
 
 // MARK: - Assertions
@@ -216,7 +181,7 @@ export const numeric = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-/** Inputs are `{key: value}` maps in the unified archive. */
+/** Inputs are `{key: value}` maps in the Golden archive. */
 export const filterNamed = (sample, name) =>
   sample?.filters?.find((filter) => filter.name === name) ?? null;
 
@@ -246,9 +211,9 @@ export function endpointSample(run) {
 export const endpointInputs = (run) =>
   glassBackground(endpointSample(run))?.inputs ?? null;
 
-/** Supports both transcoded legacy runs and direct-capture runs. */
+/** Tint color components recorded directly on a Dynamic run. */
 export const tintComponents = (run) =>
-  run?.tintComponents ?? run?.tint?.components ?? null;
+  run?.tintComponents ?? null;
 
 // MARK: - The measured curve, mirrored from LiquidGlassLab/GlassMaterial
 

@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   analyzeTintParameterization,
 } from "./analyze-tint-parameterization.mjs";
-import { goldenDirectory, loadModuleDocument } from "./lib/golden.mjs";
+import { goldenDirectory, loadEvidenceDocument } from "./lib/golden.mjs";
 
 const LUMA = [0.2126, 0.7152, 0.0722];
 
@@ -147,7 +147,7 @@ test("macOS 27 Golden sweeps pass the complete parameterized matrix gate", async
   let rowCount = 0;
   let maximumResidual = 0;
   for (const moduleID of fixtures) {
-    const { document } = await loadModuleDocument(
+    const { document } = await loadEvidenceDocument(
       `${goldenDirectory}/macOS-27`, moduleID
     );
     const result = analyzeTintParameterization(document);
@@ -161,6 +161,26 @@ test("macOS 27 Golden sweeps pass the complete parameterized matrix gate", async
   }
   assert.equal(rowCount, 3496);
   assert.ok(maximumResidual > 1.9e-4);
+});
+
+test("macOS 26 Golden sweeps classify the certified saturation-boost family", async () => {
+  const fixtures = [
+    "tint.parameterization.sweep",
+    "tint.parameterization.focused-2b",
+    "tint.parameterization.hue-2c",
+  ];
+  let rowCount = 0;
+  for (const moduleID of fixtures) {
+    const { document } = await loadEvidenceDocument(
+      `${goldenDirectory}/macOS-26`, moduleID
+    );
+    const result = analyzeTintParameterization(document);
+    assert.equal(result.parameterizationSupported, true);
+    assert.equal(result.unclassifiedRowCount, 0);
+    assert.ok(result.maximumParameterizedMatrixResidual <= 2e-4);
+    rowCount += result.rowCount;
+  }
+  assert.equal(rowCount, 3496);
 });
 
 test("accepts a complete eight-cell color group", () => {
@@ -254,8 +274,9 @@ test("allows Float-to-Number noise in stored residual metadata", () => {
   );
 });
 
-test("rejects a row whose stored classification does not match its matrix", () => {
+test("recomputes classification from measured matrices", () => {
   const document = makeDocument();
   document.rows[0].matrix[0] += 0.01;
-  assert.throws(() => analyzeTintParameterization(document), /recomputed/);
+  const result = analyzeTintParameterization(document);
+  assert.equal(result.unclassifiedRowCount, 1);
 });

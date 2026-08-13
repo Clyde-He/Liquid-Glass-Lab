@@ -2,7 +2,7 @@
 //  GlassLabGoldenSchema.swift
 //  LiquidGlassLab
 //
-//  The unified Golden archive schema, written directly by the exporter.
+//  The Golden archive schema, written directly by the exporter.
 //
 //  Every row of every section is addressed by the same `GoldenCell`, which is
 //  what makes cross-version and cross-section comparison a key match instead of
@@ -15,7 +15,7 @@
 import AppKit
 import Foundation
 
-let goldenSchemaVersion = 1
+let goldenSchemaVersion = 2
 
 /// One coordinate in the archive.
 ///
@@ -150,70 +150,207 @@ struct GoldenCell: Codable, Hashable {
     }
 }
 
-// MARK: - Section 1: static-scalar
+// MARK: - Complete settled renderer snapshot
 
-struct GoldenStaticScalarRow: Codable {
-    let cell: GoldenCell
-    /// Whether the requested participation was actually observed. A row that is
-    /// not accepted is never written; the flag exists so a reader can assert it
-    /// rather than trust the exporter.
-    let accepted: Bool
-    let participation: String
-    let slice: String
-    let passes: Passes
-    let inputs: [String: Double]
-    let highlight: [String: Double]
-    let geometry: [String: Double]
-    let colors: [String: String]
-    let points: [String: GlassLabTuning.MatrixEntry.PointValue]
-    let strings: [String: String]
+/// One typed value read from the resolved Core Animation tree. The archive
+/// keeps the original value kind instead of flattening everything to text, so
+/// scalar analysis, recursive comparison, and Consumer projection are views of
+/// the same observation.
+indirect enum GoldenResolvedValue: Codable, Equatable {
+    case boolean(Bool)
+    case number(Double)
+    case string(String)
+    case color(GoldenResolvedColor)
+    case point(GoldenResolvedPair)
+    case size(GoldenResolvedPair)
+    case rect(GoldenResolvedRect)
+    case matrix(GoldenResolvedMatrix)
+    case array([GoldenResolvedValue])
+    case dictionary([String: GoldenResolvedValue])
+    /// Research evidence may retain an unfamiliar readable type without
+    /// pretending it is safe to replay. Replay-critical projections reject it.
+    case opaque(type: String)
 
-    struct Passes: Codable {
-        let shader: Bool
-        let highlight: Bool
+    private enum CodingKeys: String, CodingKey {
+        case type, boolean, number, string, color, point, size, rect, matrix
+        case array, dictionary, opaqueType
+    }
+
+    private enum Kind: String, Codable {
+        case boolean, number, string, color, point, size, rect, matrix
+        case array, dictionary, opaque
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .type) {
+        case .boolean:
+            self = .boolean(try container.decode(Bool.self, forKey: .boolean))
+        case .number:
+            self = .number(try container.decode(Double.self, forKey: .number))
+        case .string:
+            self = .string(try container.decode(String.self, forKey: .string))
+        case .color:
+            self = .color(try container.decode(GoldenResolvedColor.self, forKey: .color))
+        case .point:
+            self = .point(try container.decode(GoldenResolvedPair.self, forKey: .point))
+        case .size:
+            self = .size(try container.decode(GoldenResolvedPair.self, forKey: .size))
+        case .rect:
+            self = .rect(try container.decode(GoldenResolvedRect.self, forKey: .rect))
+        case .matrix:
+            self = .matrix(try container.decode(GoldenResolvedMatrix.self, forKey: .matrix))
+        case .array:
+            self = .array(try container.decode([GoldenResolvedValue].self, forKey: .array))
+        case .dictionary:
+            self = .dictionary(try container.decode(
+                [String: GoldenResolvedValue].self,
+                forKey: .dictionary
+            ))
+        case .opaque:
+            self = .opaque(type: try container.decode(String.self, forKey: .opaqueType))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .boolean(value):
+            try container.encode(Kind.boolean, forKey: .type)
+            try container.encode(value, forKey: .boolean)
+        case let .number(value):
+            try container.encode(Kind.number, forKey: .type)
+            try container.encode(value, forKey: .number)
+        case let .string(value):
+            try container.encode(Kind.string, forKey: .type)
+            try container.encode(value, forKey: .string)
+        case let .color(value):
+            try container.encode(Kind.color, forKey: .type)
+            try container.encode(value, forKey: .color)
+        case let .point(value):
+            try container.encode(Kind.point, forKey: .type)
+            try container.encode(value, forKey: .point)
+        case let .size(value):
+            try container.encode(Kind.size, forKey: .type)
+            try container.encode(value, forKey: .size)
+        case let .rect(value):
+            try container.encode(Kind.rect, forKey: .type)
+            try container.encode(value, forKey: .rect)
+        case let .matrix(value):
+            try container.encode(Kind.matrix, forKey: .type)
+            try container.encode(value, forKey: .matrix)
+        case let .array(value):
+            try container.encode(Kind.array, forKey: .type)
+            try container.encode(value, forKey: .array)
+        case let .dictionary(value):
+            try container.encode(Kind.dictionary, forKey: .type)
+            try container.encode(value, forKey: .dictionary)
+        case let .opaque(type):
+            try container.encode(Kind.opaque, forKey: .type)
+            try container.encode(type, forKey: .opaqueType)
+        }
     }
 }
 
-struct GoldenStaticScalarDocument: Codable {
-    let schemaVersion: Int
-    let section: String
-    let capturedAt: String
-    let operatingSystem: String
-    let environment: GoldenEnvironment
-    /// Declared inputs are identical on every row, so one copy is enough.
-    let capability: Capability
-    let rows: [GoldenStaticScalarRow]
+struct GoldenResolvedColor: Codable, Equatable {
+    /// Core Graphics color-space identity as captured, not merely its model.
+    let colorSpaceName: String?
+    let model: String
+    let components: [Double]
+    /// The Consumer projection is explicitly extended-sRGB. Keeping this
+    /// conversion next to the source components makes it deterministic without
+    /// erasing the original color-space identity used by research comparisons.
+    let extendedSRGB: GlassMaterialColorValue?
+}
 
-    struct Capability: Codable {
-        let shaderInputKeys: [String]
-        let highlightInputKeys: [String]
-        let geometryKeys: [String]
+struct GoldenResolvedPair: Codable, Equatable {
+    let x: Double
+    let y: Double
+}
+
+struct GoldenResolvedRect: Codable, Equatable {
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+
+    init(_ rect: CGRect) {
+        x = rect.origin.x
+        y = rect.origin.y
+        width = rect.width
+        height = rect.height
     }
 }
 
-// MARK: - Section 2: static-tree
+struct GoldenResolvedMatrix: Codable, Equatable {
+    let objCType: String
+    let coefficients: [Double]
+}
 
-struct GoldenStaticTreeRow: Codable {
+enum GoldenResolvedPropertyState: String, Codable {
+    case value
+    case nilValue = "nil"
+    case unreadable
+}
+
+struct GoldenResolvedProperty: Codable, Equatable {
+    let state: GoldenResolvedPropertyState
+    let value: GoldenResolvedValue?
+    let attributes: [String: String]
+}
+
+struct GoldenResolvedLayer: Codable, Equatable {
+    let path: String
+    let layerClass: String
+    let name: String?
+    let frame: GoldenResolvedRect
+    let bounds: GoldenResolvedRect
+    let opacity: Double
+    let isHidden: Bool
+    let masksToBounds: Bool
+    let cornerRadius: Double
+    let hasMask: Bool
+    /// Replay-critical private layer properties, currently marginWidth.
+    let properties: [String: GoldenResolvedProperty]
+}
+
+struct GoldenResolvedPass: Codable, Equatable {
+    let id: String
+    let order: Int
+    let layerPath: String
+    let layerClass: String
+    let location: String
+    let objectClass: String
+    let name: String?
+    let properties: [String: GoldenResolvedProperty]
+}
+
+struct GoldenResolvedSnapshot: Codable, Equatable {
+    let shortSide: Double
+    let layers: [GoldenResolvedLayer]
+    let passes: [GoldenResolvedPass]
+}
+
+// MARK: - Settled static observations
+
+/// One exact requested condition paired with the one complete tree observed
+/// after it settled. Scalar analysis, recursive audit, and Consumer replay are
+/// projections; none is separately stored or captured.
+struct GoldenStaticObservation: Codable {
     let cell: GoldenCell
-    let accepted: Bool
-    let participation: String
-    let slice: String
-    let topologySignature: String
-    let valueSignature: String
-    let layers: [String: GlassLabTuning.PassAuditLayerRecord]
-    let passes: [String: GlassLabTuning.PassAuditPassRecord]
+    let snapshot: GoldenResolvedSnapshot
 }
 
-struct GoldenStaticTreeDocument: Codable {
+struct GoldenStaticDocument: Codable {
     let schemaVersion: Int
-    let section: String
-    let capturedAt: String
-    let operatingSystem: String
-    let environment: GoldenEnvironment
-    let rows: [GoldenStaticTreeRow]
+    /// Compiled from the same Swift requirement list that drives acquisition.
+    /// Catalog tooling selects these keys rather than duplicating the product
+    /// coordinate table in another language.
+    let consumerCells: [GoldenCell]
+    let observations: [GoldenStaticObservation]
 }
 
-// MARK: - Section 3: dynamic
+// MARK: - Dynamic
 
 struct GoldenDynamicSample: Codable {
     /// Observed progress, not requested: the renderer is the source of truth
@@ -257,42 +394,24 @@ struct GoldenDynamicRun: Codable {
 
 struct GoldenDynamicDocument: Codable {
     let schemaVersion: Int
-    let section: String
-    let capturedAt: String
-    let operatingSystem: String
-    let environment: GoldenEnvironment
     let runs: [GoldenDynamicRun]
 }
 
 // MARK: - Shared
 
-/// Conditions held constant across a whole capture. Anything that varies row to
-/// row belongs in the cell instead, or it cannot be compared.
-struct GoldenEnvironment: Codable {
-    let windowMargin: Double
-    let scrim: Bool
-    let reducedTintOpacity: Bool
-    let adaptiveAppearance: Int
-    let overridesEnabled: Bool
-}
-
-struct GoldenMeta: Codable {
+/// Small capture-level provenance. File names and completion are structural:
+/// a finalized directory exists only after all required files validate.
+struct GoldenCaptureDocument: Codable {
     let schemaVersion: Int
     let operatingSystem: String
+    let architecture: String
+    let displaySignature: String
     let capturedAt: String
-    /// Written by the exporter, so unlike the transcoded archive this is
-    /// primary evidence rather than derived output.
-    let role: String
-    let sections: [String: Section]
+}
 
-    struct Section: Codable {
-        let file: String
-        let rows: Int
-        let repeatedCells: Int
-        let bytes: Int
-        let sha256: String
-        let swept: [String]
-        let slices: [String: Int]
-    }
+struct GoldenCaptureSummary {
+    let capture: GoldenCaptureDocument
+    let staticObservations: Int
+    let dynamicRuns: Int
 }
 #endif

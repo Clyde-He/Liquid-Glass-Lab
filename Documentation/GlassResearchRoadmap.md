@@ -187,13 +187,13 @@ The implementation must:
 
 ### P0.6 — Targeted geometry replay
 
-The former plan to replay Height 24 and 600 across the full recursive Cartesian product was superseded when the standalone Recipe Matrix and Recursive Pass Audit fixtures were retired. Use the surviving evidence before proposing a new capture axis:
+The former plan to replay Height 24 and 600 across the full recursive Cartesian product was superseded when the separate Recipe Matrix and Recursive Pass Audit producers were retired. Use the Snapshot projections before proposing a new capture axis:
 
-- use the direct Core static-tree module for full fixed-geometry recursive-product coverage and its 21-cell repeat sentinel;
-- use the direct Core static-scalar size slice for Variants 1 and 2;
-- use retained `formula-analysis.json` for dense size behavior and the retained display-context control for runtime-sensitive resolved values.
+- use the recursive projection of `static.json` for full fixed-geometry product coverage;
+- use the scalar projection of its size coordinates for Variants 1 and 2;
+- treat build/display provenance as an explicit confound when interpreting runtime-sensitive resolved values.
 
-The old all-variant Height 24/600 claim is intentionally retired. Add a new registered module or expand the recursive product only if the surviving evidence identifies a concrete uncovered topology or property family; record the new claim and admission gate before capture.
+The old all-variant Height 24/600 claim is intentionally retired. Expand the typed Swift condition list only when a concrete claim needs a new coordinate.
 
 ### P0 exit criteria
 
@@ -338,7 +338,7 @@ Making `height` take the inflation ratio drops the worst residual at `shortSide 
 
 The residual is a second-order consequence of the same effect: a channel that is capped tracks the cap instead of the inflating geometry, so it reads as linear, and which channels are capped depends on size. At `shortSide = 400` `inputBleedBlurRadius` caps at 160 and goes linear while the rest of its family stays quadratic; at 48 `inputShadowAmount` and both inner-refraction channels leave their caps and become quadratic. Resolving this exactly would require authoring a ratio and cap per channel — the table baseline capture was adopted to avoid — so it is deliberately left as a bounded error.
 
-The direct cross-section comparison found one separate compact-size exception. At `shortSide = 48`, the Materialize animation endpoint uses a different adaptive face grade from the long-lived static Recipe. During removal, `inputFaceColorMatrixBlack` and `inputFaceColorMatrixWhite` traverse both grades, so a single read baseline cannot reproduce those two channels. At 200/400 the endpoints agree. Every other channel remains within the documented bound, and the scalar remains monotonic; exact compact removal requires a future dual-endpoint face-grade model.
+The direct cross-section comparison found one separate compact-size exception. At `shortSide = 48`, face opacity reaches one before the Materialized adaptive face grade finishes settling, and that final grade differs from the long-lived static Recipe. The paired removal starts from the same settled insertion tree. `inputFaceColorMatrixBlack` and `inputFaceColorMatrixWhite` therefore traverse a two-stage terminal state that a single read baseline cannot reproduce. At 200/400 the endpoints agree. Every other channel remains within the documented bound, and the scalar remains monotonic; exact compact replay requires a future dual-endpoint face-grade model.
 
 **This is macOS 26 only.** The direct macOS 27 capture resolves one endpoint at 48, 200, and 400pt, so no dual-endpoint model is needed there. macOS 27 does break monotonicity on one channel, for an unrelated and fully modelled reason: its size-gated `inputBlurOpacity0` resolves `g · (1 - (1 - endpoint)g)`, which turns inside `0...1` whenever the endpoint is below 0.5.
 
@@ -510,7 +510,7 @@ shortSide 48, Regular, Light      inputFaceColorMatrixBlack
 shortSide 200 and 400                    both endpoints agree
 ```
 
-Three channels diverge — `inputFaceColorMatrixBlack`, `inputFaceColorMatrixWhite`, and `inputClamp` — and only below 200pt. Since a dissolve traverses both grades, no single read endpoint can replay it, and the worst channel error reaches 17% at 48pt against the documented `min(5%, 4/S)`.
+Three channels diverge — `inputFaceColorMatrixBlack`, `inputFaceColorMatrixWhite`, and `inputClamp` — and only below 200pt. The insertion reaches face opacity 1 before the compact grade settles, and the paired dissolve begins from that later grade, so no single read endpoint can replay the entire lifecycle. The two face-grade channels reach 17% error at 48pt against the documented `min(5%, 4/S)`; `inputClamp` remains inside the ordinary bound and stays under the strict curve learning.
 
 **Accepted without further work.** The affected channels are the face color grade, so the visible consequence is a mid-fade tone difference on a very small glass rather than a pop, a wrong material, or a geometry error. Both endpoints stay exact, and every other channel stays inside the ordinary bound. The measured bound in `GlassMaterialStrength` has been corrected to say so.
 

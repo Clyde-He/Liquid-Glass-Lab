@@ -15,7 +15,7 @@ For the Liquid Glass Lab window controller, UI state, Live Inspector, Overrides,
 
 ## Version scope
 
-The public API begins at macOS 26, but private recipes, class names, inventories, and ranges must not be treated as version-stable. Sections without an explicit macOS 26 label describe the macOS 27 beta baseline. Historical macOS 26.6 Recipe Matrix and fixed-geometry Recursive Pass Audit captures informed this document, as did the matching macOS 27 audit on the fixture-level build above. Those standalone fixtures are now retired; direct Core modules retain the supported cross-version and recursive-product coverage, while the deliberately retired claims are recorded in the evidence retirement ledger. Preliminary pass-family parity is recorded below, while value-level semantic classification remains open.
+The public API begins at macOS 26, but private recipes, class names, inventories, and ranges must not be treated as version-stable. Sections without an explicit macOS 26 label describe the macOS 27 beta baseline. Historical macOS 26.6 Recipe Matrix and fixed-geometry Recursive Pass Audit captures informed this document, as did the matching macOS 27 audit on the fixture-level build above. Those standalone fixtures are retired; fresh Golden archives derive scalar, recursive, and cross-version views from typed Resolved Snapshots. Preliminary pass-family parity is recorded below, while value-level semantic classification remains open.
 
 Unknown Objective-C KVC keys raise `NSUnknownKeyException` before Swift can catch them. Consumers must discover and guard private capabilities rather than assuming that a later or earlier build exposes the same object graph. The Playground's concrete fail-closed policy is documented separately.
 
@@ -276,7 +276,7 @@ An immediate repeat in the same display session reproduced every row, signature,
 - `DLCAFilter` `glassBackground.inputKeyFillHighlightEffectOffset` changed in 268 rows;
 - `DLCAFilter` `glassBackground.inputKeyFillHighlightHeight` changed in 212 rows.
 
-Typical transitions were `maximum: 2 → 1.5`, highlight offset `-1 → -0.5` or `-2 → -1`, and highlight height `1 → 0.5`. This establishes display/runtime sensitivity for those resolved values; it does not establish which display metric drives them. The former canonical audit and full same-context repeat have been retired; the retained display-context control preserves the transition provenance, while the direct Core static-tree module owns the recursive product and a narrower 21-cell repeat sentinel.
+Typical transitions were `maximum: 2 → 1.5`, highlight offset `-1 → -0.5` or `-2 → -1`, and highlight height `1 → 0.5`. This establishes display/runtime sensitivity for those resolved values; it does not establish which display metric drives them. Current Snapshot captures record display provenance and compute topology/value comparisons directly; the old control fixture and second-sweep sentinel are no longer active evidence.
 
 The macOS 26 and macOS 27 documents use different whole-tree wrappers, so raw structural paths cannot be treated as semantic identities across releases. Matching by Recipe axes and normalized pass family gives this preliminary inventory result:
 

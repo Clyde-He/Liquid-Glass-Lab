@@ -616,8 +616,12 @@ final class ReferenceLifecycleTests: XCTestCase {
     private func makeCertifiedFixture(
         in directory: URL
     ) throws -> (URL, GlassMaterialStyleAtlas) {
+        let currentMajor = ProcessInfo.processInfo.operatingSystemVersion
+            .majorVersion
         let bundledURL = try XCTUnwrap(
-            GlassMaterialAtlasCatalog.bundledAtlasURL(forMacOSMajor: 27)
+            GlassMaterialAtlasCatalog.bundledAtlasURL(
+                forMacOSMajor: currentMajor
+            )
         )
         var atlas = try JSONDecoder().decode(
             GlassMaterialStyleAtlas.self,

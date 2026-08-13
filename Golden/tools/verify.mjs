@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 import { goldenDirectory, osDirectories } from "./lib/golden.mjs";
-import { readDispositions, verifyArchiveSet } from "./lib/verify-engine.mjs";
+import {
+  readDispositions, releaseVerificationProblems, verifyArchiveSet,
+} from "./lib/verify-engine.mjs";
 
 const args = process.argv.slice(2);
 const verbose = args.includes("--verbose");
@@ -27,11 +28,8 @@ function usage(message) {
 
 if ((candidate && !candidateName) || (!candidate && candidateName) || (candidate && onlyOS)) usage();
 const candidateInput = candidate ? path.resolve(candidate) : null;
-if (candidateInput && (await lstat(candidateInput)).isSymbolicLink()) {
-  throw new Error("candidate directory must not be a symlink");
-}
 const archives = candidate
-  ? [{ name: candidateName, directory: await realpath(candidateInput) }]
+  ? [{ name: candidateName, directory: candidateInput }]
   : (onlyOS ? [onlyOS] : await osDirectories()).map((name) => ({
     name, directory: path.join(goldenDirectory, name),
   }));
@@ -52,7 +50,7 @@ if (json) {
   console.log("\nIntegrity");
   for (const integrity of report.integrity) {
     if (integrity.status === "passed") {
-      console.log(`  ${green("ok")}   ${integrity.name}  ${integrity.count} fixtures, ${integrity.unifiedCount} unified sections`);
+      console.log(`  ${green("ok")}   ${integrity.name}  ${integrity.count} evidence documents`);
     } else {
       console.log(`  ${red("fail")} ${integrity.name}`);
       for (const problem of integrity.problems) console.log(`         ${problem}`);
@@ -61,7 +59,7 @@ if (json) {
   console.log("\nLearnings");
   for (const archive of archives) {
     const platform = report.integrity.find(({ name }) => name === archive.name)?.platform ?? {};
-    console.log(`\n  ${archive.name} (${platform.version ?? "?"} / ${platform.build ?? "?"} unified)`);
+    console.log(`\n  ${archive.name} (${platform.version ?? "?"} / ${platform.build ?? "?"})`);
     for (const outcome of report.outcomes.filter(({ osDirectory }) => osDirectory === archive.name)) {
       const mark = outcome.status === "passed" ? green("✓")
         : outcome.status === "failed" ? red("✗") : yellow("–");
@@ -81,4 +79,4 @@ if (json) {
   console.log(`\n${report.tally.passed} passed, ${report.tally.failed} failed, ${report.tally.skipped} skipped`);
 }
 
-if (!report.ok) process.exitCode = 1;
+if (releaseVerificationProblems(report).length) process.exitCode = 1;

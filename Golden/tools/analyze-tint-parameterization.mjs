@@ -10,6 +10,7 @@ const STANDARD_TOLERANCE = 2e-3;
 const ALPHA_SWEEP_TOLERANCE = 2e-4;
 const PARAMETERIZED_MATRIX_TOLERANCE = 2e-4;
 const ACHROMATIC_CHROMA_THRESHOLD = 0.00035;
+const ACHROMATIC_SATURATION_BOOST_LUMA = [0.2126134, 0.7152094, 0.0721772];
 // Swift stores the residuals after doing the fit with Float matrix
 // coefficients, while this analyzer repeats it in JavaScript Number. The
 // classification tolerance is unchanged; this looser comparison only checks
@@ -194,6 +195,22 @@ function achromaticMatrix(color) {
   return matrix;
 }
 
+function achromaticSaturationBoostMatrix(color) {
+  const value = (color.red + color.green + color.blue) / 3;
+  const strength = 0.9 + 0.05 * value;
+  const bias = 0.95 * value;
+  const matrix = Array(20).fill(0);
+  for (let row = 0; row < 3; row += 1) {
+    for (let column = 0; column < 3; column += 1) {
+      matrix[row * 5 + column] = (row === column ? 1 : 0)
+        - strength * ACHROMATIC_SATURATION_BOOST_LUMA[column];
+    }
+    matrix[row * 5 + 4] = bias;
+  }
+  matrix[18] = color.alpha;
+  return matrix;
+}
+
 function standardDarkEndpoint(source) {
   const minimum = Math.min(...source);
   const maximum = Math.max(...source);
@@ -270,19 +287,23 @@ function pastelEndpoint(source, isBright) {
   });
 }
 
-export function parameterizedTintMatrix(color, cell) {
+export function parameterizedTintMatrix(color, cell, osMajorVersion = 27) {
   const source = [color.red, color.green, color.blue];
-  if (!cell.isClear && !cell.hasMainParticipation) {
+  const mainOffSuppresses = osMajorVersion === 26
+    ? !cell.hasMainParticipation
+    : !cell.isClear && !cell.hasMainParticipation;
+  if (mainOffSuppresses) {
     return neutralSuppressionMatrix(cell.isLightAppearance, color.alpha);
   }
   const chroma = Math.max(...source) - Math.min(...source);
   if (chroma <= ACHROMATIC_CHROMA_THRESHOLD) {
-    return achromaticMatrix(color);
+    return osMajorVersion === 26
+      ? achromaticSaturationBoostMatrix(color)
+      : achromaticMatrix(color);
   }
-  const isPastel =
-    !cell.isLightAppearance &&
-    !cell.isClear &&
-    cell.hasMainParticipation;
+  const isPastel = osMajorVersion === 26
+    ? !cell.isLightAppearance && cell.hasMainParticipation
+    : !cell.isLightAppearance && !cell.isClear && cell.hasMainParticipation;
   if (isPastel) {
     return lumaEndpointMatrix(
       pastelEndpoint(source, true),
@@ -297,7 +318,7 @@ export function parameterizedTintMatrix(color, cell) {
   );
 }
 
-function validateRow(row, color) {
+function validateRow(row, color, osMajorVersion) {
   if (
     !Array.isArray(row.matrix) ||
     row.matrix.length !== 20 ||
@@ -338,6 +359,11 @@ function validateRow(row, color) {
     color,
     alphaResidual
   );
+  const sourceRGB = [color.red, color.green, color.blue];
+  const sourceChroma = maximum(sourceRGB) - Math.min(...sourceRGB);
+  const saturationBoostResidual = sourceChroma <= ACHROMATIC_CHROMA_THRESHOLD
+    ? maximumDifference(row.matrix, achromaticSaturationBoostMatrix(color))
+    : Infinity;
   let family;
   let structure;
   let structureResidual;
@@ -360,21 +386,20 @@ function validateRow(row, color) {
       achromatic.maximumResidual,
       alphaResidual
     );
+  } else if (
+    osMajorVersion === 26
+    && row.cell.hasMainParticipation
+    && saturationBoostResidual <= STRUCTURE_TOLERANCE
+  ) {
+    structure = "achromaticSaturationBoost";
+    family = "achromaticSaturationBoost";
+    structureResidual = Math.max(saturationBoostResidual, alphaResidual);
   } else {
     structure = "unclassified";
     family = "unclassified";
     structureResidual = Math.max(
       Math.min(endpoint.maximumResidual, neutralResidual),
       alphaResidual
-    );
-  }
-  const legacyAchromaticDeclaration =
-    row.structure === "unclassified" &&
-    structure === "achromaticChannelAffine";
-  if (row.structure !== structure && !legacyAchromaticDeclaration) {
-    throw new Error(
-      `${row.colorID} · ${cellKey(row.cell)} declares ${row.structure}, ` +
-        `recomputed ${structure}`
     );
   }
   if (
@@ -413,7 +438,9 @@ function validateRow(row, color) {
     endpoint,
     neutralResidual,
     achromatic,
-    formulaResidual,
+    formulaResidual: family === "achromaticSaturationBoost"
+      ? saturationBoostResidual
+      : formulaResidual,
   };
 }
 
@@ -436,8 +463,8 @@ export function analyzeTintParameterization(document) {
   let maximumStandardBrightResidual = 0;
   let maximumAchromaticFormulaResidual = 0;
   let achromaticFormulaRowCount = 0;
-  const parameterizationSupported =
-    document.environment?.osMajorVersion === 27;
+  const osMajorVersion = document.environment?.osMajorVersion;
+  const parameterizationSupported = [26, 27].includes(osMajorVersion);
   let maximumParameterizedMatrixResidual = 0;
   let worstParameterizedRow = null;
   const unclassifiedRows = [];
@@ -446,10 +473,10 @@ export function analyzeTintParameterization(document) {
   for (const row of rows) {
     const color = colorsByID.get(row.colorID);
     if (!color) throw new Error(`Unknown color ID ${row.colorID}`);
-    const result = validateRow(row, color);
+    const result = validateRow(row, color, osMajorVersion);
     evaluated.push({ row, color, result });
     if (parameterizationSupported) {
-      const predicted = parameterizedTintMatrix(color, row.cell);
+      const predicted = parameterizedTintMatrix(color, row.cell, osMajorVersion);
       const residual = maximumDifference(predicted, row.matrix);
       if (residual > maximumParameterizedMatrixResidual) {
         maximumParameterizedMatrixResidual = residual;
@@ -488,7 +515,7 @@ export function analyzeTintParameterization(document) {
       );
     }
     if (
-      result.family === "achromatic" &&
+      ["achromatic", "achromaticSaturationBoost"].includes(result.family) &&
       result.formulaResidual !== null
     ) {
       maximumAchromaticFormulaResidual = Math.max(

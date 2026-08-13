@@ -6,7 +6,7 @@
 //  dimensionless shapes.
 //
 //  Evidence behind every constant in this file lives in the direct canonical
-//  Golden/macOS-26/unified and Golden/macOS-27/unified archives (104 runs and
+//  Golden/macOS-26 and Golden/macOS-27 archives (104 runs and
 //  936 samples each), with the analysis written up under "P1.1" in
 //  Documentation/GlassResearchRoadmap.md. Measured on macOS 26.6 (25G5065a) and
 //  macOS 27.0 (26A5388g).
