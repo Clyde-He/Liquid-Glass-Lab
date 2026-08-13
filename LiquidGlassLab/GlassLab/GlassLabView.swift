@@ -159,7 +159,8 @@ struct GlassLabView: View {
         .bleed,
         .outerRefraction,
     ]
-    @State var hudExperimentalMarginWidth: Double? = 0
+    @State var hudExperimentalSamplingMarginWidth: Double? = 0
+    @State var hudExperimentalWindowRoomInset: Double? = 0
 
     var body: some View {
         labForm
@@ -1545,6 +1546,23 @@ struct GlassLabView: View {
             Text(label)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Slider(value: value, in: range)
+                .frame(width: InspectorLayout.sliderWidth)
+            Text(String(format: "%.0f", value.wrappedValue))
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: InspectorLayout.valueWidth, alignment: .trailing)
+        }
+    }
+
+    func labeledIntegerSlider(
+        _ label: String,
+        value: Binding<Double>,
+        in range: ClosedRange<Double>
+    ) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Slider(value: value, in: range, step: 1)
                 .frame(width: InspectorLayout.sliderWidth)
             Text(String(format: "%.0f", value.wrappedValue))
                 .font(.callout.monospacedDigit())

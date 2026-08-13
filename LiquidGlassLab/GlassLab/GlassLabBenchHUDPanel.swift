@@ -55,7 +55,8 @@ final class GlassLabHUDPanelController {
         .bleed,
         .outerRefraction,
     ]
-    private var experimentalMarginWidth: CGFloat? = 0
+    private var experimentalSamplingMarginWidth: CGFloat? = 0
+    private var experimentalWindowRoomInset: CGFloat? = 0
     private var freezeRetryTask: Task<Void, Never>?
 
     var onStatusChanged: (() -> Void)?
@@ -162,10 +163,14 @@ final class GlassLabHUDPanelController {
 
     func setRenderExperiment(
         outerPasses: AdjustableGlassOuterPasses,
-        marginWidth: CGFloat?
+        samplingMarginWidth: CGFloat?,
+        windowRoomInset: CGFloat?
     ) {
         experimentalOuterPasses = outerPasses
-        experimentalMarginWidth = marginWidth
+        experimentalSamplingMarginWidth = samplingMarginWidth
+        experimentalWindowRoomInset = windowRoomInset.map {
+            max(0, $0.rounded())
+        }
         applyRenderExperiment()
         layoutPanel()
         onStatusChanged?()
@@ -185,7 +190,7 @@ final class GlassLabHUDPanelController {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
-        panel.level = .floating
+        panel.level = .screenSaver
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -241,7 +246,12 @@ final class GlassLabHUDPanelController {
     private func applyRenderExperiment() {
         guard let glassView else { return }
         glassView.experimentalOuterPasses = experimentalOuterPasses
-        glassView.experimentalMarginWidth = experimentalMarginWidth
+        glassView.experimentalSamplingMarginWidth =
+            experimentalSamplingMarginWidth
+        // The Bench owns this axis as exact external window geometry. Keep
+        // the glass's internal required-inset policy native so changing room
+        // cannot accidentally change the sampled material.
+        glassView.experimentalWindowInsetMarginWidth = nil
     }
 
     private func refreeze() {
@@ -328,18 +338,12 @@ final class GlassLabHUDPanelController {
         }
     }
 
-    /// The widest sampled `marginWidth` across the selected participation's
-    /// cells at this short side, so appearance/variant switches never outgrow
-    /// the room.
-    /// Falls back to the measured `max(16, 0.35 · shortSide)` shape before an
-    /// atlas exists.
+    /// Uses the experiment's exact integer window room when supplied. Native
+    /// mode instead reserves the widest sampled `marginWidth` across the
+    /// selected participation's cells at this short side.
     private func requiredInset(for shortSide: Double) -> CGFloat {
-        if let marginWidth = glassView?.experimentalMarginWidth {
-            return GlassEffectController.windowInset(
-                for: Double(marginWidth),
-                osMajorVersion: ProcessInfo.processInfo
-                    .operatingSystemVersion.majorVersion
-            )
+        if let inset = experimentalWindowRoomInset {
+            return inset
         }
         return nativeRequiredInset(for: shortSide)
     }

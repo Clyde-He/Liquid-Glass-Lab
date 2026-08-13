@@ -449,6 +449,54 @@ final class ControllerConfigurationTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testExperimentalSamplingAndWindowMarginsAreIndependent() {
+        let view = AdjustableGlassEffectView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 120)
+        )
+
+        view.experimentalSamplingMarginWidth = 12
+        view.experimentalWindowInsetMarginWidth = 0
+
+        XCTAssertEqual(
+            view.materialStrength.renderExperiment.marginWidthOverride,
+            12
+        )
+        XCTAssertEqual(
+            view.materialStrength.renderExperiment
+                .windowInsetMarginWidthOverride,
+            0
+        )
+        XCTAssertEqual(
+            view.requiredWindowInset,
+            GlassEffectController.windowInset(
+                for: 0,
+                osMajorVersion: ProcessInfo.processInfo
+                    .operatingSystemVersion.majorVersion
+            )
+        )
+
+        view.experimentalWindowInsetMarginWidth = 7
+
+        XCTAssertEqual(
+            view.materialStrength.renderExperiment.marginWidthOverride,
+            12
+        )
+        XCTAssertEqual(
+            view.materialStrength.renderExperiment
+                .windowInsetMarginWidthOverride,
+            7
+        )
+        XCTAssertEqual(
+            view.requiredWindowInset,
+            GlassEffectController.windowInset(
+                for: 7,
+                osMajorVersion: ProcessInfo.processInfo
+                    .operatingSystemVersion.majorVersion
+            )
+        )
+    }
+
     func testProductPolicyDisablesOnlyTheOuterShadow() {
         let contained = GlassMaterialRenderExperiment.outerShadowPolicy(
             hasOuterShadow: false
@@ -458,12 +506,7 @@ final class ControllerConfigurationTests: XCTestCase {
         XCTAssertTrue(contained.outerPasses.contains(.ringShadow))
         XCTAssertTrue(contained.outerPasses.contains(.bleed))
         XCTAssertTrue(contained.outerPasses.contains(.outerRefraction))
-        XCTAssertEqual(
-            contained.marginWidthOverride,
-            ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 27
-                ? 0.5
-                : 0
-        )
+        XCTAssertNil(contained.marginWidthOverride)
         XCTAssertEqual(contained.windowInsetMarginWidthOverride, 0)
 
         let native = GlassMaterialRenderExperiment.outerShadowPolicy(
@@ -474,33 +517,32 @@ final class ControllerConfigurationTests: XCTestCase {
         XCTAssertNil(native.windowInsetMarginWidthOverride)
     }
 
-    func testContainedRenderMarginIsDecoupledFromWindowInsetByMajor() {
-        let macOS26 = GlassMaterialRenderExperiment.outerShadowPolicy(
-            hasOuterShadow: false,
-            osMajorVersion: 26
+    func testContainedWindowRoomKeepsTheNativeSamplingMargin() {
+        let contained = GlassMaterialRenderExperiment.outerShadowPolicy(
+            hasOuterShadow: false
         )
-        XCTAssertEqual(macOS26.marginWidthOverride, 0)
-        XCTAssertEqual(macOS26.windowInsetMarginWidthOverride, 0)
-
-        let macOS27 = GlassMaterialRenderExperiment.outerShadowPolicy(
-            hasOuterShadow: false,
-            osMajorVersion: 27
-        )
-        XCTAssertEqual(macOS27.marginWidthOverride, 0.5)
-        XCTAssertEqual(macOS27.windowInsetMarginWidthOverride, 0)
+        XCTAssertNil(contained.marginWidthOverride)
+        XCTAssertEqual(contained.windowInsetMarginWidthOverride, 0)
         XCTAssertEqual(
             GlassEffectController.windowInset(
-                for: macOS27.windowInsetMarginWidthOverride!,
+                for: contained.windowInsetMarginWidthOverride!,
+                osMajorVersion: 26
+            ),
+            1
+        )
+        XCTAssertEqual(
+            GlassEffectController.windowInset(
+                for: contained.windowInsetMarginWidthOverride!,
                 osMajorVersion: 27
             ),
             1
         )
     }
 
-    func testZeroMarginSafetyInsetDiffersByMajorVersion() {
+    func testZeroMarginSafetyInsetIsOnePointAcrossSupportedMajors() {
         XCTAssertEqual(
             GlassEffectController.windowInset(for: 0, osMajorVersion: 26),
-            0
+            1
         )
         XCTAssertEqual(
             GlassEffectController.windowInset(for: 0, osMajorVersion: 27),

@@ -162,7 +162,7 @@ private final class ConsumerDemoAppDelegate:
         action: nil
     )
     private let panelLevelControl = NSSegmentedControl(
-        labels: ["Normal", "Floating"],
+        labels: ["Normal", "Screen Saver"],
         trackingMode: .selectOne,
         target: nil,
         action: nil
@@ -405,7 +405,7 @@ private final class ConsumerDemoAppDelegate:
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
-        panel.level = .floating
+        panel.level = .screenSaver
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -672,7 +672,7 @@ private final class ConsumerDemoAppDelegate:
         visibilityValue.stringValue = String(format: "%.2f", visibility)
         hudPanel?.level = panelLevelControl.selectedSegment == 0
             ? .normal
-            : .floating
+            : .screenSaver
         hudPanel?.hasShadow = panelShadowToggle.state == .on
         if let container = hudPanel?.contentView
             as? ConsumerHUDDragContainerView {

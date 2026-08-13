@@ -542,7 +542,11 @@ final class GlassEffectController {
     ) -> CGFloat {
         let margin = max(0, marginWidth)
         if margin == 0 {
-            return osMajorVersion >= 27 ? 1 : 0
+            // Even without a bounds-extending outer shadow, an edge-to-edge
+            // backing surface can flash while its backdrop sample updates.
+            // Controlled Dock dragging reproduced this on macOS 26 and proved
+            // that one transparent point is the minimum stable room there too.
+            return 1
         }
         return ceil(margin) + 1
     }

@@ -33,6 +33,14 @@ private final class GlassLabManagedEffectView: NSGlassEffectView {
 /// real desktop/content behind it. In every case the glass keeps its exact
 /// requested size instead of being clamped by an in-window preview.
 final class GlassLabGlassHost: NSView {
+    struct NativeReferenceConfiguration {
+        let isClear: Bool
+        let tintColor: NSColor?
+        let cornerRadius: CGFloat
+        let title: String
+        let detail: String
+    }
+
     private struct MaterializeProbeState {
         let progress: Double
         let variant: Int
@@ -50,6 +58,9 @@ final class GlassLabGlassHost: NSView {
     ).joined(separator: "  "))
     private var glassSize = NSSize(width: 480, height: 200)
     private var glassPadding: CGFloat = 40
+    private let nativeReferenceTitle = NSTextField(labelWithString: "")
+    private let nativeReferenceDetail = NSTextField(labelWithString: "")
+    private var nativeReference: NativeReferenceConfiguration?
     private weak var state: GlassLabState?
     private var isRestampingAfterLayout = false
     private var materializeProbeState: MaterializeProbeState?
@@ -57,6 +68,8 @@ final class GlassLabGlassHost: NSView {
     /// whenever AppKit hands back a pristine Recipe so a size, appearance, or
     /// Variant change moves the endpoints without any authored table.
     private var materializeBaseline: GlassLabTuning.MaterializeBaseline?
+
+    var isShowingNativeReference: Bool { nativeReference != nil }
 
     init(showsCanvasBackdrop: Bool) {
         self.showsCanvasBackdrop = showsCanvasBackdrop
@@ -79,6 +92,22 @@ final class GlassLabGlassHost: NSView {
         label.isHidden = !showsCanvasBackdrop
         addSubview(label)
         addSubview(glass)
+
+        nativeReferenceTitle.font = .systemFont(ofSize: 15, weight: .semibold)
+        nativeReferenceTitle.textColor = .labelColor
+        nativeReferenceTitle.alignment = .center
+        nativeReferenceTitle.isHidden = true
+        addSubview(nativeReferenceTitle)
+
+        nativeReferenceDetail.font = .monospacedSystemFont(
+            ofSize: 11,
+            weight: .regular
+        )
+        nativeReferenceDetail.textColor = .secondaryLabelColor
+        nativeReferenceDetail.alignment = .center
+        nativeReferenceDetail.isHidden = true
+        addSubview(nativeReferenceDetail)
+
         installLayoutRestamp(on: glass)
     }
 
@@ -97,11 +126,35 @@ final class GlassLabGlassHost: NSView {
             glassPadding = padding
             needsLayout = true
         }
-        glass.cornerRadius = state.cornerRadius
-        if !state.isCapturingRecipeMatrix {
+        if let nativeReference {
+            glass.style = nativeReference.isClear ? .clear : .regular
+            glass.tintColor = nativeReference.tintColor
+            glass.cornerRadius = nativeReference.cornerRadius
+            nativeReferenceTitle.stringValue = nativeReference.title
+            nativeReferenceDetail.stringValue = nativeReference.detail
+            nativeReferenceTitle.isHidden = false
+            nativeReferenceDetail.isHidden = false
+        } else if !state.isCapturingRecipeMatrix {
+            glass.cornerRadius = state.cornerRadius
             GlassLabTuning.applyRecipe(from: state, to: glass)
             restampMaterializeProbeIfNeeded(on: glass)
         }
+    }
+
+    /// Replaces the research-managed view with an untouched system
+    /// `NSGlassEffectView` and configures it only through public properties.
+    func showNativeReference(
+        _ configuration: NativeReferenceConfiguration,
+        with state: GlassLabState
+    ) {
+        nativeReference = configuration
+        rebuildGlass(with: state)
+    }
+
+    func clearNativeReference() {
+        nativeReference = nil
+        nativeReferenceTitle.isHidden = true
+        nativeReferenceDetail.isHidden = true
     }
 
     private func updateBackdrop(_ backdrop: GlassLabBackdropMode) {
@@ -129,11 +182,13 @@ final class GlassLabGlassHost: NSView {
     /// its real key/main participation.
     func rebuildGlass(with state: GlassLabState) {
         let previous = glass
-        let replacement = GlassLabManagedEffectView()
+        let replacement: NSGlassEffectView = nativeReference == nil
+            ? GlassLabManagedEffectView()
+            : NSGlassEffectView()
         glass = replacement
         installLayoutRestamp(on: replacement)
         previous.removeFromSuperview()
-        addSubview(replacement)
+        addSubview(replacement, positioned: .above, relativeTo: label)
         needsLayout = true
         layoutSubtreeIfNeeded()
         update(with: state)
@@ -243,6 +298,19 @@ final class GlassLabGlassHost: NSView {
             y: glassPadding,
             width: glassSize.width,
             height: glassSize.height
+        )
+        let mid = glassPadding + glassSize.height / 2
+        nativeReferenceTitle.frame = NSRect(
+            x: glassPadding,
+            y: mid + 2,
+            width: glassSize.width,
+            height: 20
+        )
+        nativeReferenceDetail.frame = NSRect(
+            x: glassPadding,
+            y: mid - 20,
+            width: glassSize.width,
+            height: 16
         )
     }
 }
@@ -596,7 +664,15 @@ final class GlassLabTestWindowController {
     }
 
     func rebuildGlass(with state: GlassLabState) {
+        glassHost?.clearNativeReference()
         glassHost?.rebuildGlass(with: state)
+    }
+
+    func showNativeReference(
+        _ configuration: GlassLabGlassHost.NativeReferenceConfiguration,
+        with state: GlassLabState
+    ) {
+        glassHost?.showNativeReference(configuration, with: state)
     }
 
     @discardableResult
@@ -693,7 +769,7 @@ final class GlassLabTestWindowController {
             panel.isOpaque = false
             panel.backgroundColor = .clear
             panel.hasShadow = false
-            panel.level = .floating
+            panel.level = .screenSaver
             panel.isMovableByWindowBackground = true
             newWindow = panel
         case .window:
@@ -950,6 +1026,11 @@ final class GlassLabTestWindowController {
     /// captured payload to become the final write nondeterministically.
     private func refreshResolvedContextAndRestamp(on glass: NSGlassEffectView) {
         guard glass === glassHost?.glass else { return }
+        if glassHost?.isShowingNativeReference == true {
+            glass.needsLayout = true
+            glass.layoutSubtreeIfNeeded()
+            return
+        }
         GlassLabTuning.refreshResolvedWindowContext(on: glass)
         guard glass === glassHost?.glass, let state else { return }
         GlassLabTuning.applyOverrides(from: state, to: glass)

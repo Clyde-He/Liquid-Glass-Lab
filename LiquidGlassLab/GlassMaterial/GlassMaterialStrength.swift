@@ -42,10 +42,9 @@ public struct AdjustableGlassOuterPasses: OptionSet, Equatable, Sendable {
 struct GlassMaterialRenderExperiment: Equatable {
     var outerPasses: AdjustableGlassOuterPasses = .all
     var marginWidthOverride: Double?
-    /// The render-server margin and the consumer-facing window room are
-    /// related but not identical. macOS 27 stabilizes the contained backdrop
-    /// at a half-point internal sampling margin, while one point of external
-    /// window room remains the product contract.
+    /// The render-server sampling margin and consumer-facing window room are
+    /// related but independently selectable. Contained glass keeps the native
+    /// sampling margin while requesting only the platform safety inset.
     var windowInsetMarginWidthOverride: Double?
 
     static var currentProductDefault: Self {
@@ -53,14 +52,11 @@ struct GlassMaterialRenderExperiment: Equatable {
     }
 
     static func outerShadowPolicy(
-        hasOuterShadow: Bool,
-        osMajorVersion: Int = ProcessInfo.processInfo
-            .operatingSystemVersion.majorVersion
+        hasOuterShadow: Bool
     ) -> Self {
         guard !hasOuterShadow else { return Self() }
         return Self(
             outerPasses: .all.subtracting(.shadow),
-            marginWidthOverride: osMajorVersion == 27 ? 0.5 : 0,
             windowInsetMarginWidthOverride: 0
         )
     }
@@ -1352,9 +1348,9 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     /// Whether the system's bounds-extending glass shadow is retained.
     ///
     /// Disabling it suppresses the bounds-extending Shadow/SDR Shadow family
-    /// while retaining the inner Ring Shadow. The resulting safety inset is 0
-    /// on macOS 26 and 1pt on macOS 27. Enabling it restores the native shadow
-    /// and its atlas-derived window inset.
+    /// while retaining the inner Ring Shadow. The resulting safety inset is
+    /// 1pt on every supported macOS version. Enabling it restores the native
+    /// shadow and its atlas-derived window inset.
     public var hasOuterShadow = false {
         didSet {
             guard hasOuterShadow != oldValue else { return }
@@ -1399,8 +1395,37 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         get { requestedExperimentalMarginWidth }
         set {
             let normalized = newValue.map { max(0, $0) }
+            guard normalized != requestedExperimentalMarginWidth
+                    || normalized != requestedWindowInsetMarginWidth
+            else { return }
+            requestedExperimentalMarginWidth = normalized
+            requestedWindowInsetMarginWidth = normalized
+            applyRenderExperiment()
+        }
+    }
+
+    /// Overrides only the backdrop layer's internal sampling/render margin.
+    /// Unlike `experimentalMarginWidth`, this does not change the transparent
+    /// room requested from the owning window.
+    @_spi(Experimental)
+    public var experimentalSamplingMarginWidth: CGFloat? {
+        get { requestedExperimentalMarginWidth }
+        set {
+            let normalized = newValue.map { max(0, $0) }
             guard normalized != requestedExperimentalMarginWidth else { return }
             requestedExperimentalMarginWidth = normalized
+            applyRenderExperiment()
+        }
+    }
+
+    /// Overrides only the margin used to derive the consumer-facing window
+    /// inset. It does not change `CABackdropLayer.marginWidth`.
+    @_spi(Experimental)
+    public var experimentalWindowInsetMarginWidth: CGFloat? {
+        get { requestedWindowInsetMarginWidth }
+        set {
+            let normalized = newValue.map { max(0, $0) }
+            guard normalized != requestedWindowInsetMarginWidth else { return }
             requestedWindowInsetMarginWidth = normalized
             applyRenderExperiment()
         }
