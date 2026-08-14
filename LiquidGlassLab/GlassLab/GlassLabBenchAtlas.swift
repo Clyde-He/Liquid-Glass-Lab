@@ -1275,12 +1275,14 @@ extension GlassLabView {
         try await Task.sleep(for: .milliseconds(1200))
         if let glass = hud.glassView {
             let experiment = glass.materialStrength.renderExperiment
+            let usesNativeSamplingPolicy = experiment.outerPasses == .all
+                && experiment.marginWidthOverride == nil
             step(
-                "verification-policy-native",
-                experiment == GlassMaterialRenderExperiment(),
-                experiment == GlassMaterialRenderExperiment()
-                    ? "all passes · native margin · native window inset"
-                    : "headless verification inherited a product override"
+                "verification-sampling-policy-native",
+                usesNativeSamplingPolicy,
+                usesNativeSamplingPolicy
+                    ? "all passes · native sampling margin"
+                    : "headless verification inherited a sampling override"
             )
             let systemMargin = GlassMaterialAccess.marginWidth(under: glass)
             step(
