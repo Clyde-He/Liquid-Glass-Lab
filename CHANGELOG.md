@@ -8,7 +8,7 @@ The project follows [Semantic Versioning](https://semver.org/). While the packag
 
 ### Fixed
 
-- Contained HUDs now reserve a uniform 1pt window safety inset on macOS 26 and 27. Controlled Dock dragging showed that the previous 0pt macOS 26 inset could flash at the backing-surface edge, while native backdrop sampling remains unchanged.
+- Contained HUDs now preserve the native backdrop sampling margin after disabling only the outer shadow, replacing the previous 0pt/0.5pt sampling override on macOS 26/27. They also reserve a uniform 1pt window safety inset after controlled Dock dragging showed that a 0pt room flashes at the backing-surface edge on macOS 26.
 
 ## [0.3.1] - 2026-08-13
 
@@ -31,7 +31,7 @@ The project follows [Semantic Versioning](https://semver.org/). While the packag
 
 - Closing, replacing, or reopening a reference window now preserves an already verified material and cached Tint while unresolved work waits for and resumes on a participating host.
 - Redundant applies now validate the live frozen tree, and stale calibration, Tint warm-up, legacy-capture, and installation-retry work can no longer mutate or clear a replacement generation.
-- Contained glass preserves the native internal backdrop sampling margin while exposing only the platform safety inset (0pt on macOS 26 and 1pt on macOS 27); muted glass continues to use the same safety inset.
+- macOS 27 contained glass preserves its required half-point internal sampling margin while exposing the documented one-point consumer window inset; muted glass continues to use the platform safety inset.
 - Clear glass now settles pending native Recipe layout before the coalesced Tint presentation writer, preventing streamed NSColorPanel updates from exposing a transient native Main-Off frame.
 - The Consumer Demo remains usable when its reference window closes and avoids unrelated panel geometry work during material-only updates.
 

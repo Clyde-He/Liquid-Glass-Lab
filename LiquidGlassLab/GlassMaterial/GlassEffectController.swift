@@ -488,8 +488,7 @@ final class GlassEffectController {
     ) -> CGFloat {
         if respectsRenderExperiment,
            let experiment = glassView?.materialStrength.renderExperiment,
-           let margin = experiment.windowInsetMarginWidthOverride
-            ?? experiment.marginWidthOverride {
+           let margin = experiment.windowInsetMarginWidthOverride {
             return windowInset(for: margin)
         }
         // Main-Off intentionally suppresses the outer shadow. Some certified
@@ -529,17 +528,10 @@ final class GlassEffectController {
     }
 
     private func windowInset(for marginWidth: Double) -> CGFloat {
-        Self.windowInset(
-            for: marginWidth,
-            osMajorVersion: ProcessInfo.processInfo
-                .operatingSystemVersion.majorVersion
-        )
+        Self.windowInset(for: marginWidth)
     }
 
-    static func windowInset(
-        for marginWidth: Double,
-        osMajorVersion: Int
-    ) -> CGFloat {
+    static func windowInset(for marginWidth: Double) -> CGFloat {
         let margin = max(0, marginWidth)
         if margin == 0 {
             // Even without a bounds-extending outer shadow, an edge-to-edge

@@ -1390,23 +1390,9 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         }
     }
 
-    @_spi(Experimental)
-    public var experimentalMarginWidth: CGFloat? {
-        get { requestedExperimentalMarginWidth }
-        set {
-            let normalized = newValue.map { max(0, $0) }
-            guard normalized != requestedExperimentalMarginWidth
-                    || normalized != requestedWindowInsetMarginWidth
-            else { return }
-            requestedExperimentalMarginWidth = normalized
-            requestedWindowInsetMarginWidth = normalized
-            applyRenderExperiment()
-        }
-    }
-
     /// Overrides only the backdrop layer's internal sampling/render margin.
-    /// Unlike `experimentalMarginWidth`, this does not change the transparent
-    /// room requested from the owning window.
+    /// This does not change the transparent room requested from the owning
+    /// window.
     @_spi(Experimental)
     public var experimentalSamplingMarginWidth: CGFloat? {
         get { requestedExperimentalMarginWidth }
@@ -1414,19 +1400,6 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
             let normalized = newValue.map { max(0, $0) }
             guard normalized != requestedExperimentalMarginWidth else { return }
             requestedExperimentalMarginWidth = normalized
-            applyRenderExperiment()
-        }
-    }
-
-    /// Overrides only the margin used to derive the consumer-facing window
-    /// inset. It does not change `CABackdropLayer.marginWidth`.
-    @_spi(Experimental)
-    public var experimentalWindowInsetMarginWidth: CGFloat? {
-        get { requestedWindowInsetMarginWidth }
-        set {
-            let normalized = newValue.map { max(0, $0) }
-            guard normalized != requestedWindowInsetMarginWidth else { return }
-            requestedWindowInsetMarginWidth = normalized
             applyRenderExperiment()
         }
     }

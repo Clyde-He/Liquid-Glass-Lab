@@ -55,8 +55,8 @@ final class GlassLabHUDPanelController {
         .bleed,
         .outerRefraction,
     ]
-    private var experimentalSamplingMarginWidth: CGFloat? = 0
-    private var experimentalWindowRoomInset: CGFloat? = 0
+    private var experimentalSamplingMarginWidth: CGFloat?
+    private var experimentalWindowRoomInset: CGFloat? = 1
     private var freezeRetryTask: Task<Void, Never>?
 
     var onStatusChanged: (() -> Void)?
@@ -77,6 +77,22 @@ final class GlassLabHUDPanelController {
 
     var nativeRequiredWindowInset: CGFloat {
         nativeRequiredInset(for: min(contentSize.width, contentSize.height))
+    }
+
+    var nativeSamplingMarginWidth: Double {
+        nativeRequiredMarginWidth(
+            for: min(contentSize.width, contentSize.height)
+        )
+    }
+
+    static func fallbackNativeMarginWidth(for shortSide: Double) -> Double {
+        max(16, 0.35 * shortSide)
+    }
+
+    static func fallbackNativeInset(for shortSide: Double) -> CGFloat {
+        GlassEffectController.windowInset(
+            for: fallbackNativeMarginWidth(for: shortSide)
+        )
     }
 
     /// The window room currently reserved around the glass.
@@ -248,10 +264,6 @@ final class GlassLabHUDPanelController {
         glassView.experimentalOuterPasses = experimentalOuterPasses
         glassView.experimentalSamplingMarginWidth =
             experimentalSamplingMarginWidth
-        // The Bench owns this axis as exact external window geometry. Keep
-        // the glass's internal required-inset policy native so changing room
-        // cannot accidentally change the sampled material.
-        glassView.experimentalWindowInsetMarginWidth = nil
     }
 
     private func refreeze() {
@@ -349,7 +361,13 @@ final class GlassLabHUDPanelController {
     }
 
     private func nativeRequiredInset(for shortSide: Double) -> CGFloat {
-        var margin = max(16.0, 0.35 * shortSide)
+        GlassEffectController.windowInset(
+            for: nativeRequiredMarginWidth(for: shortSide)
+        )
+    }
+
+    private func nativeRequiredMarginWidth(for shortSide: Double) -> Double {
+        var margin = Self.fallbackNativeMarginWidth(for: shortSide)
         if let atlas = glassView?.materialStrength.frozenAtlas {
             for isLight in [true, false] {
                 for isClear in [true, false] {
@@ -367,11 +385,7 @@ final class GlassLabHUDPanelController {
                 }
             }
         }
-        return GlassEffectController.windowInset(
-            for: margin,
-            osMajorVersion: ProcessInfo.processInfo
-                .operatingSystemVersion.majorVersion
-        )
+        return margin
     }
 
     private func updateLabels() {

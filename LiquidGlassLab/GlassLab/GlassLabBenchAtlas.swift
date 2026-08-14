@@ -195,10 +195,11 @@ extension GlassLabView {
                         "Native Window Room",
                         isOn: hudNativeWindowRoomBinding
                     )
-                    labeledIntegerSlider(
+                    labeledSlider(
                         "Actual Window Room",
                         value: hudExperimentalWindowRoomInsetBinding,
-                        in: 0...120
+                        in: 0...120,
+                        step: 1
                     )
                     .disabled(hudExperimentalWindowRoomInset == nil)
 
@@ -464,26 +465,19 @@ extension GlassLabView {
 
     private var estimatedHUDNativeMarginWidth: Double {
         if let hudPanelController {
-            return max(
-                0,
-                Double(hudPanelController.nativeRequiredWindowInset - 1)
-            )
+            return hudPanelController.nativeSamplingMarginWidth
         }
-        return max(16, 0.35 * min(hudContentWidth, hudContentHeight))
+        return GlassLabHUDPanelController.fallbackNativeMarginWidth(
+            for: min(hudContentWidth, hudContentHeight)
+        )
     }
 
     private var estimatedHUDNativeWindowRoomInset: Double {
         if let hudPanelController {
             return Double(hudPanelController.nativeRequiredWindowInset)
         }
-        let margin = max(
-            16,
-            0.35 * min(hudContentWidth, hudContentHeight)
-        )
-        return Double(GlassEffectController.windowInset(
-            for: margin,
-            osMajorVersion: ProcessInfo.processInfo
-                .operatingSystemVersion.majorVersion
+        return Double(GlassLabHUDPanelController.fallbackNativeInset(
+            for: min(hudContentWidth, hudContentHeight)
         ))
     }
 
@@ -670,21 +664,11 @@ extension GlassLabView {
     /// difference (anything below the CA model, which diffs clean) shows up
     /// to the eye immediately.
     func showMainOnTintReference() {
-        state.shaderOverridesEnabled = false
-        state.highlightOverridesEnabled = false
-        state.vibrantMatrixOverridesEnabled = false
-        state.testWindow.clearAppKitMaterializeBackgroundProbe(rebuild: false)
         state.rendererMode = .recipe
         selectedRecipePage = .general
         state.isTestWindowVisible = true
         state.windowHostType = .panel
         state.testBackdrop = .ambient
-        state.isSubdued = false
-        state.hasScrim = false
-        state.hasReducedTintOpacity = false
-        state.subvariant = ""
-        state.adaptiveAppearance = 2
-        state.variant = hudIsClear ? 2 : 1
         state.testAppearance = switch hudAppearance {
         case .light: .light
         case .dark: .dark
@@ -692,10 +676,8 @@ extension GlassLabView {
         }
         state.glassWidth = hudContentWidth
         state.glassHeight = hudContentHeight
-        state.cornerRadius = 24
         state.windowPadding = 120
         let tint = currentHUDTintColor()
-        state.tintColor = tint
         state.isTestWindowMain = true
         state.isTestWindowKey = false
         state.testWindow.sync(with: state)

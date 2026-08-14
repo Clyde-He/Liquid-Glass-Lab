@@ -147,6 +147,7 @@ final class GlassLabGlassHost: NSView {
         _ configuration: NativeReferenceConfiguration,
         with state: GlassLabState
     ) {
+        clearMaterializeBackgroundProbe()
         nativeReference = configuration
         rebuildGlass(with: state)
     }
@@ -207,6 +208,7 @@ final class GlassLabGlassHost: NSView {
         tintColor: NSColor?,
         includesViewEnvelope: Bool
     ) -> GlassLabTuning.MaterializeBackgroundTransplantResult? {
+        guard nativeReference == nil else { return nil }
         refreshMaterializeBaselineIfPristine(on: glass)
         materializeProbeState = MaterializeProbeState(
             progress: progress,
@@ -572,7 +574,10 @@ final class GlassLabTestWindowController {
     private var mainReconciliationTask: Task<Void, Never>?
     private var contextSettleTask: Task<Void, Never>?
 
-    var liveGlass: NSGlassEffectView? { glassHost?.glass }
+    var liveGlass: NSGlassEffectView? {
+        guard glassHost?.isShowingNativeReference != true else { return nil }
+        return glassHost?.glass
+    }
     var liveSemanticLayerRoot: CALayer? { semanticHost?.inspectionRootLayer }
     var semanticRenderStatus: String? { semanticHost?.renderStatus }
     var liveWindow: NSWindow? { window }
@@ -666,6 +671,11 @@ final class GlassLabTestWindowController {
     func rebuildGlass(with state: GlassLabState) {
         glassHost?.clearNativeReference()
         glassHost?.rebuildGlass(with: state)
+    }
+
+    func clearNativeReference(with state: GlassLabState) {
+        guard glassHost?.isShowingNativeReference == true else { return }
+        rebuildGlass(with: state)
     }
 
     func showNativeReference(
