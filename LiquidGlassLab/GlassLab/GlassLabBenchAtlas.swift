@@ -467,9 +467,22 @@ extension GlassLabView {
         if let hudPanelController {
             return hudPanelController.nativeSamplingMarginWidth
         }
-        return GlassLabHUDPanelController.fallbackNativeMarginWidth(
-            for: min(hudContentWidth, hudContentHeight)
+        let isLight = switch hudAppearance {
+        case .light: true
+        case .dark: false
+        case .auto:
+            NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])
+                == .aqua
+        }
+        let cell = GlassMaterialStyleAtlas.Cell(
+            isLightAppearance: isLight,
+            isClear: hudIsClear,
+            hasMainParticipation: !hudIsMuted
         )
+        return atlasDocument?.sample(
+            for: cell,
+            at: min(hudContentWidth, hudContentHeight)
+        )?.marginWidth ?? 0
     }
 
     private var estimatedHUDNativeWindowRoomInset: Double {

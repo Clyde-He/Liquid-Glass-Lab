@@ -80,9 +80,26 @@ final class GlassLabHUDPanelController {
     }
 
     var nativeSamplingMarginWidth: Double {
-        nativeRequiredMarginWidth(
-            for: min(contentSize.width, contentSize.height)
+        let isLight = switch appearance {
+        case .light: true
+        case .dark: false
+        case .auto:
+            glassView.map(GlassMaterialStrength.isLightAppearance) ?? false
+        }
+        let cell = GlassMaterialStyleAtlas.Cell(
+            isLightAppearance: isLight,
+            isClear: isClear,
+            hasMainParticipation: !isMuted
         )
+        let shortSide = min(contentSize.width, contentSize.height)
+        if let margin = glassView?.materialStrength.frozenAtlas?.sample(
+            for: cell,
+            at: shortSide
+        )?.marginWidth {
+            return margin
+        }
+        return glassView.flatMap { GlassMaterialAccess.marginWidth(under: $0) }
+            ?? 0
     }
 
     static func fallbackNativeMarginWidth(for shortSide: Double) -> Double {
