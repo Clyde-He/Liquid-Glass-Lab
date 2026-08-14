@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/). While the packag
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-13
+
 ### Fixed
 
 - Contained HUDs now preserve the native backdrop sampling margin after disabling only the outer shadow, replacing the previous 0pt/0.5pt sampling override on macOS 26/27. They also reserve a uniform 1pt window safety inset after controlled Dock dragging showed that a 0pt room flashes at the backing-surface edge on macOS 26.
@@ -80,7 +82,8 @@ The project follows [Semantic Versioning](https://semver.org/). While the packag
 - The package can be linked from a macOS 15 deployment target so consumers can retain an older-system fallback. `AdjustableGlassEffectView` itself is available on macOS 26 and later.
 - The implementation relies on private AppKit details and is intended for Direct Distribution, not the Mac App Store.
 
-[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.1...HEAD
+[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.2...HEAD
+[0.3.2]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.1...0.3.2
 [0.3.1]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.0...0.3.1
 [0.3.0]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.2...0.3.0
 [0.2.2]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.1...0.2.2
