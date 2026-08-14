@@ -159,7 +159,8 @@ struct GlassLabView: View {
         .bleed,
         .outerRefraction,
     ]
-    @State var hudExperimentalMarginWidth: Double? = 0
+    @State var hudExperimentalSamplingMarginWidth: Double?
+    @State var hudExperimentalWindowRoomInset: Double? = 1
 
     var body: some View {
         labForm
@@ -279,6 +280,9 @@ struct GlassLabView: View {
     /// Leaving Bench (or a Bench page) resets any research page it had set,
     /// which is also what disarms its instrumentation.
     private func applyBenchPageContext() {
+        if state.selectedSection != .bench || selectedBenchPage != .atlas {
+            state.testWindow.clearNativeReference(with: state)
+        }
         guard state.selectedSection == .bench else {
             if selectedRecipePage == .materialize || selectedRecipePage == .tint {
                 selectedRecipePage = .general
@@ -1539,12 +1543,19 @@ struct GlassLabView: View {
     func labeledSlider(
         _ label: String,
         value: Binding<Double>,
-        in range: ClosedRange<Double>
+        in range: ClosedRange<Double>,
+        step: Double? = nil
     ) -> some View {
         HStack(spacing: 12) {
             Text(label)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Slider(value: value, in: range)
+            Group {
+                if let step {
+                    Slider(value: value, in: range, step: step)
+                } else {
+                    Slider(value: value, in: range)
+                }
+            }
                 .frame(width: InspectorLayout.sliderWidth)
             Text(String(format: "%.0f", value.wrappedValue))
                 .font(.callout.monospacedDigit())

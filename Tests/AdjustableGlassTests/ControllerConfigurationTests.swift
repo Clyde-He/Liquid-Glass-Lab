@@ -319,7 +319,7 @@ final class ControllerConfigurationTests: XCTestCase {
         let view = AdjustableGlassEffectView(
             frame: NSRect(x: 0, y: 0, width: 320, height: 120)
         )
-        view.experimentalMarginWidth = nil
+        view.hasOuterShadow = true
         view.style = .regular
         view.effectState = .active
         view.layoutSubtreeIfNeeded()
@@ -332,11 +332,7 @@ final class ControllerConfigurationTests: XCTestCase {
         XCTAssertGreaterThan(activeInset, inactiveInset)
         XCTAssertEqual(
             inactiveInset,
-            GlassEffectController.windowInset(
-                for: 0,
-                osMajorVersion: ProcessInfo.processInfo
-                    .operatingSystemVersion.majorVersion
-            )
+            GlassEffectController.windowInset(for: 0)
         )
     }
 
@@ -415,38 +411,26 @@ final class ControllerConfigurationTests: XCTestCase {
     }
 
     @MainActor
-    func testExperimentalMarginOverridesOnlyTheEffectiveWindowInset() {
+    func testExperimentalSamplingMarginDoesNotChangeWindowInset() {
         let view = AdjustableGlassEffectView(
             frame: NSRect(x: 0, y: 0, width: 320, height: 120)
         )
-        let nativeInset = view.experimentalNativeRequiredWindowInset
-
-        view.experimentalMarginWidth = 12
-
-        XCTAssertEqual(view.requiredWindowInset, 13)
-        XCTAssertEqual(view.experimentalNativeRequiredWindowInset, nativeInset)
-        XCTAssertGreaterThan(nativeInset, view.requiredWindowInset)
-
-        view.experimentalMarginWidth = nil
-        XCTAssertEqual(view.requiredWindowInset, nativeInset)
-    }
-
-    @MainActor
-    func testZeroExperimentalMarginUsesThePlatformSafetyInset() {
-        let view = AdjustableGlassEffectView(
-            frame: NSRect(x: 0, y: 0, width: 320, height: 120)
-        )
-
-        view.experimentalMarginWidth = 0
+        view.hasOuterShadow = true
+        let nativeInset = view.requiredWindowInset
+        view.experimentalSamplingMarginWidth = 12
 
         XCTAssertEqual(
-            view.requiredWindowInset,
-            GlassEffectController.windowInset(
-                for: 0,
-                osMajorVersion: ProcessInfo.processInfo
-                    .operatingSystemVersion.majorVersion
-            )
+            view.materialStrength.renderExperiment.marginWidthOverride,
+            12
         )
+        XCTAssertNil(
+            view.materialStrength.renderExperiment
+                .windowInsetMarginWidthOverride
+        )
+        XCTAssertEqual(view.requiredWindowInset, nativeInset)
+
+        view.experimentalSamplingMarginWidth = 0
+        XCTAssertEqual(view.requiredWindowInset, nativeInset)
     }
 
     func testProductPolicyDisablesOnlyTheOuterShadow() {
@@ -458,12 +442,7 @@ final class ControllerConfigurationTests: XCTestCase {
         XCTAssertTrue(contained.outerPasses.contains(.ringShadow))
         XCTAssertTrue(contained.outerPasses.contains(.bleed))
         XCTAssertTrue(contained.outerPasses.contains(.outerRefraction))
-        XCTAssertEqual(
-            contained.marginWidthOverride,
-            ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 27
-                ? 0.5
-                : 0
-        )
+        XCTAssertNil(contained.marginWidthOverride)
         XCTAssertEqual(contained.windowInsetMarginWidthOverride, 0)
 
         let native = GlassMaterialRenderExperiment.outerShadowPolicy(
@@ -474,46 +453,23 @@ final class ControllerConfigurationTests: XCTestCase {
         XCTAssertNil(native.windowInsetMarginWidthOverride)
     }
 
-    func testContainedRenderMarginIsDecoupledFromWindowInsetByMajor() {
-        let macOS26 = GlassMaterialRenderExperiment.outerShadowPolicy(
-            hasOuterShadow: false,
-            osMajorVersion: 26
+    func testContainedWindowRoomKeepsTheNativeSamplingMargin() {
+        let contained = GlassMaterialRenderExperiment.outerShadowPolicy(
+            hasOuterShadow: false
         )
-        XCTAssertEqual(macOS26.marginWidthOverride, 0)
-        XCTAssertEqual(macOS26.windowInsetMarginWidthOverride, 0)
-
-        let macOS27 = GlassMaterialRenderExperiment.outerShadowPolicy(
-            hasOuterShadow: false,
-            osMajorVersion: 27
-        )
-        XCTAssertEqual(macOS27.marginWidthOverride, 0.5)
-        XCTAssertEqual(macOS27.windowInsetMarginWidthOverride, 0)
+        XCTAssertNil(contained.marginWidthOverride)
+        XCTAssertEqual(contained.windowInsetMarginWidthOverride, 0)
         XCTAssertEqual(
             GlassEffectController.windowInset(
-                for: macOS27.windowInsetMarginWidthOverride!,
-                osMajorVersion: 27
+                for: contained.windowInsetMarginWidthOverride!
             ),
             1
         )
     }
 
-    func testZeroMarginSafetyInsetDiffersByMajorVersion() {
-        XCTAssertEqual(
-            GlassEffectController.windowInset(for: 0, osMajorVersion: 26),
-            0
-        )
-        XCTAssertEqual(
-            GlassEffectController.windowInset(for: 0, osMajorVersion: 27),
-            1
-        )
-        XCTAssertEqual(
-            GlassEffectController.windowInset(for: 12.25, osMajorVersion: 26),
-            14
-        )
-        XCTAssertEqual(
-            GlassEffectController.windowInset(for: 12.25, osMajorVersion: 27),
-            14
-        )
+    func testZeroMarginSafetyInsetIsOnePoint() {
+        XCTAssertEqual(GlassEffectController.windowInset(for: 0), 1)
+        XCTAssertEqual(GlassEffectController.windowInset(for: 12.25), 14)
     }
 
     @MainActor
@@ -521,11 +477,7 @@ final class ControllerConfigurationTests: XCTestCase {
         let view = AdjustableGlassEffectView(
             frame: NSRect(x: 0, y: 0, width: 320, height: 120)
         )
-        let containedInset = GlassEffectController.windowInset(
-            for: 0,
-            osMajorVersion: ProcessInfo.processInfo
-                .operatingSystemVersion.majorVersion
-        )
+        let containedInset = GlassEffectController.windowInset(for: 0)
 
         XCTAssertFalse(view.hasOuterShadow)
         XCTAssertEqual(view.requiredWindowInset, containedInset)

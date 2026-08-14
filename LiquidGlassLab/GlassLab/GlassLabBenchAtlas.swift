@@ -101,7 +101,7 @@ extension GlassLabView {
             Toggle(isOn: hudVisibleBinding) {
                 LabRowLabel(
                     "Show HUD Panel",
-                    description: "A borderless non-activating floating panel rendering an AdjustableGlassEffectView frozen from the paired atlas. Normal holds verified Main-On; Muted holds verified Main-Off. The panel itself never becomes key or main."
+                    description: "A borderless non-activating screen-saver-level panel rendering an AdjustableGlassEffectView frozen from the paired atlas. Normal holds verified Main-On; Muted holds verified Main-Off. The panel itself never becomes key or main."
                 )
             }
             .disabled(atlasDocument == nil && !hudPanelVisible)
@@ -140,10 +140,10 @@ extension GlassLabView {
                     supportsOpacity: true
                 )
                 .disabled(!hudTintEnabled)
-                Button("Show Main-On Reference in Test Window") {
+                Button("Show Pristine Main-On Reference") {
                     showMainOnTintReference()
                 }
-                Text("A/B: configures the visible test window as a genuinely main window with the HUD's exact context — variant, appearance, size, and tint — so the frozen replica and the real thing sit side by side.")
+                Text("A/B: creates a fresh public NSGlassEffectView in a genuinely main, screen-saver-level test panel. It matches the HUD's Regular/Clear, appearance, size, tint, and corner radius without applying Catalog, strength, recipe SPI, or captured overrides.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -180,20 +180,35 @@ extension GlassLabView {
                         )
                     }
 
-                    Toggle("Native Margin", isOn: hudNativeMarginBinding)
+                    Toggle(
+                        "Native Sampling Margin",
+                        isOn: hudNativeSamplingMarginBinding
+                    )
                     labeledSlider(
-                        "Margin Width",
-                        value: hudExperimentalMarginWidthBinding,
+                        "Sampling Margin",
+                        value: hudExperimentalSamplingMarginWidthBinding,
                         in: 0...120
                     )
-                    .disabled(hudExperimentalMarginWidth == nil)
+                    .disabled(hudExperimentalSamplingMarginWidth == nil)
+
+                    Toggle(
+                        "Native Window Room",
+                        isOn: hudNativeWindowRoomBinding
+                    )
+                    labeledSlider(
+                        "Actual Window Room",
+                        value: hudExperimentalWindowRoomInsetBinding,
+                        in: 0...120,
+                        step: 1
+                    )
+                    .disabled(hudExperimentalWindowRoomInset == nil)
 
                     Text(hudRenderExperimentSummary)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
 
-                    Text("Debug-only SPI. Pass toggles isolate the frozen material's outer families; Native Margin restores the Atlas value, while the slider replaces marginWidth before the OS-specific safety inset is added.")
+                    Text("Debug-only SPI. Sampling Margin independently controls CABackdropLayer.marginWidth. Actual Window Room directly sets the panel's integer transparent inset with no margin conversion; Native restores the Atlas-derived room.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -331,7 +346,10 @@ extension GlassLabView {
                 ))
                 controller.setRenderExperiment(
                     outerPasses: hudExperimentalOuterPasses,
-                    marginWidth: hudExperimentalMarginWidth.map { CGFloat($0) }
+                    samplingMarginWidth: hudExperimentalSamplingMarginWidth
+                        .map { CGFloat($0) },
+                    windowRoomInset: hudExperimentalWindowRoomInset
+                        .map { CGFloat($0) }
                 )
                 controller.show()
             } else {
@@ -397,36 +415,83 @@ extension GlassLabView {
         }
     }
 
-    private var hudNativeMarginBinding: Binding<Bool> {
+    private var hudNativeSamplingMarginBinding: Binding<Bool> {
         Binding {
-            hudExperimentalMarginWidth == nil
+            hudExperimentalSamplingMarginWidth == nil
         } set: { usesNativeMargin in
             if usesNativeMargin {
-                hudExperimentalMarginWidth = nil
+                hudExperimentalSamplingMarginWidth = nil
             } else {
-                hudExperimentalMarginWidth = estimatedHUDNativeMarginWidth
+                hudExperimentalSamplingMarginWidth =
+                    estimatedHUDNativeMarginWidth
             }
             pushHUDRenderExperiment()
         }
     }
 
-    private var hudExperimentalMarginWidthBinding: Binding<Double> {
+    private var hudExperimentalSamplingMarginWidthBinding: Binding<Double> {
         Binding {
-            hudExperimentalMarginWidth ?? estimatedHUDNativeMarginWidth
+            hudExperimentalSamplingMarginWidth
+                ?? estimatedHUDNativeMarginWidth
         } set: { value in
-            hudExperimentalMarginWidth = value
+            hudExperimentalSamplingMarginWidth = value
+            pushHUDRenderExperiment()
+        }
+    }
+
+    private var hudNativeWindowRoomBinding: Binding<Bool> {
+        Binding {
+            hudExperimentalWindowRoomInset == nil
+        } set: { usesNativeRoom in
+            if usesNativeRoom {
+                hudExperimentalWindowRoomInset = nil
+            } else {
+                hudExperimentalWindowRoomInset =
+                    estimatedHUDNativeWindowRoomInset
+            }
+            pushHUDRenderExperiment()
+        }
+    }
+
+    private var hudExperimentalWindowRoomInsetBinding: Binding<Double> {
+        Binding {
+            hudExperimentalWindowRoomInset
+                ?? estimatedHUDNativeWindowRoomInset
+        } set: { value in
+            hudExperimentalWindowRoomInset = max(0, value.rounded())
             pushHUDRenderExperiment()
         }
     }
 
     private var estimatedHUDNativeMarginWidth: Double {
         if let hudPanelController {
-            return max(
-                0,
-                Double(hudPanelController.nativeRequiredWindowInset - 1)
-            )
+            return hudPanelController.nativeSamplingMarginWidth
         }
-        return max(16, 0.35 * min(hudContentWidth, hudContentHeight))
+        let isLight = switch hudAppearance {
+        case .light: true
+        case .dark: false
+        case .auto:
+            NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])
+                == .aqua
+        }
+        let cell = GlassMaterialStyleAtlas.Cell(
+            isLightAppearance: isLight,
+            isClear: hudIsClear,
+            hasMainParticipation: !hudIsMuted
+        )
+        return atlasDocument?.sample(
+            for: cell,
+            at: min(hudContentWidth, hudContentHeight)
+        )?.marginWidth ?? 0
+    }
+
+    private var estimatedHUDNativeWindowRoomInset: Double {
+        if let hudPanelController {
+            return Double(hudPanelController.nativeRequiredWindowInset)
+        }
+        return Double(GlassLabHUDPanelController.fallbackNativeInset(
+            for: min(hudContentWidth, hudContentHeight)
+        ))
     }
 
     private var hudRenderExperimentSummary: String {
@@ -439,19 +504,26 @@ extension GlassLabView {
         let passes = disabled.isEmpty
             ? "passes: all"
             : "passes: −" + disabled.joined(separator: ",")
-        let margin = hudExperimentalMarginWidth.map {
-            String(format: "marginWidth: %.0fpt", $0)
-        } ?? "marginWidth: native"
+        let samplingMargin = hudExperimentalSamplingMarginWidth.map {
+            String(format: "sampling: %.0fpt", $0)
+        } ?? "sampling: native"
+        let roomPolicy = hudExperimentalWindowRoomInset.map {
+            String(format: "window room: %.0fpt", $0)
+        } ?? "window room: native"
         let inset = hudPanelController.map {
-            String(format: "window room: %.0fpt", $0.currentInset)
-        } ?? "window room: HUD hidden"
-        return [passes, margin, inset].joined(separator: " · ")
+            String(format: "actual room: %.0fpt", $0.currentInset)
+        } ?? "actual room: HUD hidden"
+        return [passes, samplingMargin, roomPolicy, inset]
+            .joined(separator: " · ")
     }
 
     private func pushHUDRenderExperiment() {
         hudPanelController?.setRenderExperiment(
             outerPasses: hudExperimentalOuterPasses,
-            marginWidth: hudExperimentalMarginWidth.map { CGFloat($0) }
+            samplingMarginWidth: hudExperimentalSamplingMarginWidth
+                .map { CGFloat($0) },
+            windowRoomInset: hudExperimentalWindowRoomInset
+                .map { CGFloat($0) }
         )
     }
 
@@ -610,11 +682,6 @@ extension GlassLabView {
         state.isTestWindowVisible = true
         state.windowHostType = .panel
         state.testBackdrop = .ambient
-        state.isSubdued = false
-        state.hasScrim = false
-        state.subvariant = ""
-        state.adaptiveAppearance = 2
-        state.variant = hudIsClear ? 2 : 1
         state.testAppearance = switch hudAppearance {
         case .light: .light
         case .dark: .dark
@@ -622,12 +689,43 @@ extension GlassLabView {
         }
         state.glassWidth = hudContentWidth
         state.glassHeight = hudContentHeight
-        state.cornerRadius = 24
         state.windowPadding = 120
-        state.tintColor = currentHUDTintColor()
+        let tint = currentHUDTintColor()
         state.isTestWindowMain = true
+        state.isTestWindowKey = false
         state.testWindow.sync(with: state)
-        state.testWindow.rebuildGlass(with: state)
+        state.testWindow.showNativeReference(
+            GlassLabGlassHost.NativeReferenceConfiguration(
+                isClear: hudIsClear,
+                tintColor: tint,
+                cornerRadius: 24,
+                title: "Native · \(hudIsClear ? "Clear" : "Regular") · \(hudAppearance.rawValue)",
+                detail: String(
+                    format: "%.0f×%.0f · %@ · radius %.0f",
+                    hudContentWidth,
+                    hudContentHeight,
+                    nativeReferenceTintDescription(tint),
+                    24.0
+                )
+            ),
+            with: state
+        )
+    }
+
+    private func nativeReferenceTintDescription(_ color: NSColor?) -> String {
+        guard let color = color?.usingColorSpace(.deviceRGB) else {
+            return "tint none"
+        }
+        func byte(_ component: CGFloat) -> Int {
+            Int((min(max(component, 0), 1) * 255).rounded())
+        }
+        return String(
+            format: "tint #%02X%02X%02X %.0f%%",
+            byte(color.redComponent),
+            byte(color.greenComponent),
+            byte(color.blueComponent),
+            color.alphaComponent * 100
+        )
     }
 
     // MARK: - In-window provider
@@ -1181,7 +1279,8 @@ extension GlassLabView {
         // untransformed Golden sample.
         hud.setRenderExperiment(
             outerPasses: .all,
-            marginWidth: nil
+            samplingMarginWidth: nil,
+            windowRoomInset: nil
         )
         // Show unfrozen first: the system-resolved margin on this
         // never-key-never-main panel is the reference for who wins later.
@@ -1189,12 +1288,14 @@ extension GlassLabView {
         try await Task.sleep(for: .milliseconds(1200))
         if let glass = hud.glassView {
             let experiment = glass.materialStrength.renderExperiment
+            let usesNativeSamplingPolicy = experiment.outerPasses == .all
+                && experiment.marginWidthOverride == nil
             step(
-                "verification-policy-native",
-                experiment == GlassMaterialRenderExperiment(),
-                experiment == GlassMaterialRenderExperiment()
-                    ? "all passes · native margin · native window inset"
-                    : "headless verification inherited a product override"
+                "verification-sampling-policy-native",
+                usesNativeSamplingPolicy,
+                usesNativeSamplingPolicy
+                    ? "all passes · native sampling margin"
+                    : "headless verification inherited a sampling override"
             )
             let systemMargin = GlassMaterialAccess.marginWidth(under: glass)
             step(

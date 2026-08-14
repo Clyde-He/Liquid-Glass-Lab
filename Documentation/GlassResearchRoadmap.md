@@ -55,7 +55,7 @@ This trace localizes the remaining cost only to work after the public setter; it
 ### Gated — correctness investigations
 
 - [ ] Reopen persistent native Tint-branch materialization only if a post-0.3.0 Tint on/off or RGB transition still reproduces a presented whole-Recipe Main-Off frame. Before implementation, prove alpha-zero pixel equivalence, black-native-to-cross-RGB matrix transplantation, acceptable steady-state pass cost, and zero visible setter-driven replacement on both certified macOS majors.
-- [ ] Reopen Outer Shadow ordering only with Tint held stationary and panel geometry fixed large enough that the public inset callback performs no resize. Test the internal macOS 27 half-point sampling margin separately from the external one-point contained window inset, then add geometry as a second independent variable.
+- [ ] Reopen Outer Shadow ordering only with Tint held stationary and panel geometry fixed large enough that the public inset callback performs no resize. Test the native internal sampling margin separately from the platform safety window inset, then add geometry as a second independent variable.
 - [ ] When model-tree recovery logs cannot establish whether a wrong frame was presented, add transition IDs plus presentation/pixel evidence. Repeated audit reads are not frame counts, and synchronous write readback is not a presentation receipt.
 
 Every follow-up preserves the 0.3.0 acceptance baseline: atomic reference-host replacement without controller rebuild, verified material and Tint survival across host detach, atomic committed identity publication, one-turn successful restamp receipt followed by live-tree authority, platform-specific contained margin/inset behavior, and the supported public API.
