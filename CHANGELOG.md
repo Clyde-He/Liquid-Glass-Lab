@@ -6,6 +6,13 @@ The project follows [Semantic Versioning](https://semver.org/). While the packag
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-08-17
+
+### Fixed
+
+- Refreshed the macOS 27 Golden archive and bundled Catalog from a complete capture on build `26A5416b`.
+- Kept display-derived `inputMaxHeadroom` in raw Golden diagnostics while leaving it platform-owned in Catalog replay, preventing one display's finite HDR headroom from being stamped onto another display.
+
 ## [0.3.2] - 2026-08-13
 
 ### Fixed
@@ -82,7 +89,8 @@ The project follows [Semantic Versioning](https://semver.org/). While the packag
 - The package can be linked from a macOS 15 deployment target so consumers can retain an older-system fallback. `AdjustableGlassEffectView` itself is available on macOS 26 and later.
 - The implementation relies on private AppKit details and is intended for Direct Distribution, not the Mac App Store.
 
-[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.2...HEAD
+[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.3...HEAD
+[0.3.3]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.2...0.3.3
 [0.3.2]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.1...0.3.2
 [0.3.1]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.0...0.3.1
 [0.3.0]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.2.2...0.3.0

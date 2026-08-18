@@ -330,7 +330,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -458,7 +458,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -914,7 +914,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -1241,7 +1241,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -1369,7 +1369,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -1697,7 +1697,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -1825,7 +1825,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -2085,7 +2085,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -2515,7 +2515,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -2643,7 +2643,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -3123,7 +3123,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "nil"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -3478,7 +3478,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -3606,7 +3606,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -3934,7 +3934,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -4062,7 +4062,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -4390,7 +4390,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -4518,7 +4518,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -4846,7 +4846,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -4974,7 +4974,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -5326,7 +5326,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -5478,7 +5478,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -5612,7 +5612,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -5636,7 +5636,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -5968,7 +5968,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -6096,7 +6096,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -6424,7 +6424,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -6552,7 +6552,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -6944,7 +6944,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -7156,7 +7156,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -7520,7 +7520,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -7732,7 +7732,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -8129,7 +8129,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -8341,7 +8341,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -8677,7 +8677,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -8805,7 +8805,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -9133,7 +9133,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -9261,7 +9261,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -9589,7 +9589,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -9717,7 +9717,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -10070,7 +10070,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -10258,7 +10258,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -10591,7 +10591,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -10719,7 +10719,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -11175,7 +11175,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -11503,7 +11503,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -11631,7 +11631,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -12087,7 +12087,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -12414,7 +12414,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -12542,7 +12542,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -12870,7 +12870,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -12998,7 +12998,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -13258,7 +13258,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -13688,7 +13688,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -13816,7 +13816,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -14296,7 +14296,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "nil"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -14651,7 +14651,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -14779,7 +14779,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -15107,7 +15107,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -15235,7 +15235,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -15563,7 +15563,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -15691,7 +15691,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -16019,7 +16019,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -16147,7 +16147,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -16499,7 +16499,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -16651,7 +16651,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -16785,7 +16785,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -16809,7 +16809,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -17141,7 +17141,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -17269,7 +17269,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -17597,7 +17597,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -17725,7 +17725,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -18117,7 +18117,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -18329,7 +18329,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -18693,7 +18693,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -18905,7 +18905,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -19302,7 +19302,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -19514,7 +19514,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -19850,7 +19850,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -19978,7 +19978,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -20306,7 +20306,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -20434,7 +20434,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -20762,7 +20762,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -20890,7 +20890,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -21243,7 +21243,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -21431,7 +21431,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -21764,7 +21764,7 @@
               },
               {
                 "key" : "inputMaxHeadroom",
-                "value" : "9999"
+                "value" : "1.2"
               },
               {
                 "key" : "inputOuterRefractionAmount",
@@ -21892,7 +21892,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -22348,7 +22348,7 @@
               },
               {
                 "key" : "inputClamp",
-                "value" : "1"
+                "value" : "1.2"
               },
               {
                 "key" : "inputClampPreserveHue",
@@ -22387,6 +22387,6 @@
     }
   ],
   "formatVersion" : 2,
-  "generatedAt" : "2026-08-12T19:11:01Z",
-  "operatingSystem" : "Version 27.0 (Build 26A5406e)"
+  "generatedAt" : "2026-08-18T05:44:19Z",
+  "operatingSystem" : "Version 27.0 (Build 26A5416b)"
 }

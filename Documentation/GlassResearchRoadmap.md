@@ -320,6 +320,8 @@ clamp          (0.34g + 0.036g²) / 0.376   Clear's inputClamp
 
 plus context/discrete behavior: participation selects the blur-opacity shape, Variant selects the `inputClamp` shape, Clear DarkAqua steps `inputBleedDarkenBlend` at `g = 0.5`, and `inputSDRHoldingToneEnabled` plus the Rim owner are active-material gates. The direct archive now verifies all single-endpoint continuous channels within the accepted bound and names the compact dual-endpoint exception below.
 
+`inputMaxHeadroom` is not a sixth material shape. On the virtual display it uses the `9999` unbounded sentinel and appears to follow `g`; on the Studio Display XDR it resolves to the constant finite headroom `1.2` throughout the same transition. Raw Golden keeps that display-dependent evidence, but replay projections and the strength controller leave this platform-owned input untouched.
+
 #### Geometry spot check — shapes are not size-invariant
 
 A 12-run sweep (`shortSide` 48/200/400 × Regular/Clear × Main Off/On, Aqua, Light backdrop, nil Tint, insertion) refutes the expectation that the shapes are size-invariant. Fitting `value(g) = endpoint · (g + c·g(1-g))` per channel per size returns a `c` that moves systematically:

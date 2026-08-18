@@ -6,10 +6,9 @@
 //  dimensionless shapes.
 //
 //  Evidence behind every constant in this file lives in the direct canonical
-//  Golden/macOS-26 and Golden/macOS-27 archives (104 runs and
-//  936 samples each), with the analysis written up under "P1.1" in
-//  Documentation/GlassResearchRoadmap.md. Measured on macOS 26.6 (25G5065a) and
-//  macOS 27.0 (26A5388g).
+//  Golden/macOS-26 and Golden/macOS-27 archives, with the analysis written up
+//  under "P1.1" in Documentation/GlassResearchRoadmap.md. The current accepted
+//  endpoints were measured on macOS 26.6.2 (25G82) and macOS 27.0 (26A5416b).
 //
 //  Both systems are served by one table with no version branch. The shapes are
 //  identical; macOS 27 only adds channels and retunes endpoints, and endpoints
@@ -111,6 +110,15 @@ struct GlassMaterialBaseline: Equatable, Sendable {
 }
 
 enum GlassMaterialCurve {
+    /// Runtime/display-owned values that remain observable evidence but must
+    /// never be authored by the strength controller or a frozen Catalog.
+    /// `inputMaxHeadroom` resolves as the animated `9999` unbounded sentinel
+    /// on a virtual display, but as a constant finite value such as `1.2` on
+    /// an HDR display. No material curve can replay both meanings safely.
+    static let platformOwnedNumericKeys: Set<String> = [
+        "inputMaxHeadroom",
+    ]
+
     /// Fill colors interpolate alpha and keep the system-resolved RGB, so the
     /// Aqua-white / DarkAqua-black split needs no appearance branch.
     public static let colorKeys = [
@@ -137,7 +145,7 @@ enum GlassMaterialCurve {
         for key in [
             "inputBleedColorMatrixSaturation", "inputBleedColorMatrixWhite",
             "inputFaceColorMatrixSaturation", "inputFaceColorMatrixWhite",
-            "inputMaxHeadroom", "inputSDRHoldingToneWhite",
+            "inputSDRHoldingToneWhite",
             "inputShadowColorMatrixSaturation", "inputShadowColorMatrixWhite",
         ] {
             table[key] = GlassMaterialChannel(start: 1, shape: .linear)

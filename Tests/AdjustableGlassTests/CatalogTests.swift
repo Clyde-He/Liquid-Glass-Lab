@@ -39,6 +39,15 @@ final class CatalogTests: XCTestCase {
                     requiredShortSides,
                     "Wrong size coverage for \(name): \(cell)"
                 )
+                for shortSide in requiredShortSides {
+                    let sample = try XCTUnwrap(
+                        atlas.sample(for: cell, at: shortSide)
+                    )
+                    XCTAssertNil(
+                        sample.numeric["inputMaxHeadroom"],
+                        "Catalog must leave display headroom platform-owned"
+                    )
+                }
                 XCTAssertTrue(
                     atlas.cellMatchesSupportedTopology(cell),
                     "Unsupported topology for \(name): \(cell)"

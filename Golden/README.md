@@ -99,7 +99,7 @@ node --test Golden/tools/*.test.mjs
 
 `verify.mjs` admits the direct archive and runs every learning. A learning may pass, fail, or skip as unverifiable. A skip never looks green; reviewed exact exceptions remain in `verification-dispositions.json`.
 
-`compare.mjs` compares complete archives by semantic observation identity. Static numeric values use the documented `1e-6` comparison tolerance. The session-volatile `inputMaxHeadroom` is excluded from the equivalence verdict but its changed counts and examples are always reported separately; topology is computed from the Snapshot rather than trusted from a stored signature.
+`compare.mjs` compares complete archives by semantic observation identity. Static numeric values use the documented `1e-6` comparison tolerance. The session-volatile `inputMaxHeadroom` is excluded from the equivalence verdict but its changed counts and examples are always reported separately; raw Golden retains it as display provenance, while the Consumer Catalog and strength controller leave it platform-owned. Topology is computed from the Snapshot rather than trusted from a stored signature.
 
 ## Design boundary
 

@@ -205,6 +205,10 @@ const RIM_VALUE_KEYS = new Set([
   "keySpread", "keySpreadOffset", "keySpreadScale",
 ]);
 
+// Captured for diagnostics, but owned by the current display/runtime rather
+// than by a portable material replay payload.
+const PLATFORM_OWNED_NUMERIC_KEYS = new Set(["inputMaxHeadroom"]);
+
 function consumerColor(property) {
   return color(property)?.extendedSRGB ?? null;
 }
@@ -218,6 +222,7 @@ export function projectStyleSample(snapshot) {
   const points = {};
   const nilKeys = [];
   for (const [key, property] of Object.entries(shader.properties)) {
+    if (PLATFORM_OWNED_NUMERIC_KEYS.has(key)) continue;
     if (property.state === "nil") {
       nilKeys.push(key);
       continue;

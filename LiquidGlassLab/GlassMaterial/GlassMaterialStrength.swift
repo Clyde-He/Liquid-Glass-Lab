@@ -810,7 +810,9 @@ final class GlassMaterialStrength {
         // The captured inputs the curve never animates are constants: the
         // system holds them through the whole transition too, and the
         // resolver re-resolves them per participation on every rebuild.
-        for (key, endpoint) in sample.numeric where numbers[key] == nil {
+        for (key, endpoint) in sample.numeric
+        where numbers[key] == nil
+            && !GlassMaterialCurve.platformOwnedNumericKeys.contains(key) {
             numbers[key] = endpoint
         }
         var colors = GlassMaterialCurve.colorValues(at: value, baseline: baseline)

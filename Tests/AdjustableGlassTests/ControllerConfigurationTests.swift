@@ -4,6 +4,29 @@ import XCTest
 @available(macOS 26.0, *)
 final class ControllerConfigurationTests: XCTestCase {
     @MainActor
+    func testPlatformOwnedHeadroomIsNotAuthoredByTheMaterialCurve() {
+        let baseline = GlassMaterialBaseline(
+            numeric: [
+                "inputFaceOpacity": 1,
+                "inputMaxHeadroom": 1.2,
+            ],
+            colors: [:],
+            rimOpacity: nil,
+            shortSide: 48
+        )
+
+        let values = GlassMaterialCurve.numericValues(
+            at: 0.5,
+            baseline: baseline,
+            isClear: false,
+            hasMainParticipation: false,
+            isLightAppearance: true
+        )
+
+        XCTAssertNil(values["inputMaxHeadroom"])
+    }
+
+    @MainActor
     func testUnresolvedTintAdvancesUnlessLegacyCaptureOwnsTheColor() {
         XCTAssertTrue(GlassEffectController.shouldAdvanceTintResolution(
             tintIsReady: false,
