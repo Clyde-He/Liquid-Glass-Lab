@@ -398,7 +398,7 @@ Examples:
 
 - Core Animation publishes `0...50` for Rim key/fill height, while measured recipes use 0.75...3.5; the editor uses the closer `0...5` domain.
 - Metadata publishes `0...1` for `diffuseHeightScale`, while live recipes use 8; the editor uses `0...10`.
-- `CASDFOutputEffect.minimum = -10000` is a discrete Recipe sentinel. `inputMaxHeadroom` can likewise use the `9999` unbounded sentinel, but active same-build captures also resolve it to display-derived values such as `1.2`; Golden comparison therefore retains it raw and classifies it as volatile.
+- `CASDFOutputEffect.minimum = -10000` is a discrete Recipe sentinel. `inputMaxHeadroom` can likewise use the `9999` unbounded sentinel, but active same-build captures also resolve it to display-derived values such as `1.2`; Golden comparison therefore retains it raw and classifies it as volatile, while the Consumer Catalog and strength controller leave the live platform value untouched.
 
 If a non-sentinel current or Override value escapes the selected envelope, the slider expands around it and labels the range source `+Current`. Runtime-discovered input keys join the proper semantic group automatically. Declared-but-nil inputs display `nil` until explicitly authored.
 

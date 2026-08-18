@@ -1,14 +1,14 @@
 {
-  "capturedAt" : "2026-08-12T19:06:39Z",
+  "capturedAt" : "2026-08-18T05:39:50Z",
   "complete" : true,
   "completedColorCount" : 131,
   "environment" : {
     "atlasSchemaVersion" : 2,
-    "displaySignature" : "Screen Sharing Virtual Display @2.0x",
+    "displaySignature" : "Studio Display XDR @2.0x",
     "osMajorVersion" : 27
   },
   "formatVersion" : 1,
-  "operatingSystem" : "Version 27.0 (Build 26A5406e)",
+  "operatingSystem" : "Version 27.0 (Build 26A5416b)",
   "plan" : {
     "colors" : [
       {

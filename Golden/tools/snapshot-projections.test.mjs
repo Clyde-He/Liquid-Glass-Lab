@@ -77,6 +77,7 @@ function snapshot() {
         objectClass: "CAFilter", name: "glassBackground",
         properties: {
           inputFaceOpacity: property(number(1)),
+          inputMaxHeadroom: property(number(1.2)),
           inputBackdropAware: property(boolean(true)),
           inputFaceColorMatrixFillColor: property(color(1, 0.5, 0.25, 0.75)),
           inputShadowOffset: property(size(0, 8)),
@@ -120,6 +121,7 @@ test("one Snapshot projects typed scalar and recursive research views", () => {
   const scalar = projectStaticScalar(document).rows[0];
   const tree = projectStaticTree(document).rows[0];
   assert.equal(scalar.inputs.inputBackdropAware, 1, "Bool remains a numeric shader input");
+  assert.equal(scalar.inputs.inputMaxHeadroom, 1.2, "research keeps display headroom");
   assert.deepEqual(scalar.points.inputShadowOffset, { x: 0, y: 8 });
   assert.equal(scalar.geometry.backdropMarginWidth, 70);
   assert.equal(tree.passes.shader.properties.inputBackdropAware.value, "1");
@@ -133,6 +135,7 @@ test("Consumer projection is complete, typed, and rejects unreadable critical va
   assert.equal(sample.matrices.length, 2);
   assert.equal(sample.rims.length, 1);
   assert.equal(sample.marginWidth, 70);
+  assert.equal(sample.numeric.inputMaxHeadroom, undefined, "Consumer replay omits headroom");
   assert.deepEqual(sample.points.inputShadowOffset, [0, 8]);
   assert.deepEqual(sample.colors.inputFaceColorMatrixFillColor, {
     red: 1, green: 0.5, blue: 0.25, alpha: 0.75,

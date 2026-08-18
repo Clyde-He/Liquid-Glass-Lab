@@ -241,9 +241,12 @@ const LINEAR_FROM_ZERO = [
 const LINEAR_FROM_ONE = [
   "inputBleedColorMatrixSaturation", "inputBleedColorMatrixWhite",
   "inputFaceColorMatrixSaturation", "inputFaceColorMatrixWhite",
-  "inputMaxHeadroom", "inputSDRHoldingToneWhite",
+  "inputSDRHoldingToneWhite",
   "inputShadowColorMatrixSaturation", "inputShadowColorMatrixWhite",
 ];
+
+/** Runtime/display-owned numeric inputs retained as evidence, never replayed. */
+export const PLATFORM_OWNED_CHANNELS = ["inputMaxHeadroom"];
 const HEIGHT_FAMILY = [
   "inputBleedAmount", "inputBleedBlurRadius", "inputBleedHeight",
   "inputBlurDistance0", "inputBlurDistance4", "inputOuterRefractionAmount",

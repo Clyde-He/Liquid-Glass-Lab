@@ -10,7 +10,8 @@
 
 import {
   ALL_CHANNELS, channelTable, endpointSample, geometryInflation, glassBackground,
-  numeric, progressOf, resolveChannel, SHAPES, tintComponents,
+  numeric, PLATFORM_OWNED_CHANNELS, progressOf, resolveChannel, SHAPES,
+  tintComponents,
 } from "../tools/lib/golden.mjs";
 import { CELL_FIELDS, cellKey, isClearCell } from "../tools/lib/cell.mjs";
 
@@ -936,10 +937,9 @@ export default [
   {
     id: "channel-table-covers-every-animating-channel",
     claim:
-      "Every glassBackground input that moves during a transition is in the "
-      + "channel table. A channel the table does not know is never written by "
-      + "the strength controller, so an omission is silent: the input keeps "
-      + "whatever the system last left there",
+      "Every replay-owned glassBackground input that moves during a transition "
+      + "is in the channel table. Platform/display-owned inputs remain visible "
+      + "evidence but are deliberately never written by the strength controller",
     source: "GlassResearchRoadmap.md — P1.1, baseline-driven curve",
     sections: [SECTION],
     verify({ sections, expect }) {
@@ -961,11 +961,20 @@ export default [
 
       expect.requireSamples(moving.size, 20, "channels observed moving");
       const known = new Set(ALL_CHANNELS);
-      const unclassified = [...moving].filter((key) => !known.has(key)).sort();
+      const platformOwned = new Set(PLATFORM_OWNED_CHANNELS);
+      const unclassified = [...moving]
+        .filter((key) => !known.has(key) && !platformOwned.has(key))
+        .sort();
       expect.equal(
         unclassified.join(",") || "none",
         "none",
         "animating channels missing from the table"
+      );
+      expect.ok(
+        true,
+        "platform-owned moving channels",
+        [...moving].filter((key) => platformOwned.has(key)).sort().join(",")
+          || "none"
       );
     },
   },

@@ -86,9 +86,11 @@ struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
     public internal(set) var shortSide: Double
 
     // Group 1 — the glass shader, captured by declared capability rather than
-    // by table: every numeric input, every color input, every point input,
-    // and the keys that resolve nil. Nil is a value: replaying a captured nil
-    // over a context's nonnil resolution requires an explicit clear.
+    // by table: every replay-owned numeric input, every color input, every
+    // point input, and the keys that resolve nil. Platform-owned values such
+    // as display headroom remain Golden diagnostics and are not persisted in
+    // a replay payload. Nil is a value: replaying a captured nil over a
+    // context's nonnil resolution requires an explicit clear.
     public internal(set) var numeric: [String: Double]
     public internal(set) var colors: [String: GlassMaterialColorValue]
     public internal(set) var points: [String: CGPoint]
@@ -174,9 +176,12 @@ struct GlassMaterialStyleSample: Codable, Hashable, Sendable {
             guard let value = GlassMaterialColorValue(color) else { return nil }
             colors[key] = value
         }
+        let numeric = inputs.numeric.filter {
+            !GlassMaterialCurve.platformOwnedNumericKeys.contains($0.key)
+        }
         return GlassMaterialStyleSample(
             shortSide: min(glass.bounds.width, glass.bounds.height),
-            numeric: inputs.numeric,
+            numeric: numeric,
             colors: colors,
             points: inputs.points,
             nilKeys: inputs.nilKeys,

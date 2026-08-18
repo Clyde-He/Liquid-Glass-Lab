@@ -1,12 +1,12 @@
 {
-  "capturedAt" : "2026-08-12T19:10:09Z",
+  "capturedAt" : "2026-08-18T05:43:26Z",
   "environment" : {
     "atlasSchemaVersion" : 2,
-    "displaySignature" : "Screen Sharing Virtual Display @2.0x",
+    "displaySignature" : "Studio Display XDR @2.0x",
     "osMajorVersion" : 27
   },
   "formatVersion" : 2,
-  "operatingSystem" : "Version 27.0 (Build 26A5406e)",
+  "operatingSystem" : "Version 27.0 (Build 26A5416b)",
   "passed" : true,
   "plannedColorIDs" : [
     "srgb-coral",
@@ -8094,132 +8094,132 @@
   ],
   "timings" : [
     {
-      "clearFlushMilliseconds" : 0.134042,
+      "clearFlushMilliseconds" : 0.385625,
       "colorID" : "srgb-coral",
-      "matrixReadbackMilliseconds" : 0.282959,
-      "pairedProofMilliseconds" : 2.08525,
-      "setFlushMilliseconds" : 10.388583,
-      "totalMilliseconds" : 12.890834
+      "matrixReadbackMilliseconds" : 0.319584,
+      "pairedProofMilliseconds" : 2.640375,
+      "setFlushMilliseconds" : 12.455125,
+      "totalMilliseconds" : 15.800709
     },
     {
-      "clearFlushMilliseconds" : 6.588708,
+      "clearFlushMilliseconds" : 16.118583,
       "colorID" : "srgb-teal",
-      "matrixReadbackMilliseconds" : 0.209459,
-      "pairedProofMilliseconds" : 2.297291,
-      "setFlushMilliseconds" : 7.112333,
-      "totalMilliseconds" : 16.207791
+      "matrixReadbackMilliseconds" : 0.340166,
+      "pairedProofMilliseconds" : 2.903042,
+      "setFlushMilliseconds" : 12.677834,
+      "totalMilliseconds" : 32.039625
     },
     {
-      "clearFlushMilliseconds" : 5.971625,
+      "clearFlushMilliseconds" : 9.238208,
       "colorID" : "srgb-gray-500",
-      "matrixReadbackMilliseconds" : 0.353625,
-      "pairedProofMilliseconds" : 3.243,
-      "setFlushMilliseconds" : 7.437583,
-      "totalMilliseconds" : 17.005833
+      "matrixReadbackMilliseconds" : 0.21975,
+      "pairedProofMilliseconds" : 2.08575,
+      "setFlushMilliseconds" : 8.10575,
+      "totalMilliseconds" : 19.649458
     },
     {
-      "clearFlushMilliseconds" : 11.268333,
+      "clearFlushMilliseconds" : 15.30975,
       "colorID" : "p3-c7cd28",
-      "matrixReadbackMilliseconds" : 0.306375,
-      "pairedProofMilliseconds" : 2.770209,
-      "setFlushMilliseconds" : 9.5245,
-      "totalMilliseconds" : 23.869417
+      "matrixReadbackMilliseconds" : 0.343583,
+      "pairedProofMilliseconds" : 3.530459,
+      "setFlushMilliseconds" : 10.541042,
+      "totalMilliseconds" : 29.724834
     },
     {
-      "clearFlushMilliseconds" : 11.74075,
+      "clearFlushMilliseconds" : 12.187125,
       "colorID" : "p3-pure-red",
-      "matrixReadbackMilliseconds" : 0.299875,
-      "pairedProofMilliseconds" : 2.731459,
-      "setFlushMilliseconds" : 8.571666,
-      "totalMilliseconds" : 23.34375
+      "matrixReadbackMilliseconds" : 0.361834,
+      "pairedProofMilliseconds" : 3.193208,
+      "setFlushMilliseconds" : 12.614291,
+      "totalMilliseconds" : 28.356458
     },
     {
-      "clearFlushMilliseconds" : 12.003208,
+      "clearFlushMilliseconds" : 6.538625,
       "colorID" : "p3-vivid-green",
-      "matrixReadbackMilliseconds" : 0.268291,
-      "pairedProofMilliseconds" : 2.82475,
-      "setFlushMilliseconds" : 9.562292,
-      "totalMilliseconds" : 24.658541
+      "matrixReadbackMilliseconds" : 0.388083,
+      "pairedProofMilliseconds" : 3.648125,
+      "setFlushMilliseconds" : 7.77775,
+      "totalMilliseconds" : 18.352583
     },
     {
-      "clearFlushMilliseconds" : 12.702583,
+      "clearFlushMilliseconds" : 11.915209,
       "colorID" : "alpha-p3-c7cd28-a15",
-      "matrixReadbackMilliseconds" : 0.283792,
-      "pairedProofMilliseconds" : 2.837708,
-      "setFlushMilliseconds" : 9.976542,
-      "totalMilliseconds" : 25.800625
+      "matrixReadbackMilliseconds" : 0.322166,
+      "pairedProofMilliseconds" : 3.060334,
+      "setFlushMilliseconds" : 8.5055,
+      "totalMilliseconds" : 23.803209
     },
     {
-      "clearFlushMilliseconds" : 6.57225,
+      "clearFlushMilliseconds" : 9.587458,
       "colorID" : "alpha-p3-c7cd28-a40",
-      "matrixReadbackMilliseconds" : 0.199375,
-      "pairedProofMilliseconds" : 1.769791,
-      "setFlushMilliseconds" : 6.026292,
-      "totalMilliseconds" : 14.567708
+      "matrixReadbackMilliseconds" : 0.258791,
+      "pairedProofMilliseconds" : 2.67075,
+      "setFlushMilliseconds" : 7.550709,
+      "totalMilliseconds" : 20.067708
     },
     {
-      "clearFlushMilliseconds" : 6.714875,
+      "clearFlushMilliseconds" : 16.768583,
       "colorID" : "alpha-p3-c7cd28-a60",
-      "matrixReadbackMilliseconds" : 0.349459,
-      "pairedProofMilliseconds" : 3.705416,
-      "setFlushMilliseconds" : 6.975125,
-      "totalMilliseconds" : 17.744875
+      "matrixReadbackMilliseconds" : 0.375875,
+      "pairedProofMilliseconds" : 3.104125,
+      "setFlushMilliseconds" : 10.901833,
+      "totalMilliseconds" : 31.150416
     },
     {
-      "clearFlushMilliseconds" : 12.352125,
+      "clearFlushMilliseconds" : 8.400292,
       "colorID" : "alpha-p3-c7cd28-a80",
-      "matrixReadbackMilliseconds" : 0.27825,
-      "pairedProofMilliseconds" : 2.714416,
-      "setFlushMilliseconds" : 8.986167,
-      "totalMilliseconds" : 24.330958
+      "matrixReadbackMilliseconds" : 0.238542,
+      "pairedProofMilliseconds" : 2.095791,
+      "setFlushMilliseconds" : 6.887708,
+      "totalMilliseconds" : 17.622333
     },
     {
-      "clearFlushMilliseconds" : 11.783042,
+      "clearFlushMilliseconds" : 15.506833,
       "colorID" : "alpha-p3-c7cd28-a100",
-      "matrixReadbackMilliseconds" : 0.292625,
-      "pairedProofMilliseconds" : 2.837041,
-      "setFlushMilliseconds" : 8.112292,
-      "totalMilliseconds" : 23.025
+      "matrixReadbackMilliseconds" : 0.3985,
+      "pairedProofMilliseconds" : 2.9425,
+      "setFlushMilliseconds" : 13.530083,
+      "totalMilliseconds" : 32.377916
     },
     {
-      "clearFlushMilliseconds" : 12.766084,
+      "clearFlushMilliseconds" : 13.932333,
       "colorID" : "alpha-p3-pure-red-a15",
-      "matrixReadbackMilliseconds" : 0.273042,
-      "pairedProofMilliseconds" : 2.832708,
-      "setFlushMilliseconds" : 9.548833,
-      "totalMilliseconds" : 25.420667
+      "matrixReadbackMilliseconds" : 0.411959,
+      "pairedProofMilliseconds" : 3.32675,
+      "setFlushMilliseconds" : 11.7735,
+      "totalMilliseconds" : 29.444542
     },
     {
-      "clearFlushMilliseconds" : 12.088625,
+      "clearFlushMilliseconds" : 9.759917,
       "colorID" : "alpha-p3-pure-red-a40",
-      "matrixReadbackMilliseconds" : 0.279667,
-      "pairedProofMilliseconds" : 2.836125,
-      "setFlushMilliseconds" : 9.803917,
-      "totalMilliseconds" : 25.008334
+      "matrixReadbackMilliseconds" : 0.250667,
+      "pairedProofMilliseconds" : 2.534041,
+      "setFlushMilliseconds" : 8.33,
+      "totalMilliseconds" : 20.874625
     },
     {
-      "clearFlushMilliseconds" : 12.920291,
+      "clearFlushMilliseconds" : 16.863875,
       "colorID" : "alpha-p3-pure-red-a60",
-      "matrixReadbackMilliseconds" : 0.296583,
-      "pairedProofMilliseconds" : 2.897125,
-      "setFlushMilliseconds" : 10.187792,
-      "totalMilliseconds" : 26.301791
+      "matrixReadbackMilliseconds" : 0.343667,
+      "pairedProofMilliseconds" : 2.966875,
+      "setFlushMilliseconds" : 11.582125,
+      "totalMilliseconds" : 31.756542
     },
     {
-      "clearFlushMilliseconds" : 10.626334,
+      "clearFlushMilliseconds" : 6.475625,
       "colorID" : "alpha-p3-pure-red-a80",
-      "matrixReadbackMilliseconds" : 0.273208,
-      "pairedProofMilliseconds" : 2.837625,
-      "setFlushMilliseconds" : 10.187625,
-      "totalMilliseconds" : 23.924792
+      "matrixReadbackMilliseconds" : 0.194041,
+      "pairedProofMilliseconds" : 2.009167,
+      "setFlushMilliseconds" : 5.943875,
+      "totalMilliseconds" : 14.622708
     },
     {
-      "clearFlushMilliseconds" : 13.177542,
+      "clearFlushMilliseconds" : 12.071584,
       "colorID" : "alpha-p3-pure-red-a100",
-      "matrixReadbackMilliseconds" : 0.285375,
-      "pairedProofMilliseconds" : 2.835458,
-      "setFlushMilliseconds" : 9.96975,
-      "totalMilliseconds" : 26.268125
+      "matrixReadbackMilliseconds" : 0.305,
+      "pairedProofMilliseconds" : 3.111375,
+      "setFlushMilliseconds" : 10.61475,
+      "totalMilliseconds" : 26.102709
     }
   ]
 }
