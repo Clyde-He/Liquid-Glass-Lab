@@ -146,7 +146,7 @@ final class ControllerConfigurationTests: XCTestCase {
     }
 
     @MainActor
-    func testOnlyTintChangesUseFrameCoalescedPresentation() {
+    func testOnlyTintChangesUseCadenceLimitedPresentation() {
         let baseline = GlassEffectController.Configuration(
             tint: NSColor(
                 srgbRed: 0.2,
@@ -185,6 +185,30 @@ final class ControllerConfigurationTests: XCTestCase {
                 to: visibilityAndTint
             )
         )
+    }
+
+    @MainActor
+    func testTintPresentationGateSharesOneDisplayCadence() {
+        XCTAssertTrue(GlassEffectController.tintPresentationIsDue(
+            lastTimestamp: nil,
+            now: 10,
+            maximumFramesPerSecond: 60
+        ))
+        XCTAssertFalse(GlassEffectController.tintPresentationIsDue(
+            lastTimestamp: 10,
+            now: 10 + 1.0 / 120.0,
+            maximumFramesPerSecond: 60
+        ))
+        XCTAssertTrue(GlassEffectController.tintPresentationIsDue(
+            lastTimestamp: 10,
+            now: 10 + 1.0 / 60.0,
+            maximumFramesPerSecond: 60
+        ))
+        XCTAssertFalse(GlassEffectController.tintPresentationIsDue(
+            lastTimestamp: 10,
+            now: 9,
+            maximumFramesPerSecond: 60
+        ))
     }
 
     @MainActor
@@ -318,6 +342,69 @@ final class ControllerConfigurationTests: XCTestCase {
         XCTAssertEqual(view.effectState, .inactive)
         XCTAssertEqual(view.effectAmount, 0.42, accuracy: 0.0001)
         XCTAssertTrue(view.tintColor?.isEqual(tint) == true)
+    }
+
+    @MainActor
+    func testNativeTintAssignmentOnlyTracksBranchLifecycle() {
+        let first = NSColor(
+            srgbRed: 0.2,
+            green: 0.4,
+            blue: 0.8,
+            alpha: 0.6
+        )
+        let second = NSColor(
+            displayP3Red: 0.9,
+            green: 0.3,
+            blue: 0.1,
+            alpha: 0.8
+        )
+
+        XCTAssertFalse(
+            AdjustableGlassEffectView.nativeTintAssignmentIsRequired(
+                from: nil,
+                to: nil
+            )
+        )
+        XCTAssertTrue(
+            AdjustableGlassEffectView.nativeTintAssignmentIsRequired(
+                from: nil,
+                to: first
+            )
+        )
+        XCTAssertFalse(
+            AdjustableGlassEffectView.nativeTintAssignmentIsRequired(
+                from: first,
+                to: second
+            )
+        )
+        XCTAssertFalse(
+            AdjustableGlassEffectView.nativeTintAssignmentIsRequired(
+                from: first.withAlphaComponent(0),
+                to: second
+            )
+        )
+        XCTAssertTrue(
+            AdjustableGlassEffectView.nativeTintAssignmentIsRequired(
+                from: second,
+                to: nil
+            )
+        )
+
+        let view = AdjustableGlassEffectView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 120)
+        )
+        XCTAssertTrue(view.stageMaterialTint(
+            nativeColor: first,
+            controlledColor: first
+        ))
+        XCTAssertFalse(view.stageMaterialTint(
+            nativeColor: second,
+            controlledColor: second
+        ))
+        XCTAssertTrue(view.stageMaterialTint(
+            nativeColor: nil,
+            controlledColor: nil
+        ))
     }
 
     @MainActor

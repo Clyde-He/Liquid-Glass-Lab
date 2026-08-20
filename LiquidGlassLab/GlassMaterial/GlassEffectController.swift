@@ -200,7 +200,7 @@ final class GlassEffectController {
     }
 
     /// Tint is the only continuously streamed configuration axis whose final
-    /// layer write is frame-coalesced. Base-material changes still apply
+    /// layer write is cadence-limited. Base-material changes still apply
     /// synchronously so geometry and participation never trail their controls.
     static func isTintOnlyChange(
         from oldConfiguration: Configuration,
@@ -263,6 +263,10 @@ final class GlassEffectController {
     private var lastVerifiedTintColor: NSColor?
     private var coalescedApplyTask: Task<Void, Never>?
     private var tintDisplayLink: CADisplayLink?
+    /// Both the display-link path and the input-driven starvation fallback
+    /// pass through this timestamp, so neither can perform a second physical
+    /// Tint presentation inside the display's shortest possible frame.
+    private var lastTintPresentationTimestamp: CFTimeInterval?
     /// Presentations coalesced away because a newer one was scheduled before
     /// the previous frame applied. Request-side supersede counts live in the
     /// pipeline; both feed the same public diagnostics counter.
@@ -420,6 +424,7 @@ final class GlassEffectController {
         stopTintDisplayLink()
         tintPipeline.invalidate()
         pendingTintPresentation = false
+        lastTintPresentationTimestamp = nil
         lastVerifiedTintColor = nil
         glassView?.materialWindowDidChange = nil
         glassView?.materialStrength.invalidate()
@@ -668,10 +673,19 @@ final class GlassEffectController {
         // zero, which materializes the destination without presenting an
         // unverified matrix. Keeping staging inside reconciliation also lets a
         // tree-health retry rebuild a branch AppKit replaced.
-        glassView.stageMaterialTint(
+        let assignedNativeTint = glassView.stageMaterialTint(
             nativeColor: plan.nativeTintColor,
             controlledColor: plan.displayedTint
         )
+        if assignedNativeTint {
+            // A native nil/nonnil transition changes Tint-branch topology and
+            // can restamp the real-participation Recipe. Settle that one
+            // lifecycle write before the frozen transaction becomes the final
+            // writer. Streamed nonnil-to-nonnil colors never enter here, so a
+            // color drag does not provoke a full AppKit layout every frame.
+            glassView.needsLayout = true
+            glassView.layoutSubtreeIfNeeded()
+        }
 
         guard atlasProvider.isPairedCoverageComplete else {
             refreshStatus(plan: plan)
@@ -837,27 +851,27 @@ final class GlassEffectController {
         )
     }
 
-    /// All Tint sources share one presentation clock. Certified colors are
-    /// synthesized synchronously, cached RGB receives a new coefficient 18,
-    /// and unresolved colors enqueue commit resolution; none writes the live
-    /// destination more than once per displayed frame.
+    /// All Tint sources share one presentation clock. The view display link is
+    /// the ordinary latest-value coalescer. Some AppKit controls, notably the
+    /// macOS 27 Color Panel brightness slider, run a nested tracking loop that
+    /// continues delivering actions while starving a view-bound display link
+    /// for 100-300 ms. Once one display interval has elapsed, a new input is
+    /// therefore allowed to flush the same presentation body synchronously.
+    /// The shared timestamp keeps both exits behind one physical-write gate.
     private func scheduleTintPresentation() {
-        let presentationWasPending = pendingTintPresentation
-        pendingTintPresentation = true
-
-        if presentationWasPending {
+        if pendingTintPresentation {
             presentationSupersededCount += 1
             mergePipelineDiagnostics()
-        } else if let glassView {
-            // Settle AppKit's pending native Recipe layout before the display-
-            // link beat becomes the frozen material's final writer. Leaving
-            // this work until CA commit lets a Clear Main-Off restamp land
-            // after the Package write during NSColorPanel Value tracking,
-            // exposing one native frame. This is glass-tree synchronization,
-            // not consumer window geometry; callers must not need an
-            // incidental layout to preserve the frozen Main-On contract.
-            glassView.needsLayout = true
-            glassView.layoutSubtreeIfNeeded()
+        }
+        pendingTintPresentation = true
+        let now = CACurrentMediaTime()
+        if Self.tintPresentationIsDue(
+            lastTimestamp: lastTintPresentationTimestamp,
+            now: now,
+            maximumFramesPerSecond: tintMaximumFramesPerSecond
+        ) {
+            presentPendingTint(at: now)
+            return
         }
         startTintDisplayLink()
     }
@@ -879,6 +893,34 @@ final class GlassEffectController {
     }
 
     @objc private func tintDisplayLinkFired(_ sender: CADisplayLink) {
+        let now = sender.timestamp
+        guard Self.tintPresentationIsDue(
+            lastTimestamp: lastTintPresentationTimestamp,
+            now: now,
+            maximumFramesPerSecond: tintMaximumFramesPerSecond
+        ) else { return }
+        presentPendingTint(at: now)
+    }
+
+    private var tintMaximumFramesPerSecond: Int {
+        max(glassView?.window?.screen?.maximumFramesPerSecond ?? 60, 1)
+    }
+
+    static func tintPresentationIsDue(
+        lastTimestamp: CFTimeInterval?,
+        now: CFTimeInterval,
+        maximumFramesPerSecond: Int
+    ) -> Bool {
+        guard let lastTimestamp else { return true }
+        // `CADisplayLink.timestamp` can describe a frame that began just
+        // before an input-driven flush. Treat that older callback as already
+        // covered instead of letting it reopen the gate.
+        guard now >= lastTimestamp else { return false }
+        let interval = 1 / Double(max(maximumFramesPerSecond, 1))
+        return now - lastTimestamp >= interval
+    }
+
+    private func presentPendingTint(at timestamp: CFTimeInterval) {
         var shouldApply = false
         if pendingTintPresentation {
             pendingTintPresentation = false
@@ -943,6 +985,10 @@ final class GlassEffectController {
             }
             return
         }
+        // Close the gate before applying. Besides enforcing cadence against a
+        // nearby display-link callback, this also bounds a pathological input
+        // source if reconciliation itself causes a synchronous callback.
+        lastTintPresentationTimestamp = timestamp
         applyConfiguration(allowsTintRestamp: true)
         if !pendingTintPresentation, !tintPipeline.hasPendingRequest {
             stopTintDisplayLink()
