@@ -1638,25 +1638,30 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     /// Separates Tint-branch materialization from the frozen writer's
     /// controlled color.
     ///
-    /// The native color is pinned by RGB: assigning `tintColor` makes the
-    /// system re-resolve the Tint pass and rewrite its matrix at commit, so
-    /// an opacity drag — which streams colors differing only in alpha — was
-    /// feeding the system's own tint writer a reason to race the frozen
-    /// restamp on every tick. The native color's only jobs are materializing
-    /// the branch and being the fallback visual; the displayed alpha lives in
-    /// coefficient 18 of the frozen writer's matrix, so alpha-only changes
-    /// carry no information the native assignment needs to deliver.
+    /// The native color is pinned for the lifetime of one nonnil Tint session.
+    /// Assigning `tintColor` makes AppKit resolve the view's real-participation
+    /// Recipe at commit. On a non-main Clear HUD that resolution rewrites the
+    /// complete base material, not only the Tint pass, so forwarding streamed
+    /// RGB changes makes the system Main-Off writer race the frozen Main-On
+    /// writer on every frame. Nil/nonnil transitions still own branch topology,
+    /// and the first verified color may replace an alpha-zero materialization
+    /// placeholder once so native fallback is not pinned transparent. After
+    /// that handoff, the verified frozen matrix owns every displayed RGBA
+    /// coefficient and streamed native assignments remain suppressed.
+    @discardableResult
     func stageMaterialTint(
         nativeColor: NSColor?,
         controlledColor: NSColor?
-    ) {
-        if !Self.nativeTintAssignmentIsChurn(
+    ) -> Bool {
+        let assignedNativeTint = Self.nativeTintAssignmentIsRequired(
             from: super.tintColor,
             to: nativeColor
-        ) {
+        )
+        if assignedNativeTint {
             super.tintColor = nativeColor
         }
         materialStrength.stageTintColor(controlledColor)
+        return assignedNativeTint
     }
 
     private func rebuildEffectController() {
@@ -1809,31 +1814,24 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         }
     }
 
-    /// True only for the assignments the pin exists to absorb: an opacity drag
-    /// streaming the same RGB between *nonzero* alphas. Alpha `0` is not part
-    /// of that stream — it is the placeholder that materializes the branch
-    /// before a color is verified — so transitions into or out of it must
-    /// reach the setter, or the placeholder would pin the native fallback
-    /// transparent for as long as the RGB survives.
-    private static func nativeTintAssignmentIsChurn(
+    /// The native property owns topology and a stable fallback seed, while the
+    /// frozen Tint matrix owns streamed presentation. Crossings of the
+    /// nil/nonnil boundary reach AppKit, as does the first transition out of an
+    /// alpha-zero materialization placeholder. Because that handoff leaves the
+    /// retained native value nontransparent, later RGB/alpha changes remain on
+    /// the narrow matrix writer.
+    static func nativeTintAssignmentIsRequired(
         from current: NSColor?,
         to requested: NSColor?
     ) -> Bool {
         switch (current, requested) {
         case (nil, nil):
+            return false
+        case (nil, _?), (_?, nil):
             return true
         case let (current?, requested?):
-            guard let a = GlassMaterialColorValue(current),
-                  let b = GlassMaterialColorValue(requested)
-            else { return false }
-            guard abs(a.red - b.red) <= 0.0005,
-                  abs(a.green - b.green) <= 0.0005,
-                  abs(a.blue - b.blue) <= 0.0005
-            else { return false }
-            if abs(a.alpha - b.alpha) <= 0.0005 { return true }
-            return a.alpha > 0.0005 && b.alpha > 0.0005
-        default:
-            return false
+            return current.alphaComponent <= 0.0005
+                && requested.alphaComponent > 0.0005
         }
     }
 
