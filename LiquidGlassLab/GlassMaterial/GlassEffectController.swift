@@ -264,9 +264,10 @@ final class GlassEffectController {
     private var coalescedApplyTask: Task<Void, Never>?
     private var tintDisplayLink: CADisplayLink?
     /// Both the display-link path and the input-driven starvation fallback
-    /// pass through this timestamp, so neither can perform a second physical
-    /// Tint presentation inside the display's shortest possible frame.
-    private var lastTintPresentationTimestamp: CFTimeInterval?
+    /// pass through this timestamp. A beat owns both pipeline service and any
+    /// resulting presentation, so failed resolution attempts cannot bypass
+    /// the same display-cadence bound as successful writes.
+    private var lastTintBeatTimestamp: CFTimeInterval?
     /// Presentations coalesced away because a newer one was scheduled before
     /// the previous frame applied. Request-side supersede counts live in the
     /// pipeline; both feed the same public diagnostics counter.
@@ -424,7 +425,7 @@ final class GlassEffectController {
         stopTintDisplayLink()
         tintPipeline.invalidate()
         pendingTintPresentation = false
-        lastTintPresentationTimestamp = nil
+        lastTintBeatTimestamp = nil
         lastVerifiedTintColor = nil
         glassView?.materialWindowDidChange = nil
         glassView?.materialStrength.invalidate()
@@ -678,11 +679,11 @@ final class GlassEffectController {
             controlledColor: plan.displayedTint
         )
         if assignedNativeTint {
-            // A native nil/nonnil transition changes Tint-branch topology and
-            // can restamp the real-participation Recipe. Settle that one
-            // lifecycle write before the frozen transaction becomes the final
-            // writer. Streamed nonnil-to-nonnil colors never enter here, so a
-            // color drag does not provoke a full AppKit layout every frame.
+            // A native branch transition or the one-time transparent
+            // placeholder handoff can restamp the real-participation Recipe.
+            // Settle that lifecycle write before the frozen transaction
+            // becomes final. Streamed RGB changes never enter here, so a color
+            // drag does not provoke a full AppKit layout every frame.
             glassView.needsLayout = true
             glassView.layoutSubtreeIfNeeded()
         }
@@ -865,10 +866,10 @@ final class GlassEffectController {
         }
         pendingTintPresentation = true
         let now = CACurrentMediaTime()
-        if Self.tintPresentationIsDue(
-            lastTimestamp: lastTintPresentationTimestamp,
+        if Self.tintBeatIsDue(
+            lastTimestamp: lastTintBeatTimestamp,
             now: now,
-            maximumFramesPerSecond: tintMaximumFramesPerSecond
+            minimumInterval: tintMinimumPresentationInterval
         ) {
             presentPendingTint(at: now)
             return
@@ -893,34 +894,45 @@ final class GlassEffectController {
     }
 
     @objc private func tintDisplayLinkFired(_ sender: CADisplayLink) {
-        let now = sender.timestamp
-        guard Self.tintPresentationIsDue(
-            lastTimestamp: lastTintPresentationTimestamp,
+        // The link is a wake-up source, not the presentation clock. Its frame
+        // timestamp can predate a delayed callback; using execution time here
+        // keeps both exits in one monotonic time domain.
+        let now = CACurrentMediaTime()
+        guard Self.tintBeatIsDue(
+            lastTimestamp: lastTintBeatTimestamp,
             now: now,
-            maximumFramesPerSecond: tintMaximumFramesPerSecond
+            minimumInterval: tintMinimumPresentationInterval
         ) else { return }
         presentPendingTint(at: now)
     }
 
-    private var tintMaximumFramesPerSecond: Int {
-        max(glassView?.window?.screen?.maximumFramesPerSecond ?? 60, 1)
+    private var tintMinimumPresentationInterval: CFTimeInterval {
+        guard let interval = glassView?.window?.screen?.minimumRefreshInterval,
+              interval > 0
+        else { return 1 / 60 }
+        return interval
     }
 
-    static func tintPresentationIsDue(
+    static func tintBeatIsDue(
         lastTimestamp: CFTimeInterval?,
         now: CFTimeInterval,
-        maximumFramesPerSecond: Int
+        minimumInterval: CFTimeInterval
     ) -> Bool {
         guard let lastTimestamp else { return true }
-        // `CADisplayLink.timestamp` can describe a frame that began just
-        // before an input-driven flush. Treat that older callback as already
-        // covered instead of letting it reopen the gate.
         guard now >= lastTimestamp else { return false }
-        let interval = 1 / Double(max(maximumFramesPerSecond, 1))
-        return now - lastTimestamp >= interval
+        guard minimumInterval > 0 else { return true }
+        // Adding a nominal frame interval to a large host-time value and then
+        // subtracting it can land a few ULPs below that same interval. Admit
+        // only that numerical error; real sub-frame calls remain coalesced.
+        let tolerance = max(lastTimestamp.ulp, now.ulp) * 2
+        return now - lastTimestamp + tolerance >= minimumInterval
     }
 
     private func presentPendingTint(at timestamp: CFTimeInterval) {
+        // Close the beat before any resolver or reconciliation work. Besides
+        // preventing synchronous feedback, this preserves the pipeline's
+        // once-per-display-cadence contract when an attempt fails early.
+        lastTintBeatTimestamp = timestamp
         var shouldApply = false
         if pendingTintPresentation {
             pendingTintPresentation = false
@@ -985,10 +997,6 @@ final class GlassEffectController {
             }
             return
         }
-        // Close the gate before applying. Besides enforcing cadence against a
-        // nearby display-link callback, this also bounds a pathological input
-        // source if reconciliation itself causes a synchronous callback.
-        lastTintPresentationTimestamp = timestamp
         applyConfiguration(allowsTintRestamp: true)
         if !pendingTintPresentation, !tintPipeline.hasPendingRequest {
             stopTintDisplayLink()

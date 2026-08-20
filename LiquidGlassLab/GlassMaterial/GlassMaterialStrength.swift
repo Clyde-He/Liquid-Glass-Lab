@@ -1643,11 +1643,11 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     /// Recipe at commit. On a non-main Clear HUD that resolution rewrites the
     /// complete base material, not only the Tint pass, so forwarding streamed
     /// RGB changes makes the system Main-Off writer race the frozen Main-On
-    /// writer on every frame. The native property's only required job is branch
-    /// lifecycle: nil -> nonnil materializes it and nonnil -> nil removes it.
-    /// Once present, the verified frozen matrix owns every displayed RGBA
-    /// coefficient, so changing the native payload carries no visual state we
-    /// need and only provokes Recipe churn.
+    /// writer on every frame. Nil/nonnil transitions still own branch topology,
+    /// and the first verified color may replace an alpha-zero materialization
+    /// placeholder once so native fallback is not pinned transparent. After
+    /// that handoff, the verified frozen matrix owns every displayed RGBA
+    /// coefficient and streamed native assignments remain suppressed.
     @discardableResult
     func stageMaterialTint(
         nativeColor: NSColor?,
@@ -1814,15 +1814,25 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         }
     }
 
-    /// The native property owns topology, while the frozen Tint matrix owns
-    /// presentation. Therefore only crossings of the nil/nonnil boundary need
-    /// an AppKit assignment; every nonnil-to-nonnil change stays on the narrow
-    /// matrix writer, including alpha-zero staging becoming verified output.
+    /// The native property owns topology and a stable fallback seed, while the
+    /// frozen Tint matrix owns streamed presentation. Crossings of the
+    /// nil/nonnil boundary reach AppKit, as does the first transition out of an
+    /// alpha-zero materialization placeholder. Because that handoff leaves the
+    /// retained native value nontransparent, later RGB/alpha changes remain on
+    /// the narrow matrix writer.
     static func nativeTintAssignmentIsRequired(
         from current: NSColor?,
         to requested: NSColor?
     ) -> Bool {
-        (current == nil) != (requested == nil)
+        switch (current, requested) {
+        case (nil, nil):
+            return false
+        case (nil, _?), (_?, nil):
+            return true
+        case let (current?, requested?):
+            return current.alphaComponent <= 0.0005
+                && requested.alphaComponent > 0.0005
+        }
     }
 
     override public func layout() {
