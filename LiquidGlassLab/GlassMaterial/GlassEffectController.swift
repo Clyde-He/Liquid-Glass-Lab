@@ -856,9 +856,11 @@ final class GlassEffectController {
     /// the ordinary latest-value coalescer. Some AppKit controls, notably the
     /// macOS 27 Color Panel brightness slider, run a nested tracking loop that
     /// continues delivering actions while starving a view-bound display link
-    /// for 100-300 ms. Once one display interval has elapsed, a new input is
-    /// therefore allowed to flush the same presentation body synchronously.
-    /// The shared timestamp keeps both exits behind one physical-write gate.
+    /// for 100-300 ms. Once one display interval has elapsed, a ready Tint may
+    /// therefore flush synchronously. Unresolved Tint stays on the deferred
+    /// link path because its resolver performs a CA commit that must not nest
+    /// inside the configuration setter. The shared timestamp keeps both exits
+    /// behind one beat gate.
     private func scheduleTintPresentation() {
         if pendingTintPresentation {
             presentationSupersededCount += 1
@@ -866,7 +868,11 @@ final class GlassEffectController {
         }
         pendingTintPresentation = true
         let now = CACurrentMediaTime()
-        if Self.tintBeatIsDue(
+        let requestedTintIsReady = tintPipeline.snapshot(
+            for: configuration.tint,
+            emphasis: configuration.emphasis
+        ).isReady
+        if requestedTintIsReady, Self.tintBeatIsDue(
             lastTimestamp: lastTintBeatTimestamp,
             now: now,
             minimumInterval: tintMinimumPresentationInterval
