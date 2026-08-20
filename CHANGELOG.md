@@ -6,6 +6,13 @@ The project follows [Semantic Versioning](https://semver.org/). While the packag
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-08-20
+
+### Fixed
+
+- Stabilized Clear Main On Tint updates by keeping streamed nonnil colors out of AppKit's native Tint setter while preserving the native fallback handoff.
+- Kept HUD Tint presentation responsive during Color Panel tracking with one display-cadence beat shared by input and display-link delivery, while commit resolution remains deferred outside configuration updates.
+
 ## [0.3.3] - 2026-08-17
 
 ### Fixed
@@ -89,7 +96,8 @@ The project follows [Semantic Versioning](https://semver.org/). While the packag
 - The package can be linked from a macOS 15 deployment target so consumers can retain an older-system fallback. `AdjustableGlassEffectView` itself is available on macOS 26 and later.
 - The implementation relies on private AppKit details and is intended for Direct Distribution, not the Mac App Store.
 
-[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.3...HEAD
+[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.4...HEAD
+[0.3.4]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.3...0.3.4
 [0.3.3]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.2...0.3.3
 [0.3.2]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.1...0.3.2
 [0.3.1]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.0...0.3.1
