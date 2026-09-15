@@ -239,6 +239,12 @@ extension GlassLabView {
             of: "--verify-removal-warmup"
         )
         let goldenFlag = arguments.firstIndex(of: "--capture-golden")
+        let goldenStaticChunkFlag = arguments.firstIndex(
+            of: "--capture-golden-static-chunk"
+        )
+        let goldenDynamicChunkFlag = arguments.firstIndex(
+            of: "--capture-golden-dynamic-chunk"
+        )
         let verifyTintAmountFlag = arguments.firstIndex(of: "--verify-glass-tint-amount")
         let goldenDriftFlag = arguments.firstIndex(
             of: "--capture-golden-drift"
@@ -271,6 +277,8 @@ extension GlassLabView {
             resizeFlag,
             removalWarmupFlag,
             goldenFlag,
+            goldenStaticChunkFlag,
+            goldenDynamicChunkFlag,
             verifyTintAmountFlag,
             goldenDriftFlag,
             semanticGoldenFlag,
@@ -311,9 +319,37 @@ extension GlassLabView {
             let requestedMajor = arguments.firstIndex(of: "--plan-os-major").flatMap { index in
                 index + 1 < arguments.count ? Int(arguments[index + 1]) : nil
             } ?? ProcessInfo.processInfo.operatingSystemVersion.majorVersion
-            FileHandle.standardError.write(Data(
-                (Self.goldenPlanReport(osMajor: requestedMajor) + "\n").utf8
-            ))
+            if arguments.contains("--plan-json") {
+                let staticContexts = GlassLabGoldenPlan.staticContexts(
+                    osMajor: requestedMajor
+                )
+                let dynamicBatches = GlassLabGoldenPlan.dynamicBatches(
+                    osMajor: requestedMajor
+                )
+                var firstIndexByLabel: [String: Int] = [:]
+                for (index, context) in staticContexts.enumerated()
+                    where firstIndexByLabel[context.label] == nil {
+                    firstIndexByLabel[context.label] = index
+                }
+                let document: [String: Any] = [
+                    "schemaVersion": 1,
+                    "osMajor": requestedMajor,
+                    "staticObservations": staticContexts.count,
+                    "staticLabelFirstIndices": firstIndexByLabel,
+                    "dynamicRuns": dynamicBatches.flatMap { $0 }.count,
+                    "dynamicBatchRunCounts": dynamicBatches.map(\.count),
+                ]
+                var data = try! JSONSerialization.data(
+                    withJSONObject: document,
+                    options: [.sortedKeys]
+                )
+                data.append(0x0A)
+                FileHandle.standardOutput.write(data)
+            } else {
+                FileHandle.standardError.write(Data(
+                    (Self.goldenPlanReport(osMajor: requestedMajor) + "\n").utf8
+                ))
+            }
             exit(0)
         }
         let requestedDestination = arguments[arguments.index(after: flagIndex)]
@@ -366,7 +402,8 @@ extension GlassLabView {
         do {
             if GlassSystemTintAmount.isSupported,
                arguments.contains("--golden-transparency"),
-               goldenFlag == nil, goldenDriftFlag == nil {
+               goldenFlag == nil, goldenStaticChunkFlag == nil,
+               goldenDynamicChunkFlag == nil, goldenDriftFlag == nil {
                 guard let amount = GlassSystemTintAmount.read() else {
                     throw GlassLabGoldenExportError.invalidPlan("Unknown requested Glass amount")
                 }
@@ -507,10 +544,33 @@ extension GlassLabView {
             }
             let payload: Data
             let report: String
-            if goldenFlag != nil || goldenDriftFlag != nil {
+            if goldenFlag != nil || goldenStaticChunkFlag != nil
+                || goldenDynamicChunkFlag != nil || goldenDriftFlag != nil {
                 // The Golden exporter writes a directory of its own, so it
                 // reports rather than handing back one payload to write.
-                let meta = if goldenDriftFlag != nil {
+                func requiredInteger(_ name: String) throws -> Int {
+                    guard let index = arguments.firstIndex(of: name),
+                          index + 1 < arguments.count,
+                          let value = Int(arguments[index + 1]) else {
+                        throw GlassLabGoldenExportError.invalidPlan(
+                            "\(name) requires an integer"
+                        )
+                    }
+                    return value
+                }
+                let meta = if goldenStaticChunkFlag != nil {
+                    try await captureGoldenStaticChunk(
+                        into: destination,
+                        start: requiredInteger("--golden-start"),
+                        count: requiredInteger("--golden-count")
+                    )
+                } else if goldenDynamicChunkFlag != nil {
+                    try await captureGoldenDynamicChunk(
+                        into: destination,
+                        batchStart: requiredInteger("--golden-start"),
+                        batchCount: requiredInteger("--golden-count")
+                    )
+                } else if goldenDriftFlag != nil {
                     try await captureGoldenDriftArchive(into: destination)
                 } else {
                     try await captureGoldenArchive(into: destination)

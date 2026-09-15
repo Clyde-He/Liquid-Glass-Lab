@@ -134,7 +134,9 @@ function cellProblems(cell, label) {
   return problems;
 }
 
-export function validateStaticDocument(document) {
+export function validateStaticDocument(
+  document, { requireConsumerCells = true } = {},
+) {
   const problems = [];
   if (document?.schemaVersion !== 2 || !Array.isArray(document.observations)) {
     return ["static.json must be a schema-2 observation document"];
@@ -184,7 +186,11 @@ export function validateStaticDocument(document) {
     }
   }
 
-  if (!Array.isArray(document.consumerCells) || document.consumerCells.length === 0) {
+  if (!Array.isArray(document.consumerCells)) {
+    problems.push("static.json has no Consumer cell array");
+    return problems;
+  }
+  if (requireConsumerCells && document.consumerCells.length === 0) {
     problems.push("static.json has no Consumer cells");
     return problems;
   }
@@ -239,6 +245,14 @@ function captureProblems(archive) {
     problems.push("capture.json lacks schema-2 OS/build/architecture/display provenance");
   }
   return problems;
+}
+
+export function validateCaptureDocument(capture, staticDocument = null) {
+  return captureProblems({
+    capture,
+    static: staticDocument,
+    platform: platformFromCapture(capture),
+  });
 }
 
 function coordinateCoverageProblems(archive) {
@@ -304,17 +318,23 @@ export async function admitCoreArchive(directory) {
   return archive;
 }
 
-function validateDynamic(archive) {
+export function validateDynamicDocument(
+  document, capture, {
+    expectedRuns,
+    requirePlanCardinality = expectedRuns === undefined,
+  } = {},
+) {
+  const platform = platformFromCapture(capture);
   const problems = [];
-  const runs = archive.dynamic?.runs;
-  if (archive.dynamic?.schemaVersion !== 2 || !Array.isArray(runs)) {
+  const runs = document?.runs;
+  if (document?.schemaVersion !== 2 || !Array.isArray(runs)) {
     return ["dynamic.json must be a schema-2 run document"];
   }
-  const canonical27 = archive.platform.major === 27
-    && archive.capture?.transparency?.control === "processOverridePerObservation";
-  const expectedRuns = canonical27 ? 273 : 104;
-  if (runs.length !== expectedRuns) {
-    problems.push(`dynamic.json must contain ${expectedRuns} runs; got ${runs.length}`);
+  const canonical27 = platform.major === 27
+    && capture?.transparency?.control === "processOverridePerObservation";
+  const requiredRuns = expectedRuns ?? (canonical27 ? 273 : 104);
+  if (runs.length !== requiredRuns) {
+    problems.push(`dynamic.json must contain ${requiredRuns} runs; got ${runs.length}`);
   }
   for (const [index, run] of runs.entries()) {
     problems.push(...cellProblems(run.cell, `Dynamic run ${index}`));
@@ -342,9 +362,13 @@ function validateDynamic(archive) {
     if (!finite(run.samples)) problems.push(`Dynamic run ${index} contains non-finite samples`);
   }
   problems.push(...dynamicPairingProblems(runs, "Dynamic", {
-    enforceCardinality: !canonical27,
+    enforceCardinality: requirePlanCardinality && !canonical27,
   }));
   return problems;
+}
+
+function validateDynamic(archive) {
+  return validateDynamicDocument(archive.dynamic, archive.capture);
 }
 
 function validateTint(id, document) {

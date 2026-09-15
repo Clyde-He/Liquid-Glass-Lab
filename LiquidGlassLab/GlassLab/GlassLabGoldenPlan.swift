@@ -682,13 +682,39 @@ enum GlassLabGoldenPlan {
         return ordered
     }
 
+    /// Checkpoint boundaries use complete physical lifecycles. A paired
+    /// removal therefore always resumes from the insertion captured in the
+    /// same process and can never be split across two chunk artifacts.
+    static func dynamicBatches(
+        osMajor: Int = currentOSMajor
+    ) -> [[DynamicContext]] {
+        var batches: [[DynamicContext]] = []
+        for context in dynamicContexts(osMajor: osMajor) {
+            if let index = batches.indices.last,
+               batches[index].first?.lifecycleIdentity == context.lifecycleIdentity {
+                batches[index].append(context)
+            } else {
+                batches.append([context])
+            }
+        }
+        return batches
+    }
+
     static func dynamicPlanIsApproved(osMajor: Int = currentOSMajor) -> Bool {
         let contexts = dynamicContexts(osMajor: osMajor)
+        let batches = dynamicBatches(osMajor: osMajor)
         let expectedCount = osMajor == 27
             ? macOS27DynamicRunCount
             : legacyDynamicRunCount
         guard contexts.count == expectedCount,
-              Set(contexts.map(\.identity)).count == contexts.count else {
+              Set(contexts.map(\.identity)).count == contexts.count,
+              batches.flatMap({ $0 }) == contexts,
+              batches.allSatisfy({ batch in
+                  guard let identity = batch.first?.lifecycleIdentity else {
+                      return false
+                  }
+                  return batch.allSatisfy { $0.lifecycleIdentity == identity }
+              }) else {
             return false
         }
         for (index, context) in contexts.enumerated() where context.direction == .removal {

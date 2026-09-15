@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compareArchives, validateArchive } from "./lib/archive.mjs";
+import {
+  compareArchives, validateArchive, validateDynamicDocument,
+  validateStaticDocument,
+} from "./lib/archive.mjs";
 
 const property = (value, state = "value") => ({
   state,
@@ -135,6 +138,36 @@ function dynamicRuns() {
   }
   return runs;
 }
+
+test("Core chunks validate without pretending to be complete archives", () => {
+  const staticDocument = {
+    schemaVersion: 2,
+    consumerCells: [],
+    observations: [{ cell: cell(10), snapshot: snapshot(11) }],
+  };
+  assert.deepEqual(
+    validateStaticDocument(staticDocument, { requireConsumerCells: false }),
+    [],
+  );
+  assert.ok(validateStaticDocument(staticDocument).some((problem) =>
+    problem.includes("no Consumer cells")));
+
+  const capture = {
+    schemaVersion: 2,
+    operatingSystem: "Version 26.0 (Build 25A1)",
+    architecture: "arm64",
+    displaySignature: "display",
+    capturedAt: "2026-08-12T00:00:00Z",
+  };
+  const dynamicDocument = {
+    schemaVersion: 2,
+    runs: [run(200, "repeat", "insertion")],
+  };
+  assert.deepEqual(
+    validateDynamicDocument(dynamicDocument, capture, { expectedRuns: 1 }),
+    [],
+  );
+});
 
 function tintCell(index) {
   return {

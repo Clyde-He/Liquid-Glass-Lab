@@ -239,19 +239,80 @@ extension GlassLabView {
         return try await captureGolden(
             into: directory,
             staticContexts: GlassLabGoldenPlan.driftContexts(),
-            dynamicContexts: [],
+            dynamicContexts: nil,
             transparencyMode: GlassSystemTintAmount.isSupported
                 ? .fixed(0.5)
                 : .unavailable
         )
     }
 
+    func captureGoldenStaticChunk(
+        into directory: URL,
+        start: Int,
+        count: Int
+    ) async throws -> GoldenCaptureSummary {
+        guard GlassLabGoldenPlan.fullPlanIsApproved() else {
+            throw GlassLabGoldenExportError.invalidPlan(
+                "the OS-specific Static plan changed"
+            )
+        }
+        let contexts = GlassLabGoldenPlan.staticContexts()
+        guard start >= 0, count > 0, start < contexts.count else {
+            throw GlassLabGoldenExportError.invalidPlan(
+                "Static chunk range \(start)..<\(start + count) is outside "
+                    + "0..<\(contexts.count)"
+            )
+        }
+        let end = start + min(count, contexts.count - start)
+        return try await captureGolden(
+            into: directory,
+            staticContexts: Array(contexts[start..<end]),
+            dynamicContexts: nil,
+            transparencyMode: GlassSystemTintAmount.isSupported
+                ? .perObservation(baseline: 0.5)
+                : .unavailable
+        )
+    }
+
+    func captureGoldenDynamicChunk(
+        into directory: URL,
+        batchStart: Int,
+        batchCount: Int
+    ) async throws -> GoldenCaptureSummary {
+        guard GlassLabGoldenPlan.dynamicPlanIsApproved() else {
+            throw GlassLabGoldenExportError.invalidPlan(
+                "the OS-specific Dynamic plan changed"
+            )
+        }
+        let batches = GlassLabGoldenPlan.dynamicBatches()
+        guard batchStart >= 0, batchCount > 0, batchStart < batches.count else {
+            throw GlassLabGoldenExportError.invalidPlan(
+                "Dynamic batch range \(batchStart)..<\(batchStart + batchCount) "
+                    + "is outside 0..<\(batches.count)"
+            )
+        }
+        let end = batchStart + min(batchCount, batches.count - batchStart)
+        return try await captureGolden(
+            into: directory,
+            staticContexts: nil,
+            dynamicContexts: batches[batchStart..<end].flatMap { $0 },
+            transparencyMode: GlassSystemTintAmount.isSupported
+                ? .perObservation(baseline: 0.5)
+                : .unavailable
+        )
+    }
+
     private func captureGolden(
         into directory: URL,
-        staticContexts: [GlassLabGoldenPlan.StaticContext],
-        dynamicContexts: [GlassLabGoldenPlan.DynamicContext],
+        staticContexts: [GlassLabGoldenPlan.StaticContext]?,
+        dynamicContexts: [GlassLabGoldenPlan.DynamicContext]?,
         transparencyMode: GoldenTransparencyCaptureMode
     ) async throws -> GoldenCaptureSummary {
+        guard staticContexts != nil || dynamicContexts != nil else {
+            throw GlassLabGoldenExportError.invalidPlan(
+                "a core capture must contain Static, Dynamic, or both"
+            )
+        }
         let capturesTransparency = transparencyMode.initialAmount != nil
         let originalAmount = state.transparency.amount
         if let amount = transparencyMode.initialAmount {
@@ -346,29 +407,37 @@ extension GlassLabView {
         // reacting while the static sweeps stamp each context themselves.
         // The dynamic section uses the independent semantic host and runs
         // through the normal observation path used by the product.
-        state.isCapturingRecipeMatrix = true
-        let staticDocument = try await captureStaticSection(
-            contexts: staticContexts
-        )
-        state.isCapturingRecipeMatrix = false
-        guard GlassMaterialStyleAtlas.Environment.current(
-            for: state.testWindow.liveWindow?.screen
-        ).displaySignature == captureEnvironment.displaySignature else {
-            throw GlassLabGoldenExportError.contextRejected(
-                context: "Static",
-                detail: "the capture window moved to another display"
+        let staticDocument: GoldenStaticDocument?
+        if let staticContexts {
+            state.isCapturingRecipeMatrix = true
+            staticDocument = try await captureStaticSection(
+                contexts: staticContexts
             )
+            state.isCapturingRecipeMatrix = false
+            guard GlassMaterialStyleAtlas.Environment.current(
+                for: state.testWindow.liveWindow?.screen
+            ).displaySignature == captureEnvironment.displaySignature else {
+                throw GlassLabGoldenExportError.contextRejected(
+                    context: "Static",
+                    detail: "the capture window moved to another display"
+                )
+            }
+        } else {
+            staticDocument = nil
         }
-        let dynamic = dynamicContexts.isEmpty
-            ? nil
-            : try await captureDynamicSection(contexts: dynamicContexts)
-        guard GlassMaterialStyleAtlas.Environment.current(
-            for: state.testWindow.liveWindow?.screen
-        ).displaySignature == captureEnvironment.displaySignature else {
-            throw GlassLabGoldenExportError.contextRejected(
-                context: "Dynamic",
-                detail: "the capture window moved to another display"
-            )
+        let dynamic: GoldenDynamicDocument?
+        if let dynamicContexts {
+            dynamic = try await captureDynamicSection(contexts: dynamicContexts)
+            guard GlassMaterialStyleAtlas.Environment.current(
+                for: state.testWindow.liveWindow?.screen
+            ).displaySignature == captureEnvironment.displaySignature else {
+                throw GlassLabGoldenExportError.contextRejected(
+                    context: "Dynamic",
+                    detail: "the capture window moved to another display"
+                )
+            }
+        } else {
+            dynamic = nil
         }
 
         #if arch(arm64)
@@ -651,7 +720,7 @@ extension GlassLabView {
     private static func writeGoldenArchive(
         into directory: URL,
         capture: GoldenCaptureDocument,
-        staticDocument: GoldenStaticDocument,
+        staticDocument: GoldenStaticDocument?,
         dynamic: GoldenDynamicDocument?
     ) throws -> GoldenCaptureSummary {
         let fileManager = FileManager.default
@@ -702,7 +771,7 @@ extension GlassLabView {
         }
         return GoldenCaptureSummary(
             capture: capture,
-            staticObservations: staticDocument.observations.count,
+            staticObservations: staticDocument?.observations.count ?? 0,
             dynamicRuns: dynamic?.runs.count ?? 0
         )
     }
@@ -710,20 +779,22 @@ extension GlassLabView {
     private static func writeGoldenArchivePayload(
         into directory: URL,
         capture: GoldenCaptureDocument,
-        staticDocument: GoldenStaticDocument,
+        staticDocument: GoldenStaticDocument?,
         dynamic: GoldenDynamicDocument?
     ) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
 
-        try write(
-            staticDocument,
-            rows: staticDocument.observations.map(\.cell),
-            named: "static",
-            into: directory,
-            encoder: encoder,
-            allowsRepeats: false
-        )
+        if let staticDocument {
+            try write(
+                staticDocument,
+                rows: staticDocument.observations.map(\.cell),
+                named: "static",
+                into: directory,
+                encoder: encoder,
+                allowsRepeats: false
+            )
+        }
         if let dynamic {
             try write(
                 dynamic,

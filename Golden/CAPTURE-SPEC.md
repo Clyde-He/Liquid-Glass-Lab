@@ -99,7 +99,7 @@ Runtime notification/restamp, mutation, and rendered-pixel harnesses remain rele
 
 ## Staging and promotion
 
-`golden capture` writes partial/checkpoint data outside the requested final staging path. Only a complete admitted archive is atomically finalized as staging. Cancellation or any failed occurrence leaves accepted Golden untouched.
+`golden capture` writes partial/checkpoint data outside the requested final staging path. Core Static rows and complete Dynamic lifecycle batches are checkpointed under that partial directory and reused only when the executable fingerprint and complete Swift plan still match. Each saved chunk is structurally validated and must share one OS/build/architecture/display/transparency context before the canonical documents are merged. Chunk ordering and boundaries do not add evidence coordinates or Study definitions. Only a complete admitted archive is atomically finalized as staging. Cancellation or any failed occurrence leaves both accepted Golden and previously completed matching chunks untouched.
 
 `golden promote` never launches the app. Preview compares and verifies the supplied staging. `--accept` re-admits that same staging, validates an install copy, then atomically creates or replaces `Golden/macOS-N`. Staged versus accepted is determined by location, not a JSON status field.
 
