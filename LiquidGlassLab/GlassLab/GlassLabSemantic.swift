@@ -594,6 +594,7 @@ struct GlassLabSemanticTransitionLayerRecord: Codable, Equatable, Identifiable {
     let sublayerTransform: [Double]
     /// CGAffineTransform values a, b, c, d, tx, ty.
     let affineTransform: [Double]
+    var declaredProperties: [String: GoldenResolvedProperty]? = nil
 
     var id: String { path }
 }
@@ -700,7 +701,8 @@ struct GlassLabSemanticTransitionSnapshot: Codable, Equatable {
                         Double(affine.d),
                         Double(affine.tx),
                         Double(affine.ty),
-                    ]
+                    ],
+                    declaredProperties: GlassLabTuning.captureDeclaredLayerProperties(on: layer)
                 )
             )
             for (index, child) in (layer.sublayers ?? []).enumerated() {
@@ -1014,14 +1016,24 @@ struct GlassLabSemanticEffectRecord: Codable, Equatable, Identifiable {
     var id: String { "\(path).\(effectClass)" }
 }
 
+struct GlassLabBackdropSampling: Codable, Equatable {
+    let path: String
+    let scale: Double?
+    let marginWidth: Double?
+}
+
 struct GlassLabSemanticSnapshot: Codable, Equatable {
     let layerLines: [String]
     let filters: [GlassLabSemanticFilterRecord]
     let effects: [GlassLabSemanticEffectRecord]
+    var backdropSampling: [GlassLabBackdropSampling]? = nil
 
     var report: String {
         var lines = ["Layer Tree", "----------"]
         lines.append(contentsOf: layerLines)
+        for sampling in backdropSampling ?? [] {
+            lines.append("\(sampling.path) · scale=\(sampling.scale.map { String($0) } ?? "unknown") · margin=\(sampling.marginWidth.map { String($0) } ?? "unknown")")
+        }
         lines.append("")
         lines.append("Filters")
         lines.append("-------")
@@ -1058,6 +1070,7 @@ struct GlassLabSemanticSnapshot: Codable, Equatable {
     ) -> GlassLabSemanticSnapshot? {
         guard let root else { return nil }
         var layerLines: [String] = []
+        var backdropSampling: [GlassLabBackdropSampling] = []
         var filters: [GlassLabSemanticFilterRecord] = []
         var effects: [GlassLabSemanticEffectRecord] = []
 
@@ -1082,6 +1095,15 @@ struct GlassLabSemanticSnapshot: Codable, Equatable {
                 summary += " effect=\(String(describing: type(of: effect)))"
             }
             layerLines.append(summary)
+            if layerClass == "CABackdropLayer" {
+                func number(_ key: String) -> Double? {
+                    guard layer.responds(to: NSSelectorFromString(key)) else { return nil }
+                    return (layer.value(forKey: key) as? NSNumber)?.doubleValue
+                }
+                backdropSampling.append(GlassLabBackdropSampling(
+                    path: path, scale: number("scale"), marginWidth: number("marginWidth")
+                ))
+            }
 
             captureFilters(
                 directFilters,
@@ -1142,7 +1164,8 @@ struct GlassLabSemanticSnapshot: Codable, Equatable {
         return GlassLabSemanticSnapshot(
             layerLines: layerLines,
             filters: filters,
-            effects: effects
+            effects: effects,
+            backdropSampling: backdropSampling
         )
     }
 

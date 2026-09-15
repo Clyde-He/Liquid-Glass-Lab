@@ -1,6 +1,6 @@
 import {
   DYNAMIC_STABLE_PHASES, dynamicPairingProblems, dynamicRunIdentity,
-  stableEndpointSamples,
+  stableEndpointSamples, stableSamplePayload,
 } from "./dynamic-contract.mjs";
 
 function stableProjection(runs, side, { requirePairing = true } = {}) {
@@ -14,8 +14,9 @@ function stableProjection(runs, side, { requirePairing = true } = {}) {
     if (identities.has(identity)) problems.push(`${side} run ${runIndex}: duplicate identity`);
     identities.add(identity);
     durations.set(identity, source.maximumAttachedAnimationDuration);
-    const run = structuredClone(source);
+    const run = { ...source };
     delete run.maximumAttachedAnimationDuration;
+    delete run.samplingDuration;
     run.samples = stableEndpointSamples(run);
     const phases = run.samples.map(({ phase }) => phase);
     const expectedPhases = source?.slice === "core" ? ["settled"] : DYNAMIC_STABLE_PHASES;
@@ -121,8 +122,50 @@ export function compareStableDynamicRuns(baselineRuns, candidateRuns, {
   if (stableDifferenceCount > 0) {
     problems.push(`${stableDifferenceCount} stable payload differences across ${changedRuns} runs`);
   }
+  const intermediateDifferences = [];
+  let intermediateDifferenceCount = 0;
+  let unalignedSamples = 0;
+  const candidatesByID = new Map(
+    (candidateRuns ?? []).map((run) => [dynamicRunIdentity(run), run])
+  );
+  for (const run of baselineRuns ?? []) {
+    const other = candidatesByID.get(dynamicRunIdentity(run));
+    if (!other) continue;
+    for (const sample of run.samples ?? []) {
+      if (["preflight", "settled"].includes(sample.phase)) continue;
+      const match = other.samples?.find((item) => item.phase === sample.phase
+        && item.requestedProgress === sample.requestedProgress);
+      if (!match) {
+        unalignedSamples += 1;
+        continue;
+      }
+      if (sample.progress !== match.progress && (!Number.isFinite(sample.progress)
+          || !Number.isFinite(match.progress)
+          || Math.abs(sample.progress - match.progress) > 1e-6)) {
+        unalignedSamples += 1;
+        continue;
+      }
+      const lhs = stableSamplePayload(sample);
+      const rhs = stableSamplePayload(match);
+      delete lhs.progress;
+      delete rhs.progress;
+      intermediateDifferenceCount += collectDifferences(
+        lhs, rhs, `${dynamicRunIdentity(run)}.${sample.phase}`,
+        intermediateDifferences, reportedDifferenceLimit
+      );
+    }
+  }
   return {
-    equivalent: problems.length === 0,
+    equivalent: problems.length === 0
+      && intermediateDifferenceCount === 0 && unalignedSamples === 0,
+    endpointEquivalent: problems.length === 0,
+    trajectory: {
+      status: intermediateDifferenceCount > 0 ? "different"
+        : unalignedSamples > 0 ? "inconclusive" : "equivalent",
+      unalignedSamples,
+      differences: intermediateDifferenceCount,
+      examples: intermediateDifferences,
+    },
     baselineRuns: baselineRuns?.length ?? null,
     candidateRuns: candidateRuns?.length ?? null,
     stablePhases: DYNAMIC_STABLE_PHASES,

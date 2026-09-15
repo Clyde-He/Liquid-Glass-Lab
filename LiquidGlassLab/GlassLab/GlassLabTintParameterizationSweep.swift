@@ -406,6 +406,7 @@ struct GlassLabTintParameterizationSweepDocument: Codable, Sendable {
         var osMajorVersion: Int
         var displaySignature: String
         var atlasSchemaVersion: Int
+        var glassAmount: Double? = nil
     }
 
     var formatVersion: Int
@@ -1186,6 +1187,18 @@ extension GlassLabView {
               mainProbeHost.window === hostWindow else {
             throw GlassLabTintSweepError.probeHostUnavailable
         }
+        let ownsTransparencyCapture = GlassSystemTintAmount.isSupported
+            && state.transparency.fixedCaptureMetadata == nil
+        let originalAmount = state.transparency.amount
+        if ownsTransparencyCapture {
+            guard let amount = GlassSystemTintAmount.read() else {
+                throw GlassLabTintSweepError.invalidExistingDocument("the effective Glass amount is unknown")
+            }
+            try state.transparency.beginCapture(at: amount)
+        }
+        defer {
+            if ownsTransparencyCapture { state.transparency.endCapture(restoring: originalAmount) }
+        }
         let currentEnvironment = GlassMaterialStyleAtlas.Environment.current(
             for: hostWindow.screen
         )
@@ -1194,7 +1207,8 @@ extension GlassLabView {
                 currentEnvironment.resolvedOSMajorVersion
                     ?? ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
             displaySignature: currentEnvironment.displaySignature,
-            atlasSchemaVersion: GlassMaterialStyleAtlas.currentSchemaVersion
+            atlasSchemaVersion: GlassMaterialStyleAtlas.currentSchemaVersion,
+            glassAmount: GlassSystemTintAmount.read()
         )
         var document = try Self.loadTintSweepCheckpoint(
             at: destination,
@@ -1243,6 +1257,9 @@ extension GlassLabView {
 
         do {
             try await session.capture(colors: remaining) { color, rows in
+                if state.transparency.fixedCaptureMetadata != nil {
+                    try state.transparency.validateCapture()
+                }
                 document.rows.removeAll { $0.colorID == color.id }
                 document.rows.append(contentsOf: rows)
                 document.rows.sort(by: Self.tintSweepRowSort)
@@ -1263,6 +1280,12 @@ extension GlassLabView {
             try Self.writeTintSweepCheckpoint(document, to: destination)
             return document
         } catch {
+            // Never allow a checkpoint containing a changed capture context to
+            // resume as if all of its rows had the original amount.
+            if state.transparency.fixedCaptureMetadata != nil {
+                do { try state.transparency.validateCapture() }
+                catch { document.environment.glassAmount = nil }
+            }
             document.complete = false
             document.failure = error is CancellationError
                 ? "cancelled"
@@ -1302,7 +1325,7 @@ extension GlassLabView {
         guard document.operatingSystem == operatingSystem,
               document.environment == environment else {
             throw GlassLabTintSweepError.invalidExistingDocument(
-                "OS build or display signature changed"
+                "OS build, display signature, or Glass amount changed (legacy checkpoints have unknown amount)"
             )
         }
         let colorsByID = Dictionary(

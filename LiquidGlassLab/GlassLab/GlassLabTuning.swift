@@ -90,6 +90,8 @@ enum GlassLabTuning {
         variant: Int,
         subvariant: String?,
         subdued: Bool,
+        reducedTintOpacity: Bool,
+        tintColor: NSColor?,
         on glass: NSGlassEffectView
     ) -> String? {
         let object = glass as NSObject
@@ -146,15 +148,37 @@ enum GlassLabTuning {
             ) as? NSNumber else {
                 return "_tintOpacityReduced is unreadable"
             }
-            guard !actualReducedTint.boolValue else {
-                return "_tintOpacityReduced is true, expected false"
+            guard actualReducedTint.boolValue == reducedTintOpacity else {
+                return "_tintOpacityReduced is \(actualReducedTint.boolValue), "
+                    + "expected \(reducedTintOpacity)"
             }
         default:
             return "_tintOpacityReduced getter/setter availability differs"
         }
 
-        guard glass.tintColor == nil else {
-            return "tintColor is non-nil, expected nil"
+        switch (glass.tintColor, tintColor) {
+        case (nil, nil):
+            break
+        case let (actual?, expected?):
+            guard let actual = actual.usingColorSpace(.extendedSRGB),
+                  let expected = expected.usingColorSpace(.extendedSRGB) else {
+                return "tintColor could not be compared in extended sRGB"
+            }
+            let actualComponents = [
+                actual.redComponent, actual.greenComponent,
+                actual.blueComponent, actual.alphaComponent,
+            ]
+            let expectedComponents = [
+                expected.redComponent, expected.greenComponent,
+                expected.blueComponent, expected.alphaComponent,
+            ]
+            guard zip(actualComponents, expectedComponents).allSatisfy({
+                abs($0 - $1) < 1e-6
+            }) else {
+                return "tintColor is \(actualComponents), expected \(expectedComponents)"
+            }
+        default:
+            return "tintColor nil state differs from the requested Tint preset"
         }
         return nil
     }
@@ -818,10 +842,10 @@ enum GlassLabTuning {
         return label
     }
 
-    /// Layer-geometry knobs — not filter inputs; they bound how far the
-    /// glass renders outside its outline. Read via captureLayerGeometry and
+    /// Layer sampling and geometry knobs. Read via captureLayerGeometry and
     /// stamped via applyLayerGeometry while shader overrides are enabled.
     static let geometryKnobs: [Knob] = [
+        Knob(key: "backdropScale", label: "Backdrop Scale", range: 0.125...0.5, fallback: 0.5),
         Knob(key: "backdropMarginWidth", label: "Backdrop Margin", range: 0...210, fallback: 0.5),
         // -10000 is the runtime's unbounded lower-field sentinel. Keep the
         // authoring slider useful; a dedicated sentinel control exposes it.
@@ -839,7 +863,8 @@ enum GlassLabTuning {
     // MARK: - Layer geometry
 
     /// The recipe resolves layer-tree geometry alongside the filter inputs,
-    /// and filter-only value cloning can't see it. Three values bound how far the
+    /// and filter-only value cloning can't see it. Scale controls backdrop sampling
+    /// resolution. Three further values bound how far the
     /// glass renders outside its outline: the backdrop layer's marginWidth
     /// (active key/main branch: 70; neither-key-nor-main HUD: 0.5) sizes the
     /// glassBackground filter may paint into — bleed, outer refraction,
@@ -850,6 +875,10 @@ enum GlassLabTuning {
         if let backdrop = backdropLayer(under: glass),
            let margin = (valueIfResponds(forKey: "marginWidth", on: backdrop) as? NSNumber)?.doubleValue {
             values["backdropMarginWidth"] = margin
+        }
+        if let backdrop = backdropLayer(under: glass),
+           let scale = (valueIfResponds(forKey: "scale", on: backdrop) as? NSNumber)?.doubleValue {
+            values["backdropScale"] = scale
         }
         if let layer = outputEffectLayer(under: glass),
            let effect = effectObject(on: layer) {
@@ -871,6 +900,10 @@ enum GlassLabTuning {
            backdrop.responds(to: NSSelectorFromString("marginWidth")) {
             keys.insert("backdropMarginWidth")
         }
+        if let backdrop = backdropLayer(under: glass),
+           backdrop.responds(to: NSSelectorFromString("scale")) {
+            keys.insert("backdropScale")
+        }
         if let layer = outputEffectLayer(under: glass),
            let effect = effectObject(on: layer) {
             if effect.responds(to: NSSelectorFromString("minimum")) {
@@ -886,6 +919,11 @@ enum GlassLabTuning {
     static func applyLayerGeometry(_ values: [String: Double], to glass: NSGlassEffectView) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        if let scale = values["backdropScale"], scale.isFinite, scale > 0,
+           let backdrop = backdropLayer(under: glass),
+           backdrop.responds(to: NSSelectorFromString("setScale:")) {
+            backdrop.setValue(scale, forKey: "scale")
+        }
         if let margin = values["backdropMarginWidth"],
            let backdrop = backdropLayer(under: glass),
            backdrop.responds(to: NSSelectorFromString("setMarginWidth:")) {
@@ -1746,6 +1784,8 @@ enum GlassLabTuning {
         let masksToBounds: Bool
         let cornerRadius: Double
         let hasMask: Bool
+        /// Optional when reading older audits that discarded layer inputs.
+        let properties: [String: PassAuditPropertyRecord]?
     }
 
     struct PassAuditPropertyRecord: Codable, Equatable {
@@ -2644,18 +2684,31 @@ enum GlassLabTuning {
         var visited: Set<ObjectIdentifier> = []
         var passOrder = 0
 
+        func stableColor(_ color: CGColor?) -> String? {
+            guard let color else { return nil }
+            let components = (color.components ?? []).map {
+                String(format: "%.9g", Double($0))
+            }.joined(separator: ",")
+            let colorSpace = color.colorSpace?.name as String? ?? "unknown"
+            return "\(colorSpace)[\(components)]"
+        }
+
         func visit(_ layer: CALayer, path: String) {
             guard visited.insert(ObjectIdentifier(layer)).inserted else { return }
             let layerClass = String(describing: type(of: layer))
-            var properties: [String: GoldenResolvedProperty] = [:]
-            if layerClass == "CABackdropLayer",
-               layer.responds(to: NSSelectorFromString("marginWidth")) {
-                properties["marginWidth"] = resolvedProperty(
-                    readable: true,
-                    value: valueIfResponds(forKey: "marginWidth", on: layer),
-                    attributes: [:]
-                )
+            var properties = captureDeclaredLayerProperties(on: layer)
+            if layerClass == "CABackdropLayer" {
+                for key in ["marginWidth", "scale"] {
+                    properties[key] = resolvedProperty(
+                        readable: layer.responds(to: NSSelectorFromString(key)),
+                        value: valueIfResponds(forKey: key, on: layer),
+                        attributes: [:]
+                    )
+                }
             }
+            let transform = layer.transform
+            let sublayerTransform = layer.sublayerTransform
+            let affine = layer.affineTransform()
             layers.append(GoldenResolvedLayer(
                 path: path,
                 layerClass: layerClass,
@@ -2667,6 +2720,38 @@ enum GlassLabTuning {
                 masksToBounds: layer.masksToBounds,
                 cornerRadius: Double(layer.cornerRadius),
                 hasMask: layer.mask != nil,
+                position: GoldenResolvedPair(
+                    x: Double(layer.position.x),
+                    y: Double(layer.position.y)
+                ),
+                anchorPoint: GoldenResolvedPair(
+                    x: Double(layer.anchorPoint.x),
+                    y: Double(layer.anchorPoint.y)
+                ),
+                zPosition: Double(layer.zPosition),
+                contentsScale: Double(layer.contentsScale),
+                backgroundColor: stableColor(layer.backgroundColor),
+                borderColor: stableColor(layer.borderColor),
+                shadowColor: stableColor(layer.shadowColor),
+                transform: [
+                    transform.m11, transform.m12, transform.m13, transform.m14,
+                    transform.m21, transform.m22, transform.m23, transform.m24,
+                    transform.m31, transform.m32, transform.m33, transform.m34,
+                    transform.m41, transform.m42, transform.m43, transform.m44,
+                ].map(Double.init),
+                sublayerTransform: [
+                    sublayerTransform.m11, sublayerTransform.m12,
+                    sublayerTransform.m13, sublayerTransform.m14,
+                    sublayerTransform.m21, sublayerTransform.m22,
+                    sublayerTransform.m23, sublayerTransform.m24,
+                    sublayerTransform.m31, sublayerTransform.m32,
+                    sublayerTransform.m33, sublayerTransform.m34,
+                    sublayerTransform.m41, sublayerTransform.m42,
+                    sublayerTransform.m43, sublayerTransform.m44,
+                ].map(Double.init),
+                affineTransform: [
+                    affine.a, affine.b, affine.c, affine.d, affine.tx, affine.ty,
+                ].map(Double.init),
                 properties: properties
             ))
 
@@ -2762,6 +2847,10 @@ enum GlassLabTuning {
                     + (layer.isHidden ? " · HIDDEN" : "")
                     + (layer.masksToBounds ? " · CLIPS" : "")
             )
+            for name in (layer.properties ?? [:]).keys.sorted() {
+                guard let property = layer.properties?[name] else { continue }
+                lines.append("    \(name) [\(property.state)] = \(property.value ?? "<nil>")")
+            }
         }
 
         lines.append("")
@@ -2868,6 +2957,23 @@ enum GlassLabTuning {
         })
     }
 
+    static func captureDeclaredLayerProperties(on layer: CALayer) -> [String: GoldenResolvedProperty] {
+        let properties = captureResolvedEffectProperties(on: layer)
+        return properties.mapValues { property in
+            guard (try? JSONEncoder().encode(property)) == nil else { return property }
+            // Native layer attributes legitimately contain infinity/NaN (e.g.
+            // unbounded rectangles). Preserve their exact typed description;
+            // never replace these observations with a fabricated finite value.
+            var attributes = property.attributes
+            attributes["representation"] = "nonFiniteDescription"
+            return GoldenResolvedProperty(
+                state: property.state,
+                value: .string(String(describing: property.value)),
+                attributes: attributes
+            )
+        }
+    }
+
     private static func captureResolvedEffectProperties(
         on effect: NSObject
     ) -> [String: GoldenResolvedProperty] {
@@ -2911,11 +3017,13 @@ enum GlassLabTuning {
                 attributes: attributes
             )
         }
-        return GoldenResolvedProperty(
-            state: .value,
-            value: resolvedValue(value),
-            attributes: attributes
-        )
+        let resolved = resolvedValue(value)
+        var metadata = attributes
+        if case .opaque = resolved {
+            metadata["nativeDescription"] = String(describing: value)
+            metadata["representation"] = "opaqueDescription"
+        }
+        return GoldenResolvedProperty(state: .value, value: resolved, attributes: metadata)
     }
 
     private static func resolvedValue(_ value: Any) -> GoldenResolvedValue {
@@ -3019,7 +3127,14 @@ enum GlassLabTuning {
                     isHidden: layer.isHidden,
                     masksToBounds: layer.masksToBounds,
                     cornerRadius: layer.cornerRadius,
-                    hasMask: layer.hasMask
+                    hasMask: layer.hasMask,
+                    properties: layer.properties.mapValues { property in
+                        PassAuditPropertyRecord(
+                            state: property.state.rawValue,
+                            value: property.value.map { resolvedAuditDescription($0) },
+                            attributes: property.attributes
+                        )
+                    }
                 )
             )
         })
@@ -3395,7 +3510,10 @@ enum GlassLabTuning {
     }
 
     /// Bounded full-tree settle used by canonical Static capture. Three
-    /// consecutive complete typed reads must agree. No property exclusions or
+    /// consecutive complete typed reads must agree, and the fresh view must
+    /// have existed for at least 800 ms. The minimum horizon prevents an early
+    /// unchanged Recipe tree from masquerading as settled while faster polling
+    /// avoids stacking another fixed delay on top. No property exclusions or
     /// tolerances are hidden here: exhaustion rejects the occurrence.
     @MainActor
     static func settledResolvedTreeSnapshot(
@@ -3404,7 +3522,8 @@ enum GlassLabTuning {
         var previous: GoldenResolvedSnapshot?
         var stableMatches = 0
         var observedSnapshot = false
-        for _ in 0..<16 {
+        let startedAt = Date()
+        for poll in 0..<30 {
             try Task.checkCancellation()
             guard NSApp.isActive else {
                 throw MatrixCaptureError.applicationInactive
@@ -3421,12 +3540,17 @@ enum GlassLabTuning {
             observedSnapshot = true
             if current == previous {
                 stableMatches += 1
-                if stableMatches >= 2 { return current }
+                if stableMatches >= 2,
+                   Date().timeIntervalSince(startedAt) >= 0.8 {
+                    return current
+                }
             } else {
                 stableMatches = 0
             }
             previous = current
-            try await Task.sleep(for: .milliseconds(300))
+            if poll < 29 {
+                try await Task.sleep(for: .milliseconds(100))
+            }
         }
         if !observedSnapshot { throw MatrixCaptureError.missingLayerTree }
         throw MatrixCaptureError.unstableResolvedTree

@@ -3,6 +3,12 @@ import XCTest
 
 @available(macOS 26.0, *)
 final class ControllerConfigurationTests: XCTestCase {
+    func testGlassTintAmountSupportIsRestrictedToExactlyMacOS27() {
+        XCTAssertFalse(GlassMaterialTintAmount.isSupported(osMajor: 26))
+        XCTAssertTrue(GlassMaterialTintAmount.isSupported(osMajor: 27))
+        XCTAssertFalse(GlassMaterialTintAmount.isSupported(osMajor: 28))
+    }
+
     @MainActor
     func testPlatformOwnedHeadroomIsNotAuthoredByTheMaterialCurve() {
         let baseline = GlassMaterialBaseline(

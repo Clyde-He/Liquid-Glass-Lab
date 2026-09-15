@@ -15,7 +15,10 @@ import AppKit
 import Foundation
 
 enum GlassLabGoldenPlan {
-    static let approvedStaticObservationCount = 776
+    static let legacyStaticObservationCount = 776
+    static let macOS27StaticObservationCount = 1_750
+    static let legacyDynamicRunCount = 104
+    static let macOS27DynamicRunCount = 273
     static let approvedConsumerCount = 56
     static let approvedDriftObservationCount = 28
     static let approvedDriftConsumerCount = 24
@@ -33,7 +36,7 @@ enum GlassLabGoldenPlan {
 
     /// One exact settled renderer observation. `label` and `requiresCatalog`
     /// are plan-only metadata and are never persisted as evidence identity.
-    struct StaticContext {
+    struct StaticContext: Codable, Equatable {
         let label: String
         let width: Double
         let height: Double
@@ -45,10 +48,13 @@ enum GlassLabGoldenPlan {
         let host: GlassLabWindowHostType
         let variant: Int
         let subvariant: String?
-        let requiresCatalog: Bool
+        var requiresCatalog: Bool
+        var backdrop: GlassLabBackdropMode = .light
+        var tintPreset: GlassLabTintPreset = .none
+        var glassAmount: Double? = nil
 
         var cell: GoldenCell {
-            .staticCell(context: self, backdrop: staticBackdrop)
+            .staticCell(context: self, backdrop: backdrop)
         }
     }
 
@@ -80,7 +86,24 @@ enum GlassLabGoldenPlan {
         (200, 480), (400, 480),
     ]
 
-    static func staticContexts() -> [StaticContext] {
+    static let glassGeometryShortSides: [Double] = [
+        48, 64, 72, 80, 88, 96, 100, 104, 112, 120, 128, 136, 144, 152,
+        160, 200, 320,
+    ]
+    static let glassScaleShortSides: [Double] = [48, 64, 96, 120, 160, 200, 320]
+    static let glassScaleAmounts: [Double] = [
+        0, 0.75, 0.8, 0.85, 0.875, 0.9, 0.925, 0.95, 0.975, 0.99, 1,
+    ]
+    static let glassAnchorAmounts: [Double] = [0, 0.5, 1]
+    static let glassSentinelAmounts: [Double] = [0, 0.25, 0.5, 0.75, 1]
+    static let glassBoundaryAmounts: [Double] = [0, 0.0001, 0.4999, 0.5, 0.5001, 1]
+
+    static var currentOSMajor: Int {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+    }
+
+    static func staticContexts(osMajor: Int = currentOSMajor) -> [StaticContext] {
+        let baselineAmount: Double? = osMajor == 27 ? 0.5 : nil
         var contexts: [StaticContext] = []
         var indexByIdentity: [String: Int] = [:]
 
@@ -96,9 +119,12 @@ enum GlassLabGoldenPlan {
             host: GlassLabWindowHostType = .panel,
             variant: Int,
             subvariant: String?,
-            requiresCatalog: Bool = false
+            requiresCatalog: Bool = false,
+            backdrop: GlassLabBackdropMode = .light,
+            tintPreset: GlassLabTintPreset = .none,
+            glassAmount: Double? = nil
         ) {
-            let candidate = StaticContext(
+            var candidate = StaticContext(
                 label: label,
                 width: width,
                 height: height,
@@ -112,24 +138,13 @@ enum GlassLabGoldenPlan {
                 subvariant: subvariant,
                 requiresCatalog: requiresCatalog
             )
+            candidate.backdrop = backdrop
+            candidate.tintPreset = tintPreset
+            candidate.glassAmount = glassAmount
             let identity = candidate.cell.identity
             if let index = indexByIdentity[identity] {
                 if requiresCatalog, !contexts[index].requiresCatalog {
-                    let existing = contexts[index]
-                    contexts[index] = StaticContext(
-                        label: existing.label,
-                        width: existing.width,
-                        height: existing.height,
-                        cornerRadius: existing.cornerRadius,
-                        main: existing.main,
-                        key: existing.key,
-                        subdued: existing.subdued,
-                        appearance: existing.appearance,
-                        host: existing.host,
-                        variant: existing.variant,
-                        subvariant: existing.subvariant,
-                        requiresCatalog: true
-                    )
+                    contexts[index].requiresCatalog = true
                 }
                 return
             }
@@ -155,7 +170,8 @@ enum GlassLabGoldenPlan {
                                 subdued: subdued,
                                 appearance: appearance,
                                 variant: variant,
-                                subvariant: subvariant
+                                subvariant: subvariant,
+                                glassAmount: baselineAmount
                             )
                         }
                     }
@@ -177,7 +193,8 @@ enum GlassLabGoldenPlan {
                         subdued: false,
                         appearance: staticAppearance,
                         variant: variant,
-                        subvariant: nil
+                        subvariant: nil,
+                        glassAmount: baselineAmount
                     )
                 }
             }
@@ -197,7 +214,8 @@ enum GlassLabGoldenPlan {
                         subdued: false,
                         appearance: staticAppearance,
                         variant: variant,
-                        subvariant: nil
+                        subvariant: nil,
+                        glassAmount: baselineAmount
                     )
                 }
             }
@@ -217,7 +235,8 @@ enum GlassLabGoldenPlan {
                         subdued: false,
                         appearance: staticAppearance,
                         variant: variant,
-                        subvariant: nil
+                        subvariant: nil,
+                        glassAmount: baselineAmount
                     )
                 }
             }
@@ -241,7 +260,8 @@ enum GlassLabGoldenPlan {
                     subdued: subdued,
                     appearance: staticAppearance,
                     variant: variant,
-                    subvariant: nil
+                    subvariant: nil,
+                    glassAmount: baselineAmount
                 )
             }
         }
@@ -263,31 +283,148 @@ enum GlassLabGoldenPlan {
                             appearance: appearance,
                             variant: variant,
                             subvariant: nil,
-                            requiresCatalog: true
+                            requiresCatalog: true,
+                            glassAmount: baselineAmount
                         )
                     }
                 }
             }
         }
 
+        guard osMajor == 27 else { return contexts }
+
+        func appendConsumer(
+            label: String,
+            shortSides: [Double],
+            amounts: [Double],
+            tintPreset: GlassLabTintPreset = .none
+        ) {
+            for appearance in GlassLabTestAppearance.controlledCases {
+                for variant in sliceVariants {
+                    for main in [false, true] {
+                        for shortSide in shortSides {
+                            for amount in amounts {
+                                append(
+                                    label: label,
+                                    width: referenceWidth,
+                                    height: shortSide,
+                                    cornerRadius: referenceCornerRadius,
+                                    main: main,
+                                    key: false,
+                                    subdued: false,
+                                    appearance: appearance,
+                                    variant: variant,
+                                    subvariant: nil,
+                                    tintPreset: tintPreset,
+                                    glassAmount: amount
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // macOS 27 transparency is a sparse axis over the same canonical
+        // Static observation space. Each coordinate is captured once, and the
+        // model, geometry, scale and boundary learnings select their subsets.
+        appendConsumer(
+            label: "glass-model-anchor",
+            shortSides: catalogShortSides,
+            amounts: glassAnchorAmounts
+        )
+        appendConsumer(
+            label: "glass-geometry",
+            shortSides: glassGeometryShortSides,
+            amounts: [0, 0.75, 1]
+        )
+        appendConsumer(
+            label: "glass-scale",
+            shortSides: glassScaleShortSides,
+            amounts: glassScaleAmounts
+        )
+        appendConsumer(
+            label: "glass-quarter",
+            shortSides: [48, 200, 320],
+            amounts: [0.25, 0.75]
+        )
+        appendConsumer(
+            label: "glass-quarter",
+            shortSides: [72, 104, 112, 120],
+            amounts: [0.25]
+        )
+
+        // Non-Consumer topology sentinels retain the alternate/adaptive
+        // branches at all five interpolation anchors.
+        for variant in [4, 6] {
+            for subdued in [false, true] {
+                for amount in glassSentinelAmounts {
+                    append(
+                        label: "glass-nonconsumer-sentinel",
+                        width: referenceWidth,
+                        height: referenceHeight,
+                        cornerRadius: referenceCornerRadius,
+                        main: true,
+                        key: false,
+                        subdued: subdued,
+                        appearance: .light,
+                        variant: variant,
+                        subvariant: nil,
+                        glassAmount: amount
+                    )
+                }
+            }
+        }
+
+        // Tint interaction is kept in Static because it is still one settled
+        // native renderer state, just with a non-nil public tint input.
+        appendConsumer(
+            label: "glass-tint-interaction",
+            shortSides: [referenceHeight],
+            amounts: glassSentinelAmounts,
+            tintPreset: .coral50
+        )
+
+        // The Clear Main+Key branch changes topology around the midpoint and
+        // therefore receives close probes on both sides of 0.5.
+        for amount in glassBoundaryAmounts {
+            append(
+                label: "glass-clear-key-boundary",
+                width: referenceWidth,
+                height: referenceHeight,
+                cornerRadius: referenceCornerRadius,
+                main: true,
+                key: true,
+                subdued: false,
+                appearance: .light,
+                host: .window,
+                variant: 2,
+                subvariant: nil,
+                glassAmount: amount
+            )
+        }
+
         return contexts
     }
 
-    static func catalogContexts() -> [StaticContext] {
-        staticContexts().filter(\.requiresCatalog)
+    static func catalogContexts(osMajor: Int = currentOSMajor) -> [StaticContext] {
+        staticContexts(osMajor: osMajor).filter(\.requiresCatalog)
     }
 
     /// These are small reviewed shape pins, colocated with the one coordinate
-    /// authority. They catch an accidental plan edit before an hours-long run;
+    /// authority. They catch an accidental plan edit before a full run;
     /// readers validate emitted observations structurally rather than copying
     /// the numbers or coordinate tables.
-    static func fullPlanIsApproved() -> Bool {
-        let contexts = staticContexts()
+    static func fullPlanIsApproved(osMajor: Int = currentOSMajor) -> Bool {
+        let contexts = staticContexts(osMajor: osMajor)
         let consumers = contexts.filter(\.requiresCatalog)
         let consumerGroups = Dictionary(grouping: consumers) {
             "\($0.appearance.rawValue)|\($0.variant)|\($0.main)"
         }
-        return contexts.count == approvedStaticObservationCount
+        let expectedCount = osMajor == 27
+            ? macOS27StaticObservationCount
+            : legacyStaticObservationCount
+        return contexts.count == expectedCount
             && Set(contexts.map(\.cell.identity)).count == contexts.count
             && consumers.count == approvedConsumerCount
             && Set(consumers.map(\.cell.identity)).count == consumers.count
@@ -302,12 +439,12 @@ enum GlassLabGoldenPlan {
     /// Fixed quick signal, captured by the same walker as Full. Twenty-four
     /// product anchors cover both appearances, variants, and participation at
     /// 48/200/320 points; Variant 4 and 6 add adaptive/alternate topology.
-    static func driftContexts() -> [StaticContext] {
+    static func driftContexts(osMajor: Int = currentOSMajor) -> [StaticContext] {
         let sizeSentinels = Set<Double>([48, 200, 320])
-        let product = catalogContexts().filter {
+        let product = catalogContexts(osMajor: osMajor).filter {
             sizeSentinels.contains(min($0.width, $0.height))
         }
-        let research = staticContexts().filter {
+        let research = staticContexts(osMajor: osMajor).filter {
             $0.label == "research-core"
                 && [4, 6].contains($0.variant)
                 && $0.subvariant == nil
@@ -318,9 +455,9 @@ enum GlassLabGoldenPlan {
         return product + research
     }
 
-    static func driftPlanIsApproved() -> Bool {
-        let full = Set(staticContexts().map(\.cell.identity))
-        let contexts = driftContexts()
+    static func driftPlanIsApproved(osMajor: Int = currentOSMajor) -> Bool {
+        let full = Set(staticContexts(osMajor: osMajor).map(\.cell.identity))
+        let contexts = driftContexts(osMajor: osMajor)
         let consumers = contexts.filter(\.requiresCatalog)
         return contexts.count == approvedDriftObservationCount
             && Set(contexts.map(\.cell.identity)).count == contexts.count
@@ -330,34 +467,86 @@ enum GlassLabGoldenPlan {
 
     // MARK: - Dynamic plan
 
-    struct DynamicContext {
+    struct DynamicContext: Equatable {
         let slice: String
         let shortSide: Double
         let main: Bool
         let appearance: GlassLabTestAppearance
         let backdrop: GlassLabBackdropMode
-        let tinted: Bool
+        let tintPreset: GlassLabTintPreset
+        let usage: GlassLabSemanticUsage
         let direction: GlassLabMaterializeDirection
+        let animationMode: GlassLabMaterializeAnimationMode
+        let glassAmount: Double?
+
+        var lifecycleIdentity: String {
+            [
+                slice, String(shortSide), String(main), appearance.rawValue,
+                backdrop.rawValue, tintPreset.descriptor.label,
+                usage.displayName, animationMode.rawValue,
+                glassAmount.map { String($0) } ?? "-",
+            ].joined(separator: "|")
+        }
+
+        var identity: String {
+            lifecycleIdentity + "|" + direction.rawValue
+        }
     }
 
     static let dynamicShortSides: [Double] = [48, 200, 400]
 
-    static func dynamicContexts() -> [DynamicContext] {
+    static func dynamicContexts(osMajor: Int = currentOSMajor) -> [DynamicContext] {
+        let baselineAmount: Double? = osMajor == 27 ? 0.5 : nil
         var contexts: [DynamicContext] = []
+        var identities = Set<String>()
+
+        func append(
+            slice: String,
+            shortSide: Double,
+            main: Bool,
+            appearance: GlassLabTestAppearance,
+            backdrop: GlassLabBackdropMode,
+            tintPreset: GlassLabTintPreset,
+            usage: GlassLabSemanticUsage,
+            direction: GlassLabMaterializeDirection,
+            animationMode: GlassLabMaterializeAnimationMode,
+            glassAmount: Double?
+        ) {
+            let candidate = DynamicContext(
+                slice: slice,
+                shortSide: shortSide,
+                main: main,
+                appearance: appearance,
+                backdrop: backdrop,
+                tintPreset: tintPreset,
+                usage: usage,
+                direction: direction,
+                animationMode: animationMode,
+                glassAmount: glassAmount
+            )
+            guard identities.insert(candidate.identity).inserted else { return }
+            contexts.append(candidate)
+        }
+
         for shortSide in dynamicShortSides {
             for main in [false, true] {
                 for appearance in GlassLabTestAppearance.controlledCases {
                     for tinted in [false, true] {
-                        for direction in GlassLabMaterializeDirection.allCases {
-                            contexts.append(DynamicContext(
-                                slice: "core",
-                                shortSide: shortSide,
-                                main: main,
-                                appearance: appearance,
-                                backdrop: .light,
-                                tinted: tinted,
-                                direction: direction
-                            ))
+                        for usage in [GlassLabSemanticUsage.regular, .clear] {
+                            for direction in GlassLabMaterializeDirection.allCases {
+                                append(
+                                    slice: "core",
+                                    shortSide: shortSide,
+                                    main: main,
+                                    appearance: appearance,
+                                    backdrop: .light,
+                                    tintPreset: tinted ? .coral50 : .none,
+                                    usage: usage,
+                                    direction: direction,
+                                    animationMode: .linear,
+                                    glassAmount: baselineAmount
+                                )
+                            }
                         }
                     }
                 }
@@ -368,15 +557,20 @@ enum GlassLabGoldenPlan {
         // model state. Deleting an axis whose finding is "this axis does
         // nothing" deletes the finding along with it.
         for main in [false, true] {
-            contexts.append(DynamicContext(
-                slice: "backdrop",
-                shortSide: referenceHeight,
-                main: main,
-                appearance: .light,
-                backdrop: .dark,
-                tinted: false,
-                direction: .insertion
-            ))
+            for usage in [GlassLabSemanticUsage.regular, .clear] {
+                append(
+                    slice: "backdrop",
+                    shortSide: referenceHeight,
+                    main: main,
+                    appearance: .light,
+                    backdrop: .dark,
+                    tintPreset: .none,
+                    usage: usage,
+                    direction: .insertion,
+                    animationMode: .linear,
+                    glassAmount: baselineAmount
+                )
+            }
         }
 
         // Re-capture the four Regular/Clear × Main cells that anchor the
@@ -384,17 +578,153 @@ enum GlassLabGoldenPlan {
         // repeatability evidence; `slice` distinguishes the second sweep while
         // the shared cell coordinate deliberately remains identical.
         for main in [false, true] {
-            contexts.append(DynamicContext(
-                slice: "repeat",
-                shortSide: referenceHeight,
-                main: main,
-                appearance: .light,
-                backdrop: .light,
-                tinted: false,
-                direction: .insertion
-            ))
+            for usage in [GlassLabSemanticUsage.regular, .clear] {
+                append(
+                    slice: "repeat",
+                    shortSide: referenceHeight,
+                    main: main,
+                    appearance: .light,
+                    backdrop: .light,
+                    tintPreset: .none,
+                    usage: usage,
+                    direction: .insertion,
+                    animationMode: .linear,
+                    glassAmount: baselineAmount
+                )
+            }
         }
-        return contexts
+
+        if osMajor == 27 {
+            typealias Condition = (
+                slice: String, shortSide: Double, main: Bool,
+                appearance: GlassLabTestAppearance,
+                backdrop: GlassLabBackdropMode,
+                tintPreset: GlassLabTintPreset,
+                usage: GlassLabSemanticUsage
+            )
+            var conditions: [Condition] = []
+
+            for appearance in GlassLabTestAppearance.controlledCases {
+                for main in [false, true] {
+                    for usage in [GlassLabSemanticUsage.regular, .clear] {
+                        conditions.append((
+                            "core", referenceHeight, main, appearance,
+                            .light, .none, usage
+                        ))
+                    }
+                }
+            }
+            for shortSide in [48.0, 400.0] {
+                conditions.append((
+                    "core", shortSide, true, .light,
+                    .light, .none, .regular
+                ))
+            }
+            conditions.append((
+                "backdrop", referenceHeight, true, .light,
+                .dark, .none, .regular
+            ))
+            conditions.append((
+                "core", referenceHeight, true, .light,
+                .light, .coral50, .regular
+            ))
+
+            for condition in conditions {
+                for amount in glassSentinelAmounts {
+                    for direction in GlassLabMaterializeDirection.allCases {
+                        append(
+                            slice: condition.slice,
+                            shortSide: condition.shortSide,
+                            main: condition.main,
+                            appearance: condition.appearance,
+                            backdrop: condition.backdrop,
+                            tintPreset: condition.tintPreset,
+                            usage: condition.usage,
+                            direction: direction,
+                            animationMode: .linear,
+                            glassAmount: amount
+                        )
+                    }
+                }
+                for amount in glassAnchorAmounts {
+                    for direction in GlassLabMaterializeDirection.allCases {
+                        append(
+                            slice: condition.slice,
+                            shortSide: condition.shortSide,
+                            main: condition.main,
+                            appearance: condition.appearance,
+                            backdrop: condition.backdrop,
+                            tintPreset: condition.tintPreset,
+                            usage: condition.usage,
+                            direction: direction,
+                            animationMode: .systemDefault,
+                            glassAmount: amount
+                        )
+                    }
+                }
+            }
+        }
+
+        // A removal must immediately follow its real insertion. Regrouping
+        // after the coordinate union preserves that physical lifecycle even
+        // when the removal was added by a later sparse axis.
+        let grouped = Dictionary(grouping: contexts, by: \.lifecycleIdentity)
+        var seenLifecycles = Set<String>()
+        var ordered: [DynamicContext] = []
+        for context in contexts where seenLifecycles.insert(context.lifecycleIdentity).inserted {
+            let group = grouped[context.lifecycleIdentity] ?? []
+            for direction in GlassLabMaterializeDirection.allCases {
+                if let run = group.first(where: { $0.direction == direction }) {
+                    ordered.append(run)
+                }
+            }
+        }
+        return ordered
+    }
+
+    /// Checkpoint boundaries use complete physical lifecycles. A paired
+    /// removal therefore always resumes from the insertion captured in the
+    /// same process and can never be split across two chunk artifacts.
+    static func dynamicBatches(
+        osMajor: Int = currentOSMajor
+    ) -> [[DynamicContext]] {
+        var batches: [[DynamicContext]] = []
+        for context in dynamicContexts(osMajor: osMajor) {
+            if let index = batches.indices.last,
+               batches[index].first?.lifecycleIdentity == context.lifecycleIdentity {
+                batches[index].append(context)
+            } else {
+                batches.append([context])
+            }
+        }
+        return batches
+    }
+
+    static func dynamicPlanIsApproved(osMajor: Int = currentOSMajor) -> Bool {
+        let contexts = dynamicContexts(osMajor: osMajor)
+        let batches = dynamicBatches(osMajor: osMajor)
+        let expectedCount = osMajor == 27
+            ? macOS27DynamicRunCount
+            : legacyDynamicRunCount
+        guard contexts.count == expectedCount,
+              Set(contexts.map(\.identity)).count == contexts.count,
+              batches.flatMap({ $0 }) == contexts,
+              batches.allSatisfy({ batch in
+                  guard let identity = batch.first?.lifecycleIdentity else {
+                      return false
+                  }
+                  return batch.allSatisfy { $0.lifecycleIdentity == identity }
+              }) else {
+            return false
+        }
+        for (index, context) in contexts.enumerated() where context.direction == .removal {
+            guard index > 0,
+                  contexts[index - 1].direction == .insertion,
+                  contexts[index - 1].lifecycleIdentity == context.lifecycleIdentity else {
+                return false
+            }
+        }
+        return true
     }
 }
 
@@ -415,66 +745,44 @@ extension GoldenCell {
             subdued: context.subdued,
             appearance: appearance == .system ? nil : appearance.rawValue,
             backdrop: backdrop.rawValue,
-            tint: "None",
+            tint: context.tintPreset.descriptor.label,
             width: context.width,
             height: context.height,
             cornerRadius: context.cornerRadius,
             host: context.host.rawValue,
-            direction: nil
+            direction: nil,
+            glassAmount: context.glassAmount
         )
     }
 }
 
 extension GoldenDynamicSample {
-    /// Model side only. `presentation`, `presentationLayers`, `modelLayers`,
-    /// and `animations` are dropped: no accepted learning reads them, and
-    /// together they were 70% of the archive's bytes. `layerLines` stays
-    /// because the SDF inflation claim parses element frames out of it.
+    /// Keep one complete native observation. Existing learnings derive their
+    /// compact filter/effect views from this canonical snapshot.
     @MainActor
     init(sample: GlassLabMaterializeSample) {
-        let model = sample.snapshot.model
-        let filters = model.filters.map { filter in
-            Filter(
-                name: filter.name,
-                path: filter.path,
-                layerClass: filter.layerClass,
-                location: filter.location,
-                inputs: Dictionary(
-                    filter.inputs.map { ($0.key, $0.value) },
-                    uniquingKeysWith: { first, _ in first }
-                )
-            )
-        }
-        let face = filters
+        let faceValue = sample.snapshot.model.filters
             .first { $0.name == "glassBackground" }?
-            .inputs["inputFaceOpacity"]
-            .flatMap(Double.init)
+            .inputs.first { $0.key == "inputFaceOpacity" }?
+            .value
+        let face = faceValue.flatMap { Double($0) }
         self.init(
             progress: face,
             requestedProgress: sample.requestedProgress,
             elapsed: sample.elapsed,
             phase: sample.phase,
-            filters: filters,
-            effects: model.effects.map { effect in
-                Effect(
-                    effectClass: effect.effectClass,
-                    path: effect.path,
-                    layerClass: effect.layerClass,
-                    layerOpacity: effect.layerOpacity,
-                    inputs: Dictionary(
-                        effect.inputs.map { ($0.key, $0.value) },
-                        uniquingKeysWith: { first, _ in first }
-                    )
-                )
-            },
-            layerLines: model.layerLines
+            snapshot: sample.snapshot
         )
     }
 }
 
 extension GoldenDynamicRun {
     @MainActor
-    init(capture: GlassLabMaterializeCapture, slice: String) {
+    init(
+        capture: GlassLabMaterializeCapture,
+        slice: String,
+        glassAmount: Double?
+    ) {
         let context = capture.context
         // Regular and Clear are addressed by their private variant index here
         // so the dynamic and static sections share one axis, rather than one
@@ -498,7 +806,8 @@ extension GoldenDynamicRun {
                 height: context.glassHeight,
                 cornerRadius: context.cornerRadius,
                 host: context.hostType,
-                direction: capture.direction.rawValue.lowercased()
+                direction: capture.direction.rawValue.lowercased(),
+                glassAmount: glassAmount
             ),
             accepted: context.actualMain == context.requestedMain
                 && !context.actualKey
@@ -510,9 +819,12 @@ extension GoldenDynamicRun {
             effectiveAppearance: context.effectiveAppearance,
             tintComponents: context.tint.components,
             animationMode: capture.animationMode.rawValue,
+            requestedDuration: capture.requestedDuration,
             maximumAttachedAnimationDuration:
                 capture.maximumAttachedAnimationDuration,
-            samples: capture.samples.map(GoldenDynamicSample.init(sample:))
+            samplingDuration: capture.samplingDuration,
+            samples: capture.samples.map(GoldenDynamicSample.init(sample:)),
+            context: capture.context
         )
     }
 }

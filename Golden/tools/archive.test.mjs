@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
-import { compareArchives, validateArchive } from "./lib/archive.mjs";
+import {
+  captureContextsMatch, compareArchives, copyArchive, readArchiveJSON, validateArchive,
+  validateDynamicDocument, validateCaptureDocument, validateStaticDocument,
+} from "./lib/archive.mjs";
+import { dynamicPairingProblems } from "./lib/dynamic-contract.mjs";
 
 const property = (value, state = "value") => ({
   state,
@@ -136,6 +144,86 @@ function dynamicRuns() {
   return runs;
 }
 
+test("Core chunks validate without pretending to be complete archives", () => {
+  const staticDocument = {
+    schemaVersion: 2,
+    consumerCells: [],
+    observations: [{ cell: cell(10), snapshot: snapshot(11) }],
+  };
+  assert.deepEqual(
+    validateStaticDocument(staticDocument, { requireConsumerCells: false }),
+    [],
+  );
+  assert.ok(validateStaticDocument(staticDocument).some((problem) =>
+    problem.includes("no Consumer cells")));
+
+  const capture = {
+    schemaVersion: 2,
+    operatingSystem: "Version 26.0 (Build 25A1)",
+    architecture: "arm64",
+    displaySignature: "display",
+    capturedAt: "2026-08-12T00:00:00Z",
+  };
+  const dynamicDocument = {
+    schemaVersion: 2,
+    runs: [run(200, "repeat", "insertion")],
+  };
+  assert.deepEqual(
+    validateDynamicDocument(dynamicDocument, capture, { expectedRuns: 1 }),
+    [],
+  );
+});
+
+test("zero backdrop scale remains valid only for research subvariants", () => {
+  const capture = {
+    schemaVersion: 2,
+    operatingSystem: "Version 27.0 (Build 26A1)",
+    architecture: "arm64",
+    displaySignature: "display",
+    capturedAt: "2026-08-12T00:00:00Z",
+    transparency: {
+      version: 1,
+      baselineAmount: 0.5,
+      control: "processOverridePerObservation",
+    },
+  };
+  const resolved = snapshot(200);
+  for (const layer of resolved.layers) {
+    Object.assign(layer, {
+      position: { x: 0, y: 0 },
+      anchorPoint: { x: 0.5, y: 0.5 },
+      zPosition: 0,
+      contentsScale: 2,
+      transform: Array(16).fill(0),
+      sublayerTransform: Array(16).fill(0),
+      affineTransform: Array(6).fill(0),
+    });
+    if (layer.layerClass === "CABackdropLayer") {
+      layer.properties.scale = property(number(0));
+    }
+  }
+  const observation = {
+    cell: {
+      ...cell(199),
+      variant: 2,
+      subvariant: "menu",
+      glassAmount: 0.5,
+    },
+    snapshot: resolved,
+  };
+  assert.deepEqual(validateCaptureDocument(capture, {
+    schemaVersion: 2,
+    consumerCells: [],
+    observations: [observation],
+  }), []);
+  observation.cell.subvariant = null;
+  assert.ok(validateCaptureDocument(capture, {
+    schemaVersion: 2,
+    consumerCells: [],
+    observations: [observation],
+  }).some((problem) => problem.includes("product-reachable")));
+});
+
 function tintCell(index) {
   return {
     isLightAppearance: index < 4,
@@ -266,6 +354,67 @@ test("macOS 26 has the same archive model without inventing Semantic evidence", 
   assert.deepEqual(validateArchive(candidate), []);
 });
 
+test("macOS 26 rejects the macOS 27-only Glass amount coordinate", () => {
+  const candidate = archive();
+  candidate.capture.operatingSystem = "Version 26.6 (Build 25G70)";
+  candidate.platform = {
+    ...candidate.platform, version: "26.6", major: 26, build: "25G70",
+  };
+  for (const key of [
+    "tintSweep", "tintFocused", "tintHue", "tintSync", "tintWideGamut",
+  ]) candidate[key].operatingSystem = candidate.capture.operatingSystem;
+  candidate.semantic = null;
+  candidate.static.observations[0].cell.glassAmount = 0.5;
+  assert.ok(validateArchive(candidate).some((problem) =>
+    problem.includes("glassAmount must be absent outside macOS 27")));
+});
+
+test("canonical archives require matching auxiliary capture context", () => {
+  const candidate = archive();
+  candidate.capture.transparency = {
+    version: 1,
+    baselineAmount: 0.5,
+    control: "processOverridePerObservation",
+  };
+  const auxiliary = [
+    candidate.tintSweep, candidate.tintFocused, candidate.tintHue,
+    candidate.tintSync, candidate.tintWideGamut, candidate.semantic,
+  ];
+  for (const document of auxiliary) {
+    document.transparency = {
+      version: 1,
+      amount: 0.5,
+      control: "processOverride",
+    };
+    document.capture = {
+      ...candidate.capture,
+      capturedAt: "2026-08-12T00:01:00Z",
+      transparency: document.transparency,
+    };
+  }
+  for (const document of [candidate.tintSweep, candidate.tintFocused, candidate.tintHue]) {
+    document.environment.glassAmount = 0.5;
+  }
+
+  let problems = validateArchive(candidate);
+  assert.equal(problems.some((problem) => problem.includes("capture context")), false);
+  assert.equal(captureContextsMatch(candidate.capture, candidate.semantic.capture), true);
+
+  const architecture = candidate.semantic.capture.architecture;
+  candidate.semantic.capture.architecture = architecture === "arm64" ? "x86_64" : "arm64";
+  assert.equal(captureContextsMatch(candidate.capture, candidate.semantic.capture), false);
+  candidate.semantic.capture.architecture = architecture;
+  candidate.semantic.capture.displaySignature = "different display";
+  problems = validateArchive(candidate);
+  assert.ok(problems.some((problem) =>
+    problem.includes("semantic.usage-trees capture context differs")));
+
+  delete candidate.semantic.capture;
+  problems = validateArchive(candidate);
+  assert.ok(problems.some((problem) =>
+    problem.includes("semantic.usage-trees lacks capture context")));
+});
+
 test("paired Tint evidence cannot pass with empty or partial planned coverage", () => {
   const empty = archive();
   empty.tintSync.rows = [];
@@ -285,6 +434,43 @@ test("Dynamic removal must continue from the exact paired insertion endpoint", (
     problem.includes("preflight does not match insertion run")));
 });
 
+test("System Default removal may retain only a fully dematerialized native tree", () => {
+  const insertion = run(0, "core", "insertion");
+  const removal = run(0, "core", "removal", "present", "retained");
+  removal.animationMode = insertion.animationMode = "System Default";
+  removal.samples[0] = structuredClone(insertion.samples.at(-1));
+  removal.samples[0].phase = "preflight";
+  removal.samples[0].requestedProgress = 0;
+  removal.samples.at(-1).progress = 0;
+  removal.samples.at(-1).snapshot = {
+    animations: [],
+    model: {
+      filters: [{ name: "glassBackground", path: "root.backdrop" }],
+      effects: [{ effectClass: "CASDFKeyFillHighlightEffect", layerOpacity: 0 }],
+    },
+    modelLayers: [{ path: "root.backdrop", opacity: 0 }],
+  };
+  assert.deepEqual(dynamicPairingProblems([insertion, removal], "Dynamic", {
+    enforceCardinality: false,
+  }), []);
+
+  removal.samples.at(-1).progress = 0.0005;
+  removal.samples.at(-1).snapshot.modelLayers[0].opacity = 0.0005;
+  assert.deepEqual(dynamicPairingProblems([insertion, removal], "Dynamic", {
+    enforceCardinality: false,
+  }), []);
+
+  removal.samples.at(-1).snapshot.modelLayers[0].opacity = 0.01;
+  assert.ok(dynamicPairingProblems([insertion, removal], "Dynamic", {
+    enforceCardinality: false,
+  }).some((problem) => problem.includes("settled endpoint does not match")));
+  removal.samples.at(-1).snapshot.modelLayers[0].opacity = 0;
+  removal.samples.at(-1).snapshot.animations.push({ duration: 0.1 });
+  assert.ok(dynamicPairingProblems([insertion, removal], "Dynamic", {
+    enforceCardinality: false,
+  }).some((problem) => problem.includes("settled endpoint does not match")));
+});
+
 test("whole-archive comparison reports value drift without inventing module gates", () => {
   const baseline = archive();
   const candidate = structuredClone(baseline);
@@ -295,6 +481,35 @@ test("whole-archive comparison reports value drift without inventing module gate
   assert.equal(report.equivalent, false);
   assert.equal(report.static.changedObservations, 1);
   assert.equal(report.static.topologyChangedObservations, 0);
+});
+
+test("legacy comparison measures the midpoint but reports axis coordinates as new coverage", () => {
+  const baseline = archive();
+  const candidate = structuredClone(baseline);
+  candidate.directory = "/tmp/candidate";
+  candidate.capture.transparency = {
+    version: 1,
+    baselineAmount: 0.5,
+    control: "processOverridePerObservation",
+  };
+  for (const observation of candidate.static.observations) {
+    observation.cell.glassAmount = 0.5;
+  }
+  for (const run of candidate.dynamic.runs) run.cell.glassAmount = 0.5;
+  const extraStatic = structuredClone(candidate.static.observations[0]);
+  extraStatic.cell.glassAmount = 0.25;
+  candidate.static.observations.push(extraStatic);
+  const extraDynamic = structuredClone(candidate.dynamic.runs[0]);
+  extraDynamic.cell.glassAmount = 0.25;
+  candidate.dynamic.runs.push(extraDynamic);
+
+  const report = compareArchives(baseline, candidate);
+  assert.equal(report.transparency.status, "legacy-baseline-projection");
+  assert.equal(report.measuredEquivalent, true);
+  assert.equal(report.coverageComplete, false);
+  assert.equal(report.equivalent, false);
+  assert.equal(report.static.coordinates.candidateOutsideProjection, 1);
+  assert.equal(report.dynamic.coverage.coordinates.candidateOutsideProjection, 1);
 });
 
 test("session-volatile headroom is reported without turning honest drift red", () => {
@@ -320,4 +535,38 @@ test("session-volatile headroom is reported without turning honest drift red", (
   );
   assert.equal(semantic.volatile.inputMaxHeadroom.differences, 1);
   assert.ok(semantic.volatile.inputMaxHeadroom.examples.length > 0);
+});
+
+test("accepted storage compresses large documents behind the logical JSON names", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "golden-storage-"));
+  const source = path.join(root, "source");
+  const destination = path.join(root, "accepted");
+  try {
+    await mkdir(source);
+    const staticDocument = { schemaVersion: 2, observations: [{ value: "static" }] };
+    const dynamicDocument = { schemaVersion: 2, runs: [{ value: "dynamic" }] };
+    await Promise.all([
+      writeFile(path.join(source, "capture.json"), "{}\n"),
+      writeFile(path.join(source, "static.json"), JSON.stringify(staticDocument)),
+      writeFile(path.join(source, "dynamic.json"), JSON.stringify(dynamicDocument)),
+      writeFile(path.join(source, "semantic-usage-trees.json"), "{\"entries\":[]}\n"),
+      writeFile(path.join(source, "tint-parameterization-sweep.json"), "{\n  \"rows\": []\n}\n"),
+    ]);
+    await copyArchive(source, destination);
+    assert.equal(existsSync(path.join(destination, "static.json")), false);
+    assert.equal(existsSync(path.join(destination, "dynamic.json")), false);
+    assert.equal(existsSync(path.join(destination, "static.json.gz")), true);
+    assert.equal(existsSync(path.join(destination, "dynamic.json.gz")), true);
+    assert.equal(existsSync(path.join(destination, "semantic-usage-trees.json.gz")), true);
+    assert.equal(existsSync(path.join(destination, "tint-parameterization-sweep.json.gz")), false);
+    assert.deepEqual(await readArchiveJSON(destination, "static.json"), staticDocument);
+    assert.deepEqual(await readArchiveJSON(destination, "dynamic.json"), dynamicDocument);
+    assert.equal(await readFile(path.join(destination, "capture.json"), "utf8"), "{}\n");
+    assert.equal(
+      await readFile(path.join(destination, "tint-parameterization-sweep.json"), "utf8"),
+      "{\"rows\":[]}\n",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

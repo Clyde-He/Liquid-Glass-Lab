@@ -167,6 +167,7 @@ struct GlassLabView: View {
         .background(GlassLabControlWindowAnchor(state: state).frame(width: 0, height: 0))
         .navigationTitle(state.selectedSection.navigationTitle)
         .onAppear {
+            state.transparency.refresh()
             state.testWindow.activate(with: state)
             configureSemanticTransitionProbe()
             scheduleLiveReadoutRefresh(refreshSchema: true)
@@ -176,6 +177,9 @@ struct GlassLabView: View {
         }
         .onChange(of: liveReadoutTrigger) {
             state.testWindow.sync(with: state)
+            scheduleLiveReadoutRefresh()
+        }
+        .onChange(of: state.transparency.resolvedAmount) {
             scheduleLiveReadoutRefresh()
         }
         .onChange(of: overridePayloadTrigger) {
@@ -561,11 +565,11 @@ struct GlassLabView: View {
             }
         }
 
-        controlGroupCard("Owner Layer · Render Margin") {
+        controlGroupCard("Owner Layer · Sampling") {
             geometryControls(
                 state: labState,
                 snapshot: snapshot,
-                keys: ["backdropMarginWidth"]
+                keys: ["backdropMarginWidth", "backdropScale"]
             )
         }
     }
@@ -1224,6 +1228,26 @@ struct GlassLabView: View {
     private func generalWindowSections(state labState: GlassLabState) -> some View {
         @Bindable var state = labState
 
+        if GlassSystemTintAmount.isSupported {
+            Section("Glass Amount") {
+                Toggle("Follow System", isOn: Binding(
+                    get: { state.transparency.amount == nil },
+                    set: { state.transparency.setAmount($0 ? nil : (state.transparency.resolvedAmount ?? 0.5)) }
+                ))
+                labeledSlider("Amount", value: Binding(
+                    get: { state.transparency.resolvedAmount ?? 0.5 },
+                    set: { state.transparency.setAmount($0) }
+                ), in: 0...1, format: "%.3f")
+                .disabled(state.transparency.amount == nil)
+                Text("Effective: \(state.transparency.resolvedAmount.map { String(format: "%.3f", $0) } ?? "Unknown") · 0 Transparent / 1 Opaque")
+                    .font(.callout.monospacedDigit())
+                Text("Manual amount applies to native Glass throughout this Lab process. Golden sweeps its declared coordinates and restores this setting afterward.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .disabled(isCapturingMatrix || state.isCapturingRecipeMatrix || isCapturingMaterialize)
+        }
+
         Section("Test Window Context") {
             Toggle(isOn: $state.isTestWindowVisible) {
                 LabRowLabel(
@@ -1441,7 +1465,7 @@ struct GlassLabView: View {
         let isEditable = state.shaderOverridesEnabled && snapshot != nil
 
         return Group {
-            Text("Layer geometry, not filter inputs. Minimum uses -10000 as an unbounded runtime sentinel. At 480×200 the active branch resolves margin 70 / reach ~40; the neither-key-nor-main Panel resolves 0.5 / 1.5.")
+            Text("Backdrop Scale controls sampling resolution; native Regular selects 0.125, 0.25 or 0.5 and Clear uses 0.5. Margin and SDF limits control render extent. Minimum uses -10000 for an unbounded inner field.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             ForEach(knobs, id: \.key) { knob in
@@ -1544,7 +1568,8 @@ struct GlassLabView: View {
         _ label: String,
         value: Binding<Double>,
         in range: ClosedRange<Double>,
-        step: Double? = nil
+        step: Double? = nil,
+        format: String = "%.0f"
     ) -> some View {
         HStack(spacing: 12) {
             Text(label)
@@ -1557,7 +1582,7 @@ struct GlassLabView: View {
                 }
             }
                 .frame(width: InspectorLayout.sliderWidth)
-            Text(String(format: "%.0f", value.wrappedValue))
+            Text(String(format: format, value.wrappedValue))
                 .font(.callout.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: InspectorLayout.valueWidth, alignment: .trailing)

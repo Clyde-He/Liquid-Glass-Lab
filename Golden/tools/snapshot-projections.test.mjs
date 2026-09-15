@@ -54,7 +54,7 @@ function snapshot() {
         masksToBounds: false,
         cornerRadius: 16,
         hasMask: false,
-        properties: { marginWidth: property(number(70)) },
+        properties: { marginWidth: property(number(70)), scale: property(number(0.5)) },
       },
       {
         path: "root.rim",
@@ -124,9 +124,15 @@ test("one Snapshot projects typed scalar and recursive research views", () => {
   assert.equal(scalar.inputs.inputMaxHeadroom, 1.2, "research keeps display headroom");
   assert.deepEqual(scalar.points.inputShadowOffset, { x: 0, y: 8 });
   assert.equal(scalar.geometry.backdropMarginWidth, 70);
+  assert.equal(scalar.geometry.backdropScale, 0.5);
   assert.equal(tree.passes.shader.properties.inputBackdropAware.value, "1");
   assert.equal(tree.passes.shader.properties.inputOptional.state, "nil");
   assert.equal(tree.layers["root.backdrop"].layerClass, "CABackdropLayer");
+  assert.equal(tree.layers["root.backdrop"].properties.scale.value, "0.5");
+  const changed = structuredClone(document);
+  changed.observations[0].snapshot.layers[0].properties.scale = property(number(0.125));
+  assert.notEqual(projectStaticTree(changed).rows[0].valueSignature, tree.valueSignature,
+    "Backdrop scale drift must be visible even when every shader input matches");
 });
 
 test("Consumer projection is complete, typed, and rejects unreadable critical values", () => {

@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  closeSync, existsSync, openSync, readFileSync, rmSync,
+} from "node:fs";
 import {
   copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile,
 } from "node:fs/promises";
@@ -9,8 +12,9 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
   ARCHIVE_FILES, acceptedArchives, admitArchive, admitCoreArchive, compareArchives,
-  compareStaticDocuments, copyArchive, finalizeStaging, platformFromCapture,
-  validateStaticDocument,
+  captureContextsMatch, compareStaticDocuments, copyArchive, finalizeStaging, platformFromCapture,
+  validateCaptureDocument, validateDynamicDocument, validateStaticDocument,
+  compareTransparency,
 } from "./lib/archive.mjs";
 import { importArtifactEnvelope } from "./lib/artifact-handoff.mjs";
 import { catalogBytes, catalogFromArchive } from "./lib/catalog.mjs";
@@ -30,6 +34,8 @@ const args = process.argv.slice(3);
 function usage(message) {
   if (message) console.error(message);
   console.error(`usage:
+  golden.mjs tint-model --os macOS-27 [--check]
+  golden.mjs fixtures [--check]
   golden.mjs drift --app EXECUTABLE --os macOS-N [--output REPORT]
   golden.mjs capture --app EXECUTABLE --output STAGING
   golden.mjs promote --staging STAGING [--accept]
@@ -58,51 +64,359 @@ const TINT_CHECKPOINT_FLAGS = new Set([
   "--capture-tint-parameterization-phase-2c",
 ]);
 
-function runDriver(app, flag, destination) {
+function runDriver(
+  app, flag, destination, { transparency = false, extraArgs = [] } = {},
+) {
   const handoff = `@temporary/golden-${process.pid}-${path.basename(destination)}`;
   const checkpoint = TINT_CHECKPOINT_FLAGS.has(flag) && existsSync(destination)
     ? readFileSync(destination) : null;
-  const driverArgs = [flag, handoff, "--artifact-stdout"];
+  const driverArgs = [flag, handoff, ...extraArgs, "--artifact-stdout"];
+  if (transparency) {
+    driverArgs.push("--golden-transparency", "-NSGlassTintAmount", "0.5");
+  }
   if (checkpoint) driverArgs.push("--checkpoint-stdin");
-  const result = spawnSync(app, driverArgs, {
-    encoding: "utf8", input: checkpoint ?? undefined, maxBuffer: 128 * 1024 * 1024,
+  const stdoutPath = path.join(
+    "/private/tmp",
+    `.golden-driver-${process.pid}-${Date.now()}-${path.basename(destination)}.stdout`,
+  );
+  const stdout = openSync(stdoutPath, "w");
+  let result;
+  try {
+    result = spawnSync(app, driverArgs, {
+      input: checkpoint ?? undefined,
+      stdio: [checkpoint ? "pipe" : "ignore", stdout, "inherit"],
+    });
+  } finally {
+    closeSync(stdout);
+  }
+  const artifact = readFileSync(stdoutPath);
+  try {
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      if (TINT_CHECKPOINT_FLAGS.has(flag) && artifact.length > 0) {
+        try {
+          importArtifactEnvelope(artifact, destination);
+          console.error(`Tint checkpoint preserved after ${flag} stopped`);
+        } catch {
+          // The original driver failure remains the useful error.
+        }
+      }
+      throw new Error(`${flag} exited ${result.status ?? "by signal"}`);
+    }
+    if (artifact.length === 0) throw new Error(`${flag} returned no artifact`);
+    importArtifactEnvelope(artifact, destination);
+  } finally {
+    rmSync(stdoutPath, { force: true });
+  }
+}
+
+const STATIC_CHUNK_SIZE = 100;
+const DYNAMIC_BATCH_CHUNK_SIZE = 12;
+
+function queryCapturePlan(app) {
+  const result = spawnSync(app, ["--print-golden-plan", "--plan-json"], {
+    encoding: "utf8",
   });
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) throw result.error;
   if (result.status !== 0) {
-    if (TINT_CHECKPOINT_FLAGS.has(flag) && result.stdout?.trim()) {
+    throw new Error(`--print-golden-plan exited ${result.status ?? "by signal"}`);
+  }
+  let plan;
+  try {
+    plan = JSON.parse(result.stdout.trim());
+  } catch (error) {
+    throw new Error(`--print-golden-plan returned invalid JSON: ${error.message}`);
+  }
+  const counts = plan?.dynamicBatchRunCounts;
+  if (plan?.schemaVersion !== 1 || !Number.isInteger(plan.osMajor)
+      || !Number.isInteger(plan.staticObservations) || plan.staticObservations <= 0
+      || !Number.isInteger(plan.dynamicRuns) || plan.dynamicRuns <= 0
+      || !Array.isArray(counts) || counts.length === 0
+      || counts.some((count) => !Number.isInteger(count) || count <= 0)
+      || counts.reduce((sum, count) => sum + count, 0) !== plan.dynamicRuns
+      || !plan.staticLabelFirstIndices
+      || Object.values(plan.staticLabelFirstIndices).some(
+        (index) => !Number.isInteger(index) || index < 0
+          || index >= plan.staticObservations,
+      )) {
+    throw new Error("--print-golden-plan returned an invalid checkpoint plan");
+  }
+  return plan;
+}
+
+function ranges(total, size) {
+  const values = [];
+  for (let start = 0; start < total; start += size) {
+    values.push({ start, count: Math.min(size, total - start) });
+  }
+  return values;
+}
+
+function captureIdentity(capture) {
+  return {
+    schemaVersion: capture?.schemaVersion ?? null,
+    operatingSystem: capture?.operatingSystem ?? null,
+    architecture: capture?.architecture ?? null,
+    displaySignature: capture?.displaySignature ?? null,
+    transparency: capture?.transparency ?? null,
+  };
+}
+
+function assertMatchingCapture(reference, candidate, label) {
+  if (JSON.stringify(captureIdentity(reference))
+      !== JSON.stringify(captureIdentity(candidate))) {
+    throw new Error(`${label} was captured in a different OS/build/display/transparency context`);
+  }
+}
+
+async function readStaticCheckpoint(directory, expectedCount, osMajor) {
+  const [capture, document] = await Promise.all([
+    readFile(path.join(directory, ARCHIVE_FILES.capture), "utf8").then(JSON.parse),
+    readFile(path.join(directory, ARCHIVE_FILES.static), "utf8").then(JSON.parse),
+  ]);
+  const problems = [
+    ...validateCaptureDocument(capture, document),
+    ...validateStaticDocument(document, { requireConsumerCells: false }),
+  ];
+  if (document?.observations?.length !== expectedCount) {
+    problems.push(`expected ${expectedCount} Static observations; got ${document?.observations?.length ?? 0}`);
+  }
+  if (platformFromCapture(capture).major !== osMajor) {
+    problems.push(`captured macOS major differs from plan ${osMajor}`);
+  }
+  if (problems.length) throw new Error(problems.join("; "));
+  return { capture, document };
+}
+
+async function readDynamicCheckpoint(directory, expectedCount, osMajor) {
+  const [capture, document] = await Promise.all([
+    readFile(path.join(directory, ARCHIVE_FILES.capture), "utf8").then(JSON.parse),
+    readFile(path.join(directory, ARCHIVE_FILES.dynamic), "utf8").then(JSON.parse),
+  ]);
+  const problems = [
+    ...validateCaptureDocument(capture),
+    ...validateDynamicDocument(document, capture, { expectedRuns: expectedCount }),
+  ];
+  if (platformFromCapture(capture).major !== osMajor) {
+    problems.push(`captured macOS major differs from plan ${osMajor}`);
+  }
+  if (problems.length) throw new Error(problems.join("; "));
+  return { capture, document };
+}
+
+async function writeCompactJSONAtomic(output, value) {
+  const temporary = path.join(
+    path.dirname(output), `.${path.basename(output)}.${process.pid}.tmp`,
+  );
+  await writeFile(temporary, `${JSON.stringify(value)}\n`);
+  await rename(temporary, output);
+}
+
+function duration(seconds) {
+  if (!Number.isFinite(seconds)) return "unknown";
+  const rounded = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(rounded / 3600);
+  const minutes = Math.floor((rounded % 3600) / 60);
+  const remainder = rounded % 60;
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m ${remainder}s`;
+}
+
+async function captureCore(app, partial) {
+  const coreFiles = [ARCHIVE_FILES.capture, ARCHIVE_FILES.static, ARCHIVE_FILES.dynamic];
+  const plan = queryCapturePlan(app);
+  const checkpointRoot = path.join(partial, ".core-checkpoints");
+  const manifestFile = path.join(checkpointRoot, "manifest.json");
+  const hasher = createHash("sha256");
+  hasher.update(await readFile(app));
+  const debugLibrary = path.join(
+    path.dirname(app), `${path.basename(app)}.debug.dylib`,
+  );
+  if (existsSync(debugLibrary)) hasher.update(await readFile(debugLibrary));
+  const fingerprint = hasher.digest("hex");
+  const manifest = {
+    schemaVersion: 1,
+    appFingerprint: fingerprint,
+    staticChunkSize: STATIC_CHUNK_SIZE,
+    dynamicBatchChunkSize: DYNAMIC_BATCH_CHUNK_SIZE,
+    plan,
+  };
+  let reusable = false;
+  if (existsSync(manifestFile)) {
+    try {
+      reusable = JSON.stringify(JSON.parse(await readFile(manifestFile, "utf8")))
+        === JSON.stringify(manifest);
+    } catch {
+      reusable = false;
+    }
+  }
+  if (!reusable) {
+    await rm(checkpointRoot, { recursive: true, force: true });
+    await Promise.all(coreFiles.map((file) => rm(
+      path.join(partial, file), { force: true },
+    )));
+    await mkdir(checkpointRoot, { recursive: true });
+    await writeCompactJSONAtomic(manifestFile, manifest);
+  } else {
+    console.error("Golden Core checkpoint manifest matches; validating saved chunks");
+  }
+
+  if (reusable && coreFiles.every((file) => existsSync(path.join(partial, file)))) {
+    try {
+      await admitCoreArchive(partial);
+      console.error("Golden Core already admitted; resuming auxiliary capture");
+      return;
+    } catch (error) {
+      console.error(`Existing Golden Core is incomplete: ${error.message}`);
+      await Promise.all(coreFiles.map((file) => rm(
+        path.join(partial, file), { force: true },
+      )));
+    }
+  }
+
+  const staticChunks = ranges(plan.staticObservations, STATIC_CHUNK_SIZE).map(
+    (range, index) => ({
+      ...range,
+      index,
+      directory: path.join(checkpointRoot, `static-${String(index).padStart(4, "0")}`),
+    }),
+  );
+  const preferredLabels = [
+    "glass-tint-interaction",
+    "glass-clear-key-boundary",
+    "glass-nonconsumer-sentinel",
+    "glass-scale",
+    "glass-geometry",
+    "glass-model-anchor",
+    ...Object.keys(plan.staticLabelFirstIndices).sort(),
+  ];
+  const priorityChunks = [...new Set(preferredLabels.map((label) =>
+    plan.staticLabelFirstIndices[label]).filter(Number.isInteger).map((index) =>
+    Math.floor(index / STATIC_CHUNK_SIZE)))];
+  const priority = new Map(priorityChunks.map((index, rank) => [index, rank]));
+  const staticCaptureOrder = [...staticChunks].sort((left, right) => {
+    const leftPriority = priority.get(left.index) ?? Number.MAX_SAFE_INTEGER;
+    const rightPriority = priority.get(right.index) ?? Number.MAX_SAFE_INTEGER;
+    return leftPriority - rightPriority || left.index - right.index;
+  });
+  const startedAt = Date.now();
+  let newlyCaptured = 0;
+  let completed = 0;
+  let referenceCapture = null;
+  for (const chunk of staticCaptureOrder) {
+    let saved = null;
+    if (existsSync(chunk.directory)) {
       try {
-        importArtifactEnvelope(result.stdout, destination);
-        console.error(`Tint checkpoint preserved after ${flag} stopped`);
-      } catch {
-        // The original driver failure remains the useful error.
+        saved = await readStaticCheckpoint(chunk.directory, chunk.count, plan.osMajor);
+      } catch (error) {
+        console.error(`Discarding invalid Static checkpoint ${chunk.index + 1}: ${error.message}`);
+        await rm(chunk.directory, { recursive: true, force: true });
       }
     }
-    throw new Error(`${flag} exited ${result.status ?? "by signal"}`);
+    if (!saved) {
+      console.error(
+        `Golden Static chunk ${chunk.index + 1}/${staticChunks.length}: rows ${chunk.start + 1}-${chunk.start + chunk.count}`,
+      );
+      runDriver(app, "--capture-golden-static-chunk", chunk.directory, {
+        extraArgs: ["--golden-start", String(chunk.start), "--golden-count", String(chunk.count)],
+      });
+      saved = await readStaticCheckpoint(chunk.directory, chunk.count, plan.osMajor);
+      newlyCaptured += chunk.count;
+    } else {
+      console.error(`Golden Static chunk ${chunk.index + 1}/${staticChunks.length}: resumed`);
+    }
+    if (referenceCapture) assertMatchingCapture(referenceCapture, saved.capture, `Static chunk ${chunk.index + 1}`);
+    else referenceCapture = saved.capture;
+    completed += chunk.count;
+    const elapsed = (Date.now() - startedAt) / 1000;
+    const remaining = plan.staticObservations - completed;
+    const eta = newlyCaptured > 0 ? elapsed / newlyCaptured * remaining : Number.NaN;
+    console.error(
+      `Golden Static overall: ${completed}/${plan.staticObservations}; elapsed ${duration(elapsed)}; ETA ${duration(eta)}`,
+    );
   }
-  if (!result.stdout?.trim()) throw new Error(`${flag} returned no artifact`);
-  importArtifactEnvelope(result.stdout, destination);
+
+  const batchRanges = ranges(
+    plan.dynamicBatchRunCounts.length, DYNAMIC_BATCH_CHUNK_SIZE,
+  );
+  const dynamicChunks = batchRanges.map((range, index) => ({
+    ...range,
+    index,
+    expectedRuns: plan.dynamicBatchRunCounts
+      .slice(range.start, range.start + range.count)
+      .reduce((sum, count) => sum + count, 0),
+    directory: path.join(checkpointRoot, `dynamic-${String(index).padStart(4, "0")}`),
+  }));
+  const dynamicStartedAt = Date.now();
+  let dynamicNewRuns = 0;
+  let dynamicCompleted = 0;
+  for (const chunk of dynamicChunks) {
+    let saved = null;
+    if (existsSync(chunk.directory)) {
+      try {
+        saved = await readDynamicCheckpoint(
+          chunk.directory, chunk.expectedRuns, plan.osMajor,
+        );
+      } catch (error) {
+        console.error(`Discarding invalid Dynamic checkpoint ${chunk.index + 1}: ${error.message}`);
+        await rm(chunk.directory, { recursive: true, force: true });
+      }
+    }
+    if (!saved) {
+      console.error(
+        `Golden Dynamic chunk ${chunk.index + 1}/${dynamicChunks.length}: batches ${chunk.start + 1}-${chunk.start + chunk.count}`,
+      );
+      runDriver(app, "--capture-golden-dynamic-chunk", chunk.directory, {
+        extraArgs: ["--golden-start", String(chunk.start), "--golden-count", String(chunk.count)],
+      });
+      saved = await readDynamicCheckpoint(
+        chunk.directory, chunk.expectedRuns, plan.osMajor,
+      );
+      dynamicNewRuns += chunk.expectedRuns;
+    } else {
+      console.error(`Golden Dynamic chunk ${chunk.index + 1}/${dynamicChunks.length}: resumed`);
+    }
+    assertMatchingCapture(referenceCapture, saved.capture, `Dynamic chunk ${chunk.index + 1}`);
+    dynamicCompleted += chunk.expectedRuns;
+    const elapsed = (Date.now() - dynamicStartedAt) / 1000;
+    const remaining = plan.dynamicRuns - dynamicCompleted;
+    const eta = dynamicNewRuns > 0 ? elapsed / dynamicNewRuns * remaining : Number.NaN;
+    console.error(
+      `Golden Dynamic overall: ${dynamicCompleted}/${plan.dynamicRuns}; elapsed ${duration(elapsed)}; ETA ${duration(eta)}`,
+    );
+  }
+
+  const staticDocuments = await Promise.all(staticChunks.map((chunk) =>
+    readStaticCheckpoint(chunk.directory, chunk.count, plan.osMajor)));
+  const dynamicDocuments = await Promise.all(dynamicChunks.map((chunk) =>
+    readDynamicCheckpoint(chunk.directory, chunk.expectedRuns, plan.osMajor)));
+  for (const [index, saved] of [...staticDocuments, ...dynamicDocuments].entries()) {
+    assertMatchingCapture(referenceCapture, saved.capture, `Core checkpoint ${index + 1}`);
+  }
+  const staticDocument = {
+    schemaVersion: 2,
+    consumerCells: staticDocuments.flatMap(({ document }) => document.consumerCells),
+    observations: staticDocuments.flatMap(({ document }) => document.observations),
+  };
+  const dynamicDocument = {
+    schemaVersion: 2,
+    runs: dynamicDocuments.flatMap(({ document }) => document.runs),
+  };
+  await Promise.all([
+    writeCompactJSONAtomic(path.join(partial, ARCHIVE_FILES.capture), referenceCapture),
+    writeCompactJSONAtomic(path.join(partial, ARCHIVE_FILES.static), staticDocument),
+    writeCompactJSONAtomic(path.join(partial, ARCHIVE_FILES.dynamic), dynamicDocument),
+  ]);
+  await admitCoreArchive(partial);
+  console.error("Golden Core merged and admitted; checkpoints remain until final admission");
 }
 
 async function capture() {
   const app = path.resolve(option("--app", { required: true }));
   const output = path.resolve(option("--output", { required: true }));
   const partial = `${output}.partial`;
-  const core = `${partial}.core-${process.pid}`;
   await mkdir(partial, { recursive: true });
-  await rm(core, { recursive: true, force: true });
-  try {
-    runDriver(app, "--capture-golden", core);
-    for (const file of [ARCHIVE_FILES.capture, ARCHIVE_FILES.static, ARCHIVE_FILES.dynamic]) {
-      await copyFile(path.join(core, file), path.join(partial, file));
-    }
-  } finally {
-    await rm(core, { recursive: true, force: true });
-  }
-
-  // Fail the inexpensive Core contract, including full Catalog derivation,
-  // before starting the long resumable Tint studies.
-  await admitCoreArchive(partial);
+  await captureCore(app, partial);
 
   const drivers = [
     ["--capture-tint-parameterization", ARCHIVE_FILES.tintSweep],
@@ -111,19 +425,52 @@ async function capture() {
     ["--verify-tint-sync-resolution", ARCHIVE_FILES.tintSync],
     ["--verify-tint-wide-gamut-model", ARCHIVE_FILES.tintWideGamut],
   ];
-  for (const [flag, file] of drivers) runDriver(app, flag, path.join(partial, file));
-
   const captureDocument = JSON.parse(
     await readFile(path.join(partial, ARCHIVE_FILES.capture), "utf8")
   );
   const platform = platformFromCapture(captureDocument);
+  const usesTransparency = platform.major === 27;
+  for (const [flag, file] of drivers) {
+    const destination = path.join(partial, file);
+    const hasCheckpoint = TINT_CHECKPOINT_FLAGS.has(flag) && existsSync(destination);
+    if (usesTransparency && hasCheckpoint) {
+      const checkpoint = JSON.parse(await readFile(destination, "utf8"));
+      if (!captureContextsMatch(captureDocument, checkpoint.capture)) {
+        throw new Error(`${file} cannot resume in a different capture context`);
+      }
+    }
+    // Tint documents are also their resumable checkpoints. Feed them back to
+    // the driver, which validates the context and returns quickly if complete.
+    if (TINT_CHECKPOINT_FLAGS.has(flag) || !existsSync(destination)) {
+      runDriver(app, flag, destination, { transparency: usesTransparency });
+    }
+  }
   if (platform.major >= 27) {
-    runDriver(app, "--capture-semantic-usage-trees", path.join(partial, ARCHIVE_FILES.semantic));
+    const semantic = path.join(partial, ARCHIVE_FILES.semantic);
+    if (!existsSync(semantic)) {
+      runDriver(app, "--capture-semantic-usage-trees", semantic, {
+        transparency: usesTransparency,
+      });
+    }
   } else {
     await rm(path.join(partial, ARCHIVE_FILES.semantic), { force: true });
   }
   await admitArchive(partial);
-  await finalizeStaging(partial, output);
+  const final = `${partial}.final-${process.pid}`;
+  await rm(final, { recursive: true, force: true });
+  try {
+    await mkdir(final, { recursive: true });
+    for (const file of Object.values(ARCHIVE_FILES)) {
+      if (existsSync(path.join(partial, file))) {
+        await copyFile(path.join(partial, file), path.join(final, file));
+      }
+    }
+    await admitArchive(final);
+    await finalizeStaging(final, output);
+    await rm(partial, { recursive: true, force: true });
+  } finally {
+    await rm(final, { recursive: true, force: true });
+  }
   console.error(`Golden capture complete: ${output}`);
 }
 
@@ -136,8 +483,14 @@ async function archiveSetWith(staging, name) {
 }
 
 async function promote() {
+  const startedAt = Date.now();
+  const progress = (stage) => console.error(
+    `Golden promotion: ${stage}; elapsed ${duration((Date.now() - startedAt) / 1000)}`
+  );
   const staging = path.resolve(option("--staging", { required: true }));
+  progress("admitting candidate");
   const candidate = await admitArchive(staging);
+  progress("candidate admitted");
   const name = `macOS-${candidate.platform.major}`;
   const target = path.join(goldenDirectory, name);
   let baseline = null;
@@ -145,19 +498,25 @@ async function promote() {
   const baselineEntry = installed.find((archive) => archive.name === name)
     ?? installed.filter(({ major }) => major < candidate.platform.major).at(-1);
   if (baselineEntry) baseline = await admitArchive(baselineEntry.directory);
+  progress("baseline admitted");
   const comparison = baseline ? compareArchives(baseline, candidate) : null;
+  progress("archive comparison complete");
   const archives = await archiveSetWith(staging, name);
   const verification = await verifyArchiveSet({
     archives,
     includeCrossVersion: archives.length > 1,
     dispositions: await readDispositions(),
+    preloadedArchives: new Map([[name, candidate]]),
   });
+  progress("release verification complete");
   const report = {
     candidate: { name, directory: staging, platform: candidate.platform },
     baseline: baseline ? { directory: baseline.directory, platform: baseline.platform } : null,
     comparison,
     verification: {
       tally: verification.tally,
+      failures: [...verification.outcomes, ...verification.crossVersion]
+        .filter(({ status }) => status === "failed"),
       undispositionedSkips: verification.undispositionedSkips,
       staleDispositions: verification.staleDispositions,
     },
@@ -242,11 +601,20 @@ async function drift() {
     if (baseline.observations.length !== staticDocument.observations.length) {
       throw new Error("accepted Golden does not contain every drift sentinel coordinate");
     }
+    const staticComparison = compareStaticDocuments(baseline, staticDocument);
+    const transparency = compareTransparency(accepted.capture, captureDocument);
+    const displaySignatureMatches =
+      accepted.platform.displaySignature === platform.displaySignature;
     const report = {
       capturedOn: platform,
       accepted: accepted.platform,
       sampledObservations: staticDocument.observations.length,
-      ...compareStaticDocuments(baseline, staticDocument),
+      ...staticComparison,
+      transparency,
+      displaySignatureMatches,
+      equivalent: staticComparison.equivalent
+        && transparency.comparable
+        && displaySignatureMatches,
     };
     const output = option("--output");
     const text = `${JSON.stringify(report, null, 2)}\n`;
@@ -258,8 +626,48 @@ async function drift() {
   }
 }
 
-if (!["drift", "capture", "promote", "catalog"].includes(command)) usage();
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value).sort().map((key) => [key, canonical(value[key])])
+    );
+  }
+  return value;
+}
+
+async function writeJSONAtomic(output, value) {
+  const temporary = path.join(
+    path.dirname(output), `.${path.basename(output)}.${process.pid}.tmp`
+  );
+  await mkdir(path.dirname(output), { recursive: true });
+  await writeFile(temporary, `${JSON.stringify(value)}\n`);
+  await rename(temporary, output);
+}
+
+async function tintModel() {
+  const name = osName(option("--os", { required: true }));
+  if (name !== "macOS-27") usage("The transparency model is available only for macOS-27");
+  const { modelFromAcceptedArchive } = await import("./tint-amount-model.mjs");
+  const value = await modelFromAcceptedArchive(path.join(goldenDirectory, name));
+  const output = path.join(
+    catalogDirectory, `glass-tint-amount-${name.toLowerCase()}.json`
+  );
+  if (args.includes("--check")) {
+    const actual = JSON.parse(await readFile(output, "utf8"));
+    if (JSON.stringify(canonical(actual)) !== JSON.stringify(canonical(value))) {
+      throw new Error("Bundled transparency model is stale");
+    }
+  } else {
+    await writeJSONAtomic(output, value);
+  }
+  console.error(`Transparency model ${args.includes("--check") ? "verified" : "generated"} from accepted Golden`);
+}
+
+if (!["drift", "capture", "promote", "catalog", "tint-model", "fixtures"].includes(command)) usage();
 if (command === "drift") await drift();
 else if (command === "capture") await capture();
 else if (command === "promote") await promote();
-else await catalog();
+else if (command === "catalog") await catalog();
+else if (command === "tint-model") await tintModel();
+else await import("./fixtures.mjs");

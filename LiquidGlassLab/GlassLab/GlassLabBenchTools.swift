@@ -41,12 +41,12 @@ extension GlassLabView {
                     Button(
                         isCapturingMatrix
                             ? "Capturing…"
-                            : "Capture Golden Snapshot"
+                            : "Capture Golden Archive"
                     ) {
                         exportGoldenArchive()
                     }
                     .disabled(isCapturingMatrix)
-                    Text("Captures the canonical typed Static Snapshots and Dynamic traces. The `golden capture` command combines this artifact with Tint and Semantic evidence into one staging archive.")
+                    Text("Captures the complete OS-specific Static and Dynamic Golden plan, including the macOS 27 transparency coordinates.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }

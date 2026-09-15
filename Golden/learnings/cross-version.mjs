@@ -9,7 +9,7 @@
 // pair rows by the shared Golden cell coordinate.
 
 import { ALL_CHANNELS, glassBackground, numeric } from "../tools/lib/golden.mjs";
-import { cellKey } from "../tools/lib/cell.mjs";
+import { cellKey, LEGACY_CELL_FIELDS } from "../tools/lib/cell.mjs";
 
 /** Ordered OS directories that have the given section. */
 function versionsWith(archives, section) {
@@ -19,9 +19,9 @@ function versionsWith(archives, section) {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Rows of a section indexed by full cell key. */
-const indexByCell = (document) =>
-  new Map((document.rows ?? document.runs ?? []).map((row) => [cellKey(row.cell), row]));
+/** Rows of a section indexed by the requested cell coordinate. */
+const indexByCell = (document, fields) =>
+  new Map((document.rows ?? document.runs ?? []).map((row) => [cellKey(row.cell, fields), row]));
 
 const staticCoreRows = (document) => (document.rows ?? []).filter((row) =>
   row.cell.width === 480
@@ -50,9 +50,9 @@ export default [
     id: "cells-line-up-across-versions",
     kind: "cross-version",
     claim:
-      "Both versions address the same cells. This is the precondition for "
-      + "every other cross-version claim: if the coordinate does not match, a "
-      + "diff is comparing different things and reports noise",
+      "Every historical cell remains addressable on newer versions. Newer "
+      + "archives may add sparse experiments, but cross-version comparisons "
+      + "must retain the full shared coordinate before they compare values",
     source: "GlassResearchRoadmap.md — cross-version validation",
     verify({ archives, expect }) {
       for (const section of ["static-scalar", "static-tree"]) {
@@ -61,15 +61,20 @@ export default [
           expect.unverifiable(`${section} present on fewer than two versions`);
         }
         const [base, ...rest] = versions;
-        const baseCells = indexByCell(base.document);
+        const baseCells = indexByCell(base.document, LEGACY_CELL_FIELDS);
         for (const other of rest) {
-          const otherCells = indexByCell(other.document);
+          const otherCells = indexByCell(other.document, LEGACY_CELL_FIELDS);
           const onlyBase = [...baseCells.keys()].filter((k) => !otherCells.has(k));
           const onlyOther = [...otherCells.keys()].filter((k) => !baseCells.has(k));
           expect.equal(
-            onlyBase.length + onlyOther.length,
+            onlyBase.length,
             0,
-            `${section}: cells unmatched between ${base.name} and ${other.name}`
+            `${section}: historical cells missing from ${other.name}`
+          );
+          expect.ok(
+            true,
+            `${section}: coordinates added by ${other.name}`,
+            `${onlyOther.length}`
           );
           expect.ok(
             baseCells.size > 0,

@@ -1221,6 +1221,25 @@ extension GlassLabView {
             GlassMaterialStyleAtlas.self,
             from: data
         )
+        let resolvedGlassAmount = GlassSystemTintAmount.read()
+        func expectedProductSample(
+            for cell: GlassMaterialStyleAtlas.Cell,
+            at shortSide: Double
+        ) -> GlassMaterialStyleSample? {
+            guard let base = decoded.sample(for: cell, at: shortSide) else {
+                return nil
+            }
+            guard major == 27,
+                  let resolvedGlassAmount,
+                  let model = GlassMaterialTintAmount.bundled else {
+                return base
+            }
+            return model.applying(
+                to: base,
+                cell: cell,
+                amount: resolvedGlassAmount
+            )
+        }
         var decodedCellsOK = true
         for main in [true, false] {
             for isLight in [true, false] {
@@ -1257,7 +1276,7 @@ extension GlassLabView {
                     hasMainParticipation: true
                 )
                 let margins = Self.atlasProbeShortSides.compactMap {
-                    decoded.sample(for: cell, at: $0).map { sample in
+                    expectedProductSample(for: cell, at: $0).map { sample in
                         String(format: "%.1f", sample.marginWidth)
                     }
                 }
@@ -1360,7 +1379,7 @@ extension GlassLabView {
                     let shortSide = min(size.width, size.height)
                     let context = "\(cellName) @ \(Int(shortSide))pt"
                     guard let glass = hud.glassView,
-                          let expected = decoded.sample(
+                          let expected = expectedProductSample(
                             for: cell,
                             at: shortSide
                           ) else {
@@ -1735,7 +1754,7 @@ extension GlassLabView {
                 isClear: false,
                 hasMainParticipation: true
             )
-            if let sample = decoded.sample(for: cell, at: 120) {
+            if let sample = expectedProductSample(for: cell, at: 120) {
                 let colors = sample.colors.sorted(by: { $0.key < $1.key })
                     .map { key, value in
                         String(
@@ -1776,7 +1795,7 @@ extension GlassLabView {
                 try await Task.sleep(for: .milliseconds(30))
             }
             let shortSide = 260.0
-            let expected = decoded.sample(for: cell, at: shortSide)
+            let expected = expectedProductSample(for: cell, at: shortSide)
             let expectedFace = expected?.numeric["inputFaceOpacity"] ?? .nan
             var convergedAfter: Int?
             if let glass = hud.glassView, let expected {
@@ -2062,7 +2081,7 @@ extension GlassLabView {
                 hasMainParticipation: true
             )
             let shortSide = min(520.0, 280.0)
-            let expectedFace = decoded.sample(for: cell, at: shortSide)?
+            let expectedFace = expectedProductSample(for: cell, at: shortSide)?
                 .numeric["inputFaceOpacity"] ?? .nan
             hud.setStrength(0.7)
 

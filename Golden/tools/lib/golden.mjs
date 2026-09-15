@@ -8,12 +8,14 @@
 // Learnings keep their scalar/tree section vocabulary, but those sections are
 // now read-time projections of the one typed static.json Snapshot store.
 
-import { readFile, readdir } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CELL_FIELDS, axisValues, sweptAxes } from "./cell.mjs";
-import { ARCHIVE_FILES } from "./archive.mjs";
-import { projectStaticScalar, projectStaticTree } from "./snapshot-projections.mjs";
+import { ARCHIVE_FILES, readArchiveJSON } from "./archive.mjs";
+import {
+  projectDynamicLearning, projectStaticScalar, projectStaticTopology, projectStaticTree,
+} from "./snapshot-projections.mjs";
 
 // .../Golden/tools/lib/golden.mjs -> .../Golden
 export const goldenDirectory = path.dirname(
@@ -42,7 +44,7 @@ const EVIDENCE_FILES = {
 export async function loadEvidenceDocument(directory, idOrAlias) {
   if (["core.static-scalar", "static-scalar", "core.static-tree", "static-tree"].includes(idOrAlias)) {
     const file = path.join(directory, ARCHIVE_FILES.static);
-    const source = JSON.parse(await readFile(file, "utf8"));
+    const source = await readArchiveJSON(directory, ARCHIVE_FILES.static);
     const tree = idOrAlias.includes("tree");
     return {
       file,
@@ -55,27 +57,73 @@ export async function loadEvidenceDocument(directory, idOrAlias) {
   const file = path.join(directory, relative);
   return {
     file,
-    document: JSON.parse(await readFile(file, "utf8")),
+    document: await readArchiveJSON(directory, relative),
   };
 }
 
 /** Materializes the projection sections consumed by existing learnings. */
 export async function loadLearningSections(archiveDirectory) {
-  const staticDocument = JSON.parse(
-    await readFile(path.join(archiveDirectory, "static.json"), "utf8")
-  );
+  const [capture, staticDocument] = await Promise.all([
+    readArchiveJSON(archiveDirectory, ARCHIVE_FILES.capture),
+    readArchiveJSON(archiveDirectory, ARCHIVE_FILES.static),
+  ]);
   let dynamic = null;
   try {
-    dynamic = normalizeLearningDocument(JSON.parse(
-      await readFile(path.join(archiveDirectory, "dynamic.json"), "utf8")
-    ));
+    dynamic = await readArchiveJSON(archiveDirectory, ARCHIVE_FILES.dynamic);
   } catch {
     // Learnings report an absent domain as unverifiable.
   }
+  return learningSectionsFromArchive({ capture, static: staticDocument, dynamic });
+}
+
+/**
+ * Existing learnings describe the historical core experiment. A canonical
+ * transparency archive retains that experiment at its declared midpoint and
+ * adds orthogonal amount/mode coordinates around it. Keep the full evidence in
+ * Golden while feeding each learning exactly the experiment its claim names.
+ */
+export function learningCoordinateDocuments({ capture, static: staticDocument, dynamic }) {
+  const transparency = capture?.transparency;
+  if (transparency?.control !== "processOverridePerObservation") {
+    return { static: staticDocument, dynamic };
+  }
+  const baseline = transparency.baselineAmount;
+  return {
+    static: {
+      ...staticDocument,
+      observations: (staticDocument?.observations ?? []).filter(
+        ({ cell }) => cell.glassAmount === baseline
+      ),
+    },
+    dynamic: dynamic ? {
+      ...dynamic,
+      runs: (dynamic.runs ?? []).filter(({ cell, animationMode, slice }) =>
+        cell.glassAmount === baseline
+          && animationMode === "Linear"
+          && !(slice === "backdrop" && cell.direction === "removal")
+      ),
+    } : null,
+  };
+}
+
+/**
+ * The historical `dynamic` section above deliberately remains the 104-run
+ * experiment its learnings describe. Axis-aware learnings get a second
+ * read-time view of the complete Dynamic document, without creating another
+ * captured artifact or moving any coordinate outside Golden.
+ */
+export function transparencyDynamicLearningDocument({ capture, dynamic }) {
+  if (capture?.transparency?.control !== "processOverridePerObservation") return null;
+  return normalizeLearningDocument(projectDynamicLearning(dynamic));
+}
+
+export function learningSectionsFromArchive(archive) {
+  const { static: staticDocument, dynamic } = learningCoordinateDocuments(archive);
   return {
     "static-scalar": normalizeLearningDocument(projectStaticScalar(staticDocument)),
-    "static-tree": normalizeLearningDocument(projectStaticTree(staticDocument)),
-    dynamic,
+    "static-tree": normalizeLearningDocument(projectStaticTopology(staticDocument)),
+    dynamic: normalizeLearningDocument(projectDynamicLearning(dynamic)),
+    "dynamic-transparency": transparencyDynamicLearningDocument(archive),
   };
 }
 

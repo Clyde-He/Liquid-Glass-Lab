@@ -237,6 +237,31 @@ final class GlassMaterialStrength {
         }
     }
 
+    /// Nil leaves the Lab/calibration snapshot untouched. Product controllers
+    /// set the resolved system/manual amount on the measured macOS 27 path.
+    var tintAmount: Double? {
+        didSet {
+            guard tintAmount != oldValue else { return }
+            apply()
+        }
+    }
+
+    private func configuredSample(
+        _ sample: GlassMaterialStyleSample,
+        cell: GlassMaterialStyleAtlas.Cell
+    ) -> GlassMaterialStyleSample? {
+        let resolved: GlassMaterialStyleSample
+        if let tintAmount {
+            guard let adjusted = GlassMaterialTintAmount.bundled?.applying(
+                to: sample, cell: cell, amount: tintAmount
+            ) else { return nil }
+            resolved = adjusted
+        } else {
+            resolved = sample
+        }
+        return renderExperiment.applying(to: resolved)
+    }
+
     /// The public tint currently set on the glass, if any. Tint lives in its
     /// own pass branch and receives `sourceAlpha × value²`. While frozen, the
     /// atlas cell's resolved Main-context matrix supplies the hue coefficients
@@ -277,7 +302,7 @@ final class GlassMaterialStrength {
                 for: currentCell(for: glass),
                 at: min(glass.bounds.width, glass.bounds.height)
             ) else { return false }
-            let sample = renderExperiment.applying(to: capturedSample)
+            guard let sample = configuredSample(capturedSample, cell: currentCell(for: glass)) else { return false }
             return frozenDestination(
                 for: sample,
                 target: target,
@@ -298,7 +323,7 @@ final class GlassMaterialStrength {
                   at: min(glass.bounds.width, glass.bounds.height)
               )
         else { return false }
-        let sample = renderExperiment.applying(to: capturedSample)
+        guard let sample = configuredSample(capturedSample, cell: currentCell(for: glass)) else { return false }
         return frozenStateHolds(sample, on: glass)
     }
 
@@ -591,7 +616,7 @@ final class GlassMaterialStrength {
             for: currentCell(for: glass),
             at: min(glass.bounds.width, glass.bounds.height)
         ) else { return }
-        let sample = renderExperiment.applying(to: capturedSample)
+        guard let sample = configuredSample(capturedSample, cell: currentCell(for: glass)) else { return }
         if !frozenStateHolds(sample, on: glass) {
             apply()
         }
@@ -776,7 +801,7 @@ final class GlassMaterialStrength {
         guard let capturedSample = atlas.sample(for: cell, at: shortSide) else {
             return
         }
-        let sample = renderExperiment.applying(to: capturedSample)
+        guard let sample = configuredSample(capturedSample, cell: currentCell(for: glass)) else { return }
 
         // Validate the complete destination topology before the first write;
         // an incomplete tree receives nothing at all. See
@@ -786,6 +811,9 @@ final class GlassMaterialStrength {
             target: target,
             on: glass
         ) else { return }
+        let backdropScale = tintAmount == nil ? nil
+            : GlassMaterialTintAmount.backdropScale(for: sample, isClear: isClear)
+        guard tintAmount == nil || backdropScale != nil else { return }
         let matrixLayers = destination.matrixLayers
         let rimLayers = destination.rimLayers
 
@@ -896,6 +924,9 @@ final class GlassMaterialStrength {
 
         // Render bounds do not animate with the transition; they are part of
         // the context and held constant across `value`.
+        if let backdropScale {
+            GlassMaterialAccess.setBackdropScale(backdropScale, under: glass)
+        }
         GlassMaterialAccess.setMarginWidth(sample.marginWidth, under: glass)
         GlassMaterialAccess.setOutputBounds(
             minimum: sample.outputMinimum,
@@ -953,9 +984,9 @@ final class GlassMaterialStrength {
                     for: self.currentCell(for: glass),
                     at: min(glass.bounds.width, glass.bounds.height)
                 ) {
-                    let sample = self.renderExperiment.applying(
-                        to: capturedSample
-                    )
+                    guard let sample = self.configuredSample(
+                        capturedSample, cell: self.currentCell(for: glass)
+                    ) else { return }
                     if self.frozenStateHolds(sample, on: glass) {
                         continue
                     }
@@ -1069,6 +1100,16 @@ final class GlassMaterialStrength {
         _ sample: GlassMaterialStyleSample,
         on glass: NSGlassEffectView
     ) -> Bool {
+        if tintAmount != nil {
+            let expected = GlassMaterialTintAmount.backdropScale(for: sample, isClear: Self.isClear(glass))
+            guard let expected, let scale = GlassMaterialAccess.backdropScale(under: glass),
+                  abs(scale - expected) < 1e-6 else {
+                return frozenStateBroke(
+                    field: "backdropScale", actual: "missingOrDifferent",
+                    expected: expected.map(String.init(describing:)) ?? "validEndpoint"
+                )
+            }
+        }
         guard let margin = GlassMaterialAccess.marginWidth(under: glass) else {
             return frozenStateBroke(
                 field: "marginWidth",
@@ -1429,6 +1470,59 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         }
     }
 
+    /// The macOS 27 Glass appearance slider: 0 is clearer, 1 more tinted.
+    /// Nil follows the system. Independent of tintColor and effectAmount.
+    /// Other macOS majors retain their existing native/calibrated material.
+    @available(macOS 27.0, *)
+    public var tintAmount: CGFloat? {
+        get {
+            guard Self.supportsTintAmount else { return nil }
+            return requestedTintAmount
+        }
+        set {
+            guard Self.supportsTintAmount else { return }
+            let normalized = newValue.map { CGFloat(GlassMaterialTintAmount.normalize(Double($0))) }
+            guard normalized != requestedTintAmount else { return }
+            if requestedTintAmount == nil {
+                refreshCachedSystemTintAmount()
+            }
+            let previousResolvedAmount = effectiveTintAmount
+            requestedTintAmount = normalized
+            if requestedTintAmount == nil {
+                refreshCachedSystemTintAmount()
+            }
+            requestedConfigurationDidChange()
+            resolvedTintAmountDidChange(from: previousResolvedAmount)
+        }
+    }
+
+    /// Effective appearance-slider value on macOS 27; nil on other majors.
+    @available(macOS 27.0, *)
+    public var resolvedTintAmount: CGFloat? {
+        effectiveTintAmount.map { CGFloat($0) }
+    }
+
+    /// Reports effective Glass appearance changes, including changes received
+    /// while following the system. Configuration batches emit at most one
+    /// callback for their final resolved value.
+    @available(macOS 27.0, *)
+    public var onResolvedTintAmountChange: ((CGFloat?) -> Void)? {
+        get { resolvedTintAmountChangeHandler }
+        set { resolvedTintAmountChangeHandler = newValue }
+    }
+
+    /// Whether this build is running on the one macOS major whose Glass
+    /// transparency behavior has been measured and bundled.
+    public static var supportsTintAmount: Bool {
+        GlassMaterialTintAmount.isSupported
+    }
+
+    private var effectiveTintAmount: Double? {
+        guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 27 else { return nil }
+        if let requestedTintAmount { return Double(requestedTintAmount) }
+        return lastSystemTintAmount
+    }
+
     /// Selects the verified active or inactive material independently of the
     /// HUD window's own main/key participation.
     public var effectState: EffectState = .active {
@@ -1518,9 +1612,13 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         let needsConfigurationUpdate = hasDeferredConfigurationUpdate
         let needsStrengthRefresh = hasDeferredStrengthRefresh
         let needsSystemRestampRefresh = hasDeferredSystemRestampRefresh
+        let hasResolvedTintAmountChange = hasDeferredResolvedTintAmountChange
+        let resolvedTintAmountBeforeChange = resolvedTintAmountBeforeDeferredChange
         hasDeferredConfigurationUpdate = false
         hasDeferredStrengthRefresh = false
         hasDeferredSystemRestampRefresh = false
+        hasDeferredResolvedTintAmountChange = false
+        resolvedTintAmountBeforeDeferredChange = nil
 
         let controllerApplied = needsConfigurationUpdate
             && synchronizeRequestedConfiguration()
@@ -1530,6 +1628,9 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         if needsSystemRestampRefresh {
             scheduleMaterialStrengthRefresh()
         }
+        if hasResolvedTintAmountChange {
+            deliverResolvedTintAmountChange(from: resolvedTintAmountBeforeChange)
+        }
     }
 
     private(set) lazy var materialStrength = GlassMaterialStrength(glass: self)
@@ -1537,6 +1638,8 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     private var isRefreshing = false
     private var isApplyingControlledConfiguration = false
     private var requestedEffectAmount: CGFloat = 1
+    private var requestedTintAmount: CGFloat?
+    private var lastSystemTintAmount: Double = GlassSystemTintAmount.read() ?? 0.5
     private var requestedTintColor: NSColor?
     private var requestedExperimentalOuterPasses: AdjustableGlassOuterPasses =
         GlassMaterialRenderExperiment.currentProductDefault.outerPasses
@@ -1552,6 +1655,9 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     private var hasDeferredConfigurationUpdate = false
     private var hasDeferredStrengthRefresh = false
     private var hasDeferredSystemRestampRefresh = false
+    private var hasDeferredResolvedTintAmountChange = false
+    private var resolvedTintAmountBeforeDeferredChange: Double?
+    private var resolvedTintAmountChangeHandler: ((CGFloat?) -> Void)?
     private var referenceWindowCloseObserver: NSObjectProtocol?
     private var referenceHostUpdateDepth = 0
 
@@ -1627,10 +1733,12 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     /// replaced by a plain Light/Dark reconstruction.
     func applyControlledConfiguration(
         style: NSGlassEffectView.Style,
-        amount: Double
+        amount: Double,
+        tintAmount: Double? = nil
     ) {
         isApplyingControlledConfiguration = true
         self.style = style
+        materialStrength.tintAmount = tintAmount
         materialStrength.value = amount
         isApplyingControlledConfiguration = false
     }
@@ -1676,6 +1784,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
             configuration: .init(
                 variant: style == .clear ? .clear : .regular,
                 visibility: Double(requestedEffectAmount),
+                tintAmount: effectiveTintAmount,
                 appearance: Self.controlledAppearance(for: appearance),
                 tint: requestedTintColor,
                 emphasis: effectState == .active ? .normal : .muted
@@ -1744,6 +1853,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         let requested = GlassEffectController.Configuration(
             variant: style == .clear ? .clear : .regular,
             visibility: Double(requestedEffectAmount),
+            tintAmount: effectiveTintAmount,
             appearance: Self.controlledAppearance(for: appearance),
             tint: requestedTintColor,
             emphasis: effectState == .active ? .normal : .muted
@@ -1857,7 +1967,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     override public func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         observeContext(of: window)
-        refreshNowAndAfterSystemRestamp()
+        reconcileContextChange()
         materialWindowDidChange?()
     }
 
@@ -1874,6 +1984,14 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     private func observeContext(of window: NSWindow?) {
         let center = NotificationCenter.default
         center.removeObserver(self)
+        if GlassSystemTintAmount.isSupported {
+            center.addObserver(
+                self,
+                selector: #selector(systemTintAmountDidChange),
+                name: GlassSystemTintAmount.didChange,
+                object: nil
+            )
+        }
         for name in [
             NSApplication.didBecomeActiveNotification,
             NSApplication.didResignActiveNotification,
@@ -1901,8 +2019,62 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         }
     }
 
+    @objc private func systemTintAmountDidChange(_ note: Notification) {
+        guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 27,
+              !usesExternallyManagedMaterialStrength else { return }
+        reconcileSystemTintAmountChange()
+        // AppKit can replace the native Recipe after delivering its
+        // notification. Reassert even when a manual request is unchanged;
+        // ignoring the new preference does not stop that native write.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.usesExternallyManagedMaterialStrength else { return }
+            self.reconcileSystemTintAmountChange()
+        }
+    }
+
+    private func reconcileSystemTintAmountChange() {
+        let previousResolvedAmount = effectiveTintAmount
+        refreshCachedSystemTintAmount()
+        if requestedTintAmount == nil { requestedConfigurationDidChange() }
+        refreshMaterialStrength()
+        updateRequiredWindowInset()
+        resolvedTintAmountDidChange(from: previousResolvedAmount)
+    }
+
     @objc private func contextDidChange(_ note: Notification) {
+        reconcileContextChange()
+    }
+
+    private func reconcileContextChange() {
+        let previousResolvedAmount = effectiveTintAmount
+        refreshCachedSystemTintAmount()
+        if requestedTintAmount == nil { requestedConfigurationDidChange() }
         refreshNowAndAfterSystemRestamp()
+        resolvedTintAmountDidChange(from: previousResolvedAmount)
+    }
+
+    private func refreshCachedSystemTintAmount() {
+        if let current = GlassSystemTintAmount.read() {
+            lastSystemTintAmount = current
+        }
+    }
+
+    private func resolvedTintAmountDidChange(from previous: Double?) {
+        guard previous != effectiveTintAmount else { return }
+        if configurationUpdateDepth > 0 {
+            if !hasDeferredResolvedTintAmountChange {
+                resolvedTintAmountBeforeDeferredChange = previous
+                hasDeferredResolvedTintAmountChange = true
+            }
+            return
+        }
+        deliverResolvedTintAmountChange(from: previous)
+    }
+
+    private func deliverResolvedTintAmountChange(from previous: Double?) {
+        let current = effectiveTintAmount
+        guard previous != current else { return }
+        resolvedTintAmountChangeHandler?(current.map { CGFloat($0) })
     }
 
     /// Refreshes immediately, then once more from a follow-up main-actor job.

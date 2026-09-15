@@ -1,15 +1,15 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import {
-  LearningFailure, Unverifiable, goldenDirectory, loadLearningSections, makeExpect,
+  LearningFailure, Unverifiable, goldenDirectory, learningSectionsFromArchive, makeExpect,
 } from "./golden.mjs";
 import { ARCHIVE_FILES, admitArchive } from "./archive.mjs";
 
-async function checkIntegrity(name, directory) {
+async function checkIntegrity(name, directory, preloaded = null) {
   const problems = [];
   let archive = null;
   try {
-    archive = await admitArchive(directory);
+    archive = preloaded ?? await admitArchive(directory);
     const expectedName = `macOS-${archive.platform.major}`;
     if (name !== expectedName) {
       problems.push(`archive name ${name} disagrees with captured OS ${expectedName}`);
@@ -40,6 +40,16 @@ async function loadLearnings() {
     }
   }
   return learnings;
+}
+
+/** A learning may name the OS majors whose captured feature surface it uses. */
+export function learningAppliesToOS(learning, osDirectory) {
+  if (!Object.hasOwn(learning, "osMajors")) return true;
+  if (!Array.isArray(learning.osMajors)
+      || learning.osMajors.some((major) => !Number.isInteger(major))) {
+    throw new Error(`${learning.id}: osMajors must be an array of integers`);
+  }
+  return learning.osMajors.includes(Number(osDirectory.slice(6)));
 }
 
 async function runLearning(learning, body, context) {
@@ -118,7 +128,9 @@ export function releaseVerificationProblems(report) {
  * Verifies named archive directories without relying on their location under Golden/.
  * Cross-version learnings run only when explicitly requested and at least two archives exist.
  */
-export async function verifyArchiveSet({ archives, includeCrossVersion = false, dispositions = [] }) {
+export async function verifyArchiveSet({
+  archives, includeCrossVersion = false, dispositions = [], preloadedArchives = new Map(),
+}) {
   if (!Array.isArray(archives) || archives.length === 0) throw new Error("no archives to verify");
   const names = new Set();
   for (const archive of archives) {
@@ -130,11 +142,13 @@ export async function verifyArchiveSet({ archives, includeCrossVersion = false, 
   const integrity = [];
   const loaded = new Map();
   for (const archive of archives) {
-    const result = await checkIntegrity(archive.name, archive.directory);
+    const result = await checkIntegrity(
+      archive.name, archive.directory, preloadedArchives.get(archive.name) ?? null,
+    );
     integrity.push(result);
     if (result.archive) loaded.set(
       archive.name,
-      await loadLearningSections(archive.directory)
+      learningSectionsFromArchive(result.archive)
     );
   }
 
@@ -143,6 +157,7 @@ export async function verifyArchiveSet({ archives, includeCrossVersion = false, 
   for (const archive of archives) {
     const sections = loaded.get(archive.name);
     for (const learning of learnings.filter(({ kind }) => kind !== "cross-version")) {
+      if (!learningAppliesToOS(learning, archive.name)) continue;
       const missing = (learning.sections ?? []).find((name) => !sections?.[name]);
       if (missing) {
         outcomes.push({ osDirectory: archive.name, id: learning.id, claim: learning.claim,

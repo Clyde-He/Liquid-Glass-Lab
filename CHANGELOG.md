@@ -6,6 +6,25 @@ The project follows [Semantic Versioning](https://semver.org/). While the packag
 
 ## [Unreleased]
 
+### Added
+
+- Added macOS 27-only `tintAmount` with system following by default, manual `0...1` control, and `resolvedTintAmount` readback, independently of `effectAmount` and colored Tint.
+- Added `onResolvedTintAmountChange` so Consumer interfaces can observe effective system/manual Glass amount changes without polling.
+- Added a measured three-anchor material model, a Golden-derived native-coordinate regression fixture, and a live system-following/override verification harness.
+- Added a macOS 27-only Glass Amount slider and System checkbox to Consumer Demo.
+- Added macOS 27-only native Glass Amount controls to Lab, live Backdrop Scale editing and audit readouts, and sampling records for Static, Dynamic and Semantic captures.
+- Expanded the canonical macOS 27 Golden plan to 1,750 Static observations and 273 Dynamic runs across a sparse transparency axis; macOS 26 remains 776/104 and contains no transparency coordinate.
+- Added per-observation Glass amount provenance and lossless Dynamic model/presentation/animation snapshots to the canonical Golden acquisition path.
+- Generated transparency models and native regression fixtures directly from accepted Golden coordinates.
+
+### Fixed
+
+- Match macOS 27’s native backdrop sampling selection from the requested material endpoint, including opaque Regular’s `0.25`/`0.125` buckets and its constant sampling through Materialize. Include scale in frozen drift detection, Golden capture and research projections so manual transparency remains independent of system changes.
+- Resolve macOS 27 native geometry caps, bleed sampling gates and logarithmic shadow output bounds between atlas coordinates.
+- Keep Clear inactive baseline blur at tint amount zero; only the active Clear recipe gates that blur off.
+- Preserve manually selected Glass tint amount when AppKit updates its native material after a system transparency notification, including a follow-up restamp for later native writes.
+- Explicitly apply the requested corner radius after rebuilding a glass for canonical static capture, preserving the strict capture-context check.
+
 ## [0.3.4] - 2026-08-20
 
 ### Fixed
