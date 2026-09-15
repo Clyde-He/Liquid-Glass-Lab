@@ -18,15 +18,18 @@ Golden/
     tint-sync-resolution.json
     tint-wide-gamut-model.json
   macOS-27/
-    ...the same files...
-    semantic-usage-trees.json
+    capture.json
+    static.json.gz
+    dynamic.json.gz
+    ...the same auxiliary documents as .json.gz...
+    semantic-usage-trees.json.gz
   learnings/
   tools/
 ```
 
 `capture.json` contains OS/build, architecture, display, capture time, and the capture-level transparency provenance available only on macOS 27. A canonical macOS 27 archive declares `processOverridePerObservation` with baseline `0.5`; each Static/Dynamic coordinate carries its own `glassAmount`. The key is completely absent on macOS 26. The directory location distinguishes staging from accepted evidence; there is no persisted status, profile, module registry, or compatibility protocol.
 
-`static.json` contains 776 typed resolved-tree Snapshots on macOS 26 and 1,750 on macOS 27. The macOS 27 total is the original plan plus one sparse transparency union. Scalar research values, recursive topology, transparency models/fixtures, signatures, and the 56 midpoint Consumer samples are projections of those Snapshots rather than separately captured files. `dynamic.json` contains 104 lifecycle-aware runs on macOS 26 and 273 on macOS 27. Every new Dynamic sample retains one canonical native snapshot containing model, presentation, detailed layers, and attached animations.
+The logical `static.json` document contains 776 typed resolved-tree Snapshots on macOS 26 and 1,750 on macOS 27. The macOS 27 total is the original plan plus one sparse transparency union. Scalar research values, recursive topology, transparency models/fixtures, signatures, and the 56 midpoint Consumer samples are projections of those Snapshots rather than separately captured files. The logical `dynamic.json` document contains 104 lifecycle-aware runs on macOS 26 and 273 on macOS 27. Every new Dynamic sample retains one canonical native snapshot containing model, presentation, detailed layers, and attached animations. Capture staging keeps measurement documents as plain JSON for checkpointing and review; promotion stores every measurement document as `.json.gz` while leaving `capture.json` directly readable. Every Golden reader resolves either form transparently.
 
 Tint matrices and Semantic Usage are first-class Golden measurement documents because they measure different phenomena: color response and view semantics. Runtime notification/restamp checks remain release validation harnesses.
 
@@ -95,7 +98,7 @@ bun Golden/tools/golden.mjs tint-model --os macOS-27 --check
 bun Golden/tools/golden.mjs fixtures --check
 ```
 
-Both commands read their coordinates directly from accepted `static.json`; there is no parallel source or migration fallback.
+Both commands read their coordinates directly from the accepted logical `static.json` document; there is no parallel source or migration fallback.
 
 ## Research commands
 

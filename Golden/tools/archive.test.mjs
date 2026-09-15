@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
-  compareArchives, validateArchive, validateDynamicDocument,
+  compareArchives, copyArchive, readArchiveJSON, validateArchive, validateDynamicDocument,
   validateCaptureDocument, validateStaticDocument,
 } from "./lib/archive.mjs";
 import { dynamicPairingProblems } from "./lib/dynamic-contract.mjs";
@@ -485,4 +489,32 @@ test("session-volatile headroom is reported without turning honest drift red", (
   );
   assert.equal(semantic.volatile.inputMaxHeadroom.differences, 1);
   assert.ok(semantic.volatile.inputMaxHeadroom.examples.length > 0);
+});
+
+test("accepted storage compresses large documents behind the logical JSON names", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "golden-storage-"));
+  const source = path.join(root, "source");
+  const destination = path.join(root, "accepted");
+  try {
+    await mkdir(source);
+    const staticDocument = { schemaVersion: 2, observations: [{ value: "static" }] };
+    const dynamicDocument = { schemaVersion: 2, runs: [{ value: "dynamic" }] };
+    await Promise.all([
+      writeFile(path.join(source, "capture.json"), "{}\n"),
+      writeFile(path.join(source, "static.json"), JSON.stringify(staticDocument)),
+      writeFile(path.join(source, "dynamic.json"), JSON.stringify(dynamicDocument)),
+      writeFile(path.join(source, "semantic-usage-trees.json"), "{\"entries\":[]}\n"),
+    ]);
+    await copyArchive(source, destination);
+    assert.equal(existsSync(path.join(destination, "static.json")), false);
+    assert.equal(existsSync(path.join(destination, "dynamic.json")), false);
+    assert.equal(existsSync(path.join(destination, "static.json.gz")), true);
+    assert.equal(existsSync(path.join(destination, "dynamic.json.gz")), true);
+    assert.equal(existsSync(path.join(destination, "semantic-usage-trees.json.gz")), true);
+    assert.deepEqual(await readArchiveJSON(destination, "static.json"), staticDocument);
+    assert.deepEqual(await readArchiveJSON(destination, "dynamic.json"), dynamicDocument);
+    assert.equal(await readFile(path.join(destination, "capture.json"), "utf8"), "{}\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

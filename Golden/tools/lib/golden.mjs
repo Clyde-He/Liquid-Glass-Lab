@@ -8,11 +8,11 @@
 // Learnings keep their scalar/tree section vocabulary, but those sections are
 // now read-time projections of the one typed static.json Snapshot store.
 
-import { readFile, readdir } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CELL_FIELDS, axisValues, sweptAxes } from "./cell.mjs";
-import { ARCHIVE_FILES } from "./archive.mjs";
+import { ARCHIVE_FILES, readArchiveJSON } from "./archive.mjs";
 import {
   projectDynamicLearning, projectStaticScalar, projectStaticTopology, projectStaticTree,
 } from "./snapshot-projections.mjs";
@@ -44,7 +44,7 @@ const EVIDENCE_FILES = {
 export async function loadEvidenceDocument(directory, idOrAlias) {
   if (["core.static-scalar", "static-scalar", "core.static-tree", "static-tree"].includes(idOrAlias)) {
     const file = path.join(directory, ARCHIVE_FILES.static);
-    const source = JSON.parse(await readFile(file, "utf8"));
+    const source = await readArchiveJSON(directory, ARCHIVE_FILES.static);
     const tree = idOrAlias.includes("tree");
     return {
       file,
@@ -57,21 +57,19 @@ export async function loadEvidenceDocument(directory, idOrAlias) {
   const file = path.join(directory, relative);
   return {
     file,
-    document: JSON.parse(await readFile(file, "utf8")),
+    document: await readArchiveJSON(directory, relative),
   };
 }
 
 /** Materializes the projection sections consumed by existing learnings. */
 export async function loadLearningSections(archiveDirectory) {
   const [capture, staticDocument] = await Promise.all([
-    readFile(path.join(archiveDirectory, ARCHIVE_FILES.capture), "utf8").then(JSON.parse),
-    readFile(path.join(archiveDirectory, ARCHIVE_FILES.static), "utf8").then(JSON.parse),
+    readArchiveJSON(archiveDirectory, ARCHIVE_FILES.capture),
+    readArchiveJSON(archiveDirectory, ARCHIVE_FILES.static),
   ]);
   let dynamic = null;
   try {
-    dynamic = JSON.parse(
-      await readFile(path.join(archiveDirectory, ARCHIVE_FILES.dynamic), "utf8")
-    );
+    dynamic = await readArchiveJSON(archiveDirectory, ARCHIVE_FILES.dynamic);
   } catch {
     // Learnings report an absent domain as unverifiable.
   }

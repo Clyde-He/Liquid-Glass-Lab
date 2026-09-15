@@ -1,7 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { cp, mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { access, cp, mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
+import { promisify } from "node:util";
+import { createGzip, gunzip } from "node:zlib";
 import { cellKey, LEGACY_CELL_FIELDS } from "./cell.mjs";
 import { catalogFromArchive } from "./catalog.mjs";
 import {
@@ -37,6 +41,11 @@ const TINT_DOCUMENTS = [
   ["tint.wide-gamut", "tintWideGamut"],
 ];
 
+const gunzipAsync = promisify(gunzip);
+const COMPRESSED_ARCHIVE_FILES = new Set(
+  Object.values(ARCHIVE_FILES).filter((file) => file !== ARCHIVE_FILES.capture)
+);
+
 export function platformFromCapture(capture) {
   const description = capture?.operatingSystem ?? "";
   const version = /Version ([0-9.]+)/.exec(description)?.[1] ?? null;
@@ -56,18 +65,29 @@ async function readJSON(file) {
   return JSON.parse(await readFile(file, "utf8"));
 }
 
+/** Reads one logical archive document from plain capture JSON or accepted gzip storage. */
+export async function readArchiveJSON(directory, file) {
+  try {
+    return await readJSON(path.join(directory, file));
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  const compressed = path.join(directory, `${file}.gz`);
+  return JSON.parse((await gunzipAsync(await readFile(compressed))).toString("utf8"));
+}
+
 export async function readArchive(directory) {
-  const capture = await readJSON(path.join(directory, ARCHIVE_FILES.capture));
+  const capture = await readArchiveJSON(directory, ARCHIVE_FILES.capture);
   const platform = platformFromCapture(capture);
   const documents = { capture };
   const required = Object.entries(ARCHIVE_FILES).filter(
     ([name]) => !["capture", "semantic"].includes(name)
   );
   await Promise.all(required.map(async ([name, file]) => {
-    documents[name] = await readJSON(path.join(directory, file));
+    documents[name] = await readArchiveJSON(directory, file);
   }));
   if (platform.major >= 27) {
-    documents.semantic = await readJSON(path.join(directory, ARCHIVE_FILES.semantic));
+    documents.semantic = await readArchiveJSON(directory, ARCHIVE_FILES.semantic);
   } else {
     documents.semantic = null;
   }
@@ -301,9 +321,9 @@ export async function admitCoreArchive(directory) {
   let archive;
   try {
     const [capture, staticDocument, dynamic] = await Promise.all([
-      readJSON(path.join(directory, ARCHIVE_FILES.capture)),
-      readJSON(path.join(directory, ARCHIVE_FILES.static)),
-      readJSON(path.join(directory, ARCHIVE_FILES.dynamic)),
+      readArchiveJSON(directory, ARCHIVE_FILES.capture),
+      readArchiveJSON(directory, ARCHIVE_FILES.static),
+      readArchiveJSON(directory, ARCHIVE_FILES.dynamic),
     ]);
     archive = {
       directory, capture, static: staticDocument, dynamic,
@@ -913,4 +933,27 @@ export async function finalizeStaging(partial, output) {
 export async function copyArchive(source, destination) {
   await rm(destination, { recursive: true, force: true });
   await cp(source, destination, { recursive: true });
+  for (const file of COMPRESSED_ARCHIVE_FILES) {
+    const plain = path.join(destination, file);
+    const compressed = `${plain}.gz`;
+    const temporary = `${compressed}.${process.pid}.tmp`;
+    try {
+      await access(plain);
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
+    try {
+      await rm(temporary, { force: true });
+      await pipeline(
+        createReadStream(plain),
+        createGzip({ level: 9 }),
+        createWriteStream(temporary, { flags: "wx" }),
+      );
+      await rename(temporary, compressed);
+      await rm(plain);
+    } finally {
+      await rm(temporary, { force: true });
+    }
+  }
 }
