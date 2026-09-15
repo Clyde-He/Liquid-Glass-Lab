@@ -1,14 +1,14 @@
 # macOS 27 release and Glass transparency
 
-## Result — 2026-09-14
+## Result — 2026-09-15
 
 The default macOS 27.0 release material does not require a Catalog value update in the measured sentinel domain. Following the new system transparency preference does require a separate material parameter: it is not the existing Materialize `effectAmount`.
 
-This is a research result, not full release certification. The original accepted baseline documents and bundled Catalog remain unchanged; the new comprehensive acquisition plan has not yet been fully recaptured.
+The comprehensive acquisition is now the accepted macOS 27 Golden. The packaged Catalog payload remains unchanged; only its build/display provenance moved to the formal release capture. The accepted transparency model and native regression fixture are deterministic projections of that same archive.
 
 ## Release drift
 
-The current system is macOS 27.0 build `26A428`, on Built-in Retina Display @2x. The accepted macOS 27 capture is build `26A5416b`, on Studio Display XDR @2x. Display context differs, so this comparison cannot isolate OS-only causality.
+The initial release-drift comparison ran on macOS 27.0 build `26A428`, on Built-in Retina Display @2x, against the previous build `26A5416b` capture from Studio Display XDR @2x. Display context differed, so that comparison could not isolate OS-only causality. The `26A428` Built-in Retina capture is now the accepted baseline.
 
 The canonical 28-sentinel drift capture completed after fixing a capture ownership bug: `isCapturingRecipeMatrix` suppresses ordinary host updates, so a freshly rebuilt glass retained AppKit's default 8pt corner radius. The static driver now explicitly sets the requested corner radius before applying its recipe. The strict 16pt context assertion remains intact.
 
@@ -135,4 +135,4 @@ On macOS 27, Recipe and Semantic General pages expose Glass Amount with System/m
 
 On macOS 27, canonical Golden records capture-level `processOverridePerObservation` provenance with baseline `0.5`, while every Static and Dynamic row carries its declared amount. The exporter detects external changes during capture, switches its own process-local value safely, and restores the pre-capture Lab selection on success or failure. macOS 26 coordinates and provenance contain no `glassAmount` key. The model/fixture generators accept only `macOS-27`. Legacy evidence remains unchanged; comparison projects a new archive to its explicit midpoint and reports additional fields/coordinates as coverage rather than backfilling them.
 
-Implementation validation for the canonical plan: the Lab App builds, and the native plan reports exactly 1,750 unique Static observations, 56 Consumer anchors, 28 drift sentinels, and 273 Dynamic runs. The expanded canonical archive has not yet been captured or promoted.
+The accepted formal-release archive contains exactly 1,750 unique Static observations, 56 Consumer anchors, 28 drift sentinels, and 273 Dynamic runs. Promotion verification reports 54 passed learnings, no failures, and three reviewed skips; the generated native fixture validates 912 non-midpoint transparency observations.
