@@ -11,7 +11,7 @@
 import AppKit
 import Observation
 
-enum GlassLabWindowHostType: String, CaseIterable, Identifiable {
+enum GlassLabWindowHostType: String, CaseIterable, Identifiable, Codable {
     case panel = "Panel"
     case window = "Window"
 
@@ -107,6 +107,8 @@ final class GlassLabState {
     /// research tooling and steers the renderer per page, so a Bench
     /// selection never implies a renderer by itself.
     var selectedSection: GlassLabSection = .recipe
+
+    let transparency = GlassLabTransparency()
 
     // MARK: Renderer
 

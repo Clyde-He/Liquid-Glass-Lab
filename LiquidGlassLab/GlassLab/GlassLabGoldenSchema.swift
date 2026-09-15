@@ -22,7 +22,9 @@ let goldenSchemaVersion = 2
 /// A field is `nil` when the capture did not control that axis. Nil is not
 /// `false` and not a default — it means unknown, and a learning that needs the
 /// axis skips rather than guessing. Encoding keeps nils so a row states its own
-/// holes rather than leaving a reader to infer them from absence.
+/// holes rather than leaving a reader to infer them from absence. `glassAmount`
+/// is the one exception: the key is completely absent before macOS 27 because
+/// that OS has no such coordinate.
 struct GoldenCell: Codable, Hashable {
     var variant: Int?
     var subvariant: String?
@@ -37,6 +39,7 @@ struct GoldenCell: Codable, Hashable {
     var cornerRadius: Double?
     var host: String?
     var direction: String?
+    var glassAmount: Double?
 
     /// Geometry reaches the renderer only through the short side, so this is
     /// derived rather than recorded: no capture can disagree with itself.
@@ -48,6 +51,7 @@ struct GoldenCell: Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case variant, subvariant, main, key, subdued, appearance, backdrop
         case tint, width, height, cornerRadius, host, direction, shortSide
+        case glassAmount
     }
 
     /// `shortSide` is written for readers but never read back: it is derived,
@@ -68,6 +72,7 @@ struct GoldenCell: Codable, Hashable {
         cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
         host = try container.decodeIfPresent(String.self, forKey: .host)
         direction = try container.decodeIfPresent(String.self, forKey: .direction)
+        glassAmount = try container.decodeIfPresent(Double.self, forKey: .glassAmount)
     }
 
     init(
@@ -83,7 +88,8 @@ struct GoldenCell: Codable, Hashable {
         height: Double? = nil,
         cornerRadius: Double? = nil,
         host: String? = nil,
-        direction: String? = nil
+        direction: String? = nil,
+        glassAmount: Double? = nil
     ) {
         self.variant = variant
         self.subvariant = subvariant
@@ -98,6 +104,7 @@ struct GoldenCell: Codable, Hashable {
         self.cornerRadius = cornerRadius
         self.host = host
         self.direction = direction
+        self.glassAmount = glassAmount
     }
 
     func encode(to encoder: Encoder) throws {
@@ -115,6 +122,7 @@ struct GoldenCell: Codable, Hashable {
         try container.encode(cornerRadius, forKey: .cornerRadius)
         try container.encode(host, forKey: .host)
         try container.encode(direction, forKey: .direction)
+        try container.encodeIfPresent(glassAmount, forKey: .glassAmount)
         try container.encode(shortSide, forKey: .shortSide)
     }
 
@@ -126,9 +134,11 @@ struct GoldenCell: Codable, Hashable {
             case nil: return "-"
             case let flag as Bool: return flag ? "1" : "0"
             case let number as Double:
-                return number == number.rounded()
-                    ? String(Int(number))
-                    : String(format: "%.6g", number)
+                if number.isFinite, number == number.rounded(), abs(number) < Double(Int.max) {
+                    return String(Int(number))
+                }
+                let hex = String(number.bitPattern, radix: 16)
+                return "@" + String(repeating: "0", count: 16 - hex.count) + hex
             case let other?: return String(describing: other)
             }
         }
@@ -146,6 +156,7 @@ struct GoldenCell: Codable, Hashable {
             "cornerRadius=\(token(cornerRadius))",
             "host=\(token(host))",
             "direction=\(token(direction))",
+            "glassAmount=\(token(glassAmount))",
         ].joined(separator: "|")
     }
 }
@@ -310,7 +321,18 @@ struct GoldenResolvedLayer: Codable, Equatable {
     let masksToBounds: Bool
     let cornerRadius: Double
     let hasMask: Bool
-    /// Replay-critical private layer properties, currently marginWidth.
+    var position: GoldenResolvedPair? = nil
+    var anchorPoint: GoldenResolvedPair? = nil
+    var zPosition: Double? = nil
+    var contentsScale: Double? = nil
+    var backgroundColor: String? = nil
+    var borderColor: String? = nil
+    var shadowColor: String? = nil
+    var transform: [Double]? = nil
+    var sublayerTransform: [Double]? = nil
+    var affineTransform: [Double]? = nil
+    /// Native declared properties plus explicit replay-critical values such as
+    /// CABackdropLayer.marginWidth and CABackdropLayer.scale.
     let properties: [String: GoldenResolvedProperty]
 }
 
@@ -359,9 +381,70 @@ struct GoldenDynamicSample: Codable {
     let requestedProgress: Double
     let elapsed: Double
     let phase: String
-    let filters: [Filter]
-    let effects: [Effect]
-    let layerLines: [String]
+    /// One lossless canonical observation for this instant. Model and
+    /// presentation trees, detailed layers, and attached animations stay
+    /// together so future learnings do not need a second capture format.
+    let snapshot: GlassLabSemanticTransitionSnapshot?
+    private let legacyFilters: [Filter]
+    private let legacyEffects: [Effect]
+    private let legacyLayerLines: [String]
+    private let legacyBackdropSampling: [GlassLabBackdropSampling]?
+
+    var filters: [Filter] {
+        snapshot?.model.filters.map { filter in
+            Filter(
+                name: filter.name,
+                path: filter.path,
+                layerClass: filter.layerClass,
+                location: filter.location,
+                inputs: Dictionary(
+                    filter.inputs.map { ($0.key, $0.value) },
+                    uniquingKeysWith: { first, _ in first }
+                )
+            )
+        } ?? legacyFilters
+    }
+
+    var effects: [Effect] {
+        snapshot?.model.effects.map { effect in
+            Effect(
+                effectClass: effect.effectClass,
+                path: effect.path,
+                layerClass: effect.layerClass,
+                layerOpacity: effect.layerOpacity,
+                inputs: Dictionary(
+                    effect.inputs.map { ($0.key, $0.value) },
+                    uniquingKeysWith: { first, _ in first }
+                )
+            )
+        } ?? legacyEffects
+    }
+
+    var layerLines: [String] {
+        snapshot?.model.layerLines ?? legacyLayerLines
+    }
+
+    var backdropSampling: [GlassLabBackdropSampling]? {
+        snapshot?.model.backdropSampling ?? legacyBackdropSampling
+    }
+
+    init(
+        progress: Double?,
+        requestedProgress: Double,
+        elapsed: Double,
+        phase: String,
+        snapshot: GlassLabSemanticTransitionSnapshot
+    ) {
+        self.progress = progress
+        self.requestedProgress = requestedProgress
+        self.elapsed = elapsed
+        self.phase = phase
+        self.snapshot = snapshot
+        legacyFilters = []
+        legacyEffects = []
+        legacyLayerLines = []
+        legacyBackdropSampling = nil
+    }
 
     struct Filter: Codable {
         let name: String
@@ -378,6 +461,49 @@ struct GoldenDynamicSample: Codable {
         let layerOpacity: Double?
         let inputs: [String: String]
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case progress, requestedProgress, elapsed, phase, snapshot
+        case filters, effects, layerLines, backdropSampling
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        progress = try container.decodeIfPresent(Double.self, forKey: .progress)
+        requestedProgress = try container.decode(Double.self, forKey: .requestedProgress)
+        elapsed = try container.decode(Double.self, forKey: .elapsed)
+        phase = try container.decode(String.self, forKey: .phase)
+        snapshot = try container.decodeIfPresent(
+            GlassLabSemanticTransitionSnapshot.self,
+            forKey: .snapshot
+        )
+        legacyFilters = try container.decodeIfPresent([Filter].self, forKey: .filters) ?? []
+        legacyEffects = try container.decodeIfPresent([Effect].self, forKey: .effects) ?? []
+        legacyLayerLines = try container.decodeIfPresent([String].self, forKey: .layerLines) ?? []
+        legacyBackdropSampling = try container.decodeIfPresent(
+            [GlassLabBackdropSampling].self,
+            forKey: .backdropSampling
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(progress, forKey: .progress)
+        try container.encode(requestedProgress, forKey: .requestedProgress)
+        try container.encode(elapsed, forKey: .elapsed)
+        try container.encode(phase, forKey: .phase)
+        if let snapshot {
+            try container.encode(snapshot, forKey: .snapshot)
+        } else {
+            try container.encode(legacyFilters, forKey: .filters)
+            try container.encode(legacyEffects, forKey: .effects)
+            try container.encode(legacyLayerLines, forKey: .layerLines)
+            try container.encodeIfPresent(
+                legacyBackdropSampling,
+                forKey: .backdropSampling
+            )
+        }
+    }
 }
 
 struct GoldenDynamicRun: Codable {
@@ -388,8 +514,11 @@ struct GoldenDynamicRun: Codable {
     let effectiveAppearance: String
     let tintComponents: [Double]?
     let animationMode: String
+    let requestedDuration: Double?
     let maximumAttachedAnimationDuration: Double
+    let samplingDuration: Double
     let samples: [GoldenDynamicSample]
+    let context: GlassLabMaterializeCaptureContext
 }
 
 struct GoldenDynamicDocument: Codable {
@@ -407,6 +536,7 @@ struct GoldenCaptureDocument: Codable {
     let architecture: String
     let displaySignature: String
     let capturedAt: String
+    var transparency: GoldenTransparencyContext? = nil
 }
 
 struct GoldenCaptureSummary {

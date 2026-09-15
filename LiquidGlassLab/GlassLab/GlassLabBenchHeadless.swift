@@ -26,10 +26,39 @@ private struct GlassLabHeadlessArtifactEnvelope: Encodable {
 }
 
 extension GlassLabView {
-    private static func streamHeadlessArtifactIfRequested(
+    private func streamHeadlessArtifactIfRequested(
         at artifact: URL,
         arguments: [String]
     ) throws {
+        // Auxiliary Golden drivers are separate processes. Each proves its own
+        // pinned context before attaching provenance; the orchestrator cannot
+        // honestly infer that context from the Static/Dynamic capture.
+        if GlassSystemTintAmount.isSupported,
+           arguments.contains("--golden-transparency"),
+           let metadata = state.transparency.fixedCaptureMetadata {
+            try state.transparency.validateCapture()
+            let resource = try artifact.resourceValues(forKeys: [.isRegularFileKey])
+            if resource.isRegularFile == true {
+                guard var document = try JSONSerialization.jsonObject(with: Data(contentsOf: artifact)) as? [String: Any] else {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
+                document["transparency"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(metadata))
+                #if arch(arm64)
+                let architecture = "arm64"
+                #else
+                let architecture = "x86_64"
+                #endif
+                document["capture"] = [
+                    "schemaVersion": 2, "architecture": architecture,
+                    "operatingSystem": ProcessInfo.processInfo.operatingSystemVersionString,
+                    "displaySignature": GlassMaterialStyleAtlas.Environment.current(for: state.testWindow.liveWindow?.screen).displaySignature,
+                    "capturedAt": ISO8601DateFormatter().string(from: Date()),
+                    "transparency": document["transparency"]!
+                ]
+                try JSONSerialization.data(withJSONObject: document, options: [.sortedKeys, .prettyPrinted])
+                    .write(to: artifact, options: .atomic)
+            }
+        }
         guard arguments.contains("--artifact-stdout") else { return }
         let manager = FileManager.default
         let keys: Set<URLResourceKey> = [
@@ -104,8 +133,10 @@ extension GlassLabView {
         // inputFaceOpacity's endpoint is always 1, so it reads back as the
         // strength itself and is a size-independent sentinel: a reverted tree
         // reports 1.
-        // inputShadowHeight's endpoint is 0.4 * shortSide, so it proves the
-        // baseline was recaptured for the new geometry instead of being reused.
+        // Bleed height is 0.35 × shortSide on both supported majors and remains
+        // present in the canonical Main-Off Regular material. Unlike an atlas
+        // lookup, the measured rule also covers the deliberate 400pt
+        // extrapolation beyond the largest Catalog sample.
         let shapeAt = { (g: Double, shortSide: Double) -> Double in
             g + min(0.2, 16 / shortSide) * g * (1 - g)
         }
@@ -151,12 +182,14 @@ extension GlassLabView {
             let inputs = GlassLabTuning.captureShaderInputs(from: glass)
             let shortSide = min(glass.bounds.width, glass.bounds.height)
             let faceOpacity = inputs["inputFaceOpacity"] ?? -1
-            let shadowHeight = inputs["inputShadowHeight"] ?? -1
-            let expectedShadowHeight =
-                0.4 * shortSide * shapeAt(strength, shortSide)
+            let bleedHeight = inputs["inputBleedHeight"] ?? -1
+            let endpoint = shortSide * 0.35
+            let expectedBleedHeight = endpoint
+                * shapeAt(strength, shortSide)
             let faceOK = abs(faceOpacity - strength) < 0.01
-            let shadowOK = abs(shadowHeight - expectedShadowHeight)
-                <= max(0.05, expectedShadowHeight * 0.02)
+            let geometryOK = abs(
+                bleedHeight - expectedBleedHeight
+            ) <= max(0.05, expectedBleedHeight * 0.02)
             steps.append([
                 "step": index,
                 "requestedShortSide": size,
@@ -165,10 +198,10 @@ extension GlassLabView {
                 "inputFaceOpacity": faceOpacity,
                 "expectedFaceOpacity": strength,
                 "faceOpacityHeld": faceOK,
-                "inputShadowHeight": shadowHeight,
-                "expectedShadowHeight": expectedShadowHeight,
-                "shadowHeightFollowedSize": shadowOK,
-                "passed": faceOK && shadowOK,
+                "inputBleedHeight": bleedHeight,
+                "expectedBleedHeight": expectedBleedHeight,
+                "bleedHeightFollowedSize": geometryOK,
+                "passed": faceOK && geometryOK,
             ])
         }
 
@@ -206,6 +239,7 @@ extension GlassLabView {
             of: "--verify-removal-warmup"
         )
         let goldenFlag = arguments.firstIndex(of: "--capture-golden")
+        let verifyTintAmountFlag = arguments.firstIndex(of: "--verify-glass-tint-amount")
         let goldenDriftFlag = arguments.firstIndex(
             of: "--capture-golden-drift"
         )
@@ -237,6 +271,7 @@ extension GlassLabView {
             resizeFlag,
             removalWarmupFlag,
             goldenFlag,
+            verifyTintAmountFlag,
             goldenDriftFlag,
             semanticGoldenFlag,
             atlasFlag,
@@ -250,6 +285,13 @@ extension GlassLabView {
         ].compactMap { $0 }
         guard let flagIndex = captureFlagIndices.first else {
             return
+        }
+        if (verifyTintAmountFlag != nil || arguments.contains("--golden-transparency")),
+           !GlassSystemTintAmount.isSupported {
+            FileHandle.standardError.write(Data(
+                "Glass amount capture and verification are supported only on macOS 27\n".utf8
+            ))
+            exit(69)
         }
         // A capture flag without its output path must fail loudly: silently
         // falling through leaves a normal GUI app idling in the event loop,
@@ -266,8 +308,11 @@ extension GlassLabView {
         // activation, or a single private read. Checking the shape of a capture
         // before paying for it is the point.
         if planFlag != nil {
+            let requestedMajor = arguments.firstIndex(of: "--plan-os-major").flatMap { index in
+                index + 1 < arguments.count ? Int(arguments[index + 1]) : nil
+            } ?? ProcessInfo.processInfo.operatingSystemVersion.majorVersion
             FileHandle.standardError.write(Data(
-                (Self.goldenPlanReport() + "\n").utf8
+                (Self.goldenPlanReport(osMajor: requestedMajor) + "\n").utf8
             ))
             exit(0)
         }
@@ -319,6 +364,14 @@ extension GlassLabView {
 
         var exitCode: Int32 = 0
         do {
+            if GlassSystemTintAmount.isSupported,
+               arguments.contains("--golden-transparency"),
+               goldenFlag == nil, goldenDriftFlag == nil {
+                guard let amount = GlassSystemTintAmount.read() else {
+                    throw GlassLabGoldenExportError.invalidPlan("Unknown requested Glass amount")
+                }
+                try state.transparency.beginCapture(at: amount)
+            }
             if semanticGoldenFlag != nil {
                 state.rendererMode = .semanticUsage
                 selectedSemanticPage = .general
@@ -347,7 +400,7 @@ extension GlassLabView {
                         .appending("Wrote \(written.path)\n")
                         .appending("GLASS_LAB_ARTIFACT_PATH=\(written.path)\n").utf8
                 ))
-                try Self.streamHeadlessArtifactIfRequested(
+                try streamHeadlessArtifactIfRequested(
                     at: written,
                     arguments: arguments
                 )
@@ -381,7 +434,7 @@ extension GlassLabView {
                             + "GLASS_LAB_ARTIFACT_PATH=\(written.path)\n"
                     ).utf8
                 ))
-                try Self.streamHeadlessArtifactIfRequested(
+                try streamHeadlessArtifactIfRequested(
                     at: written,
                     arguments: arguments
                 )
@@ -410,7 +463,7 @@ extension GlassLabView {
                             + "GLASS_LAB_ARTIFACT_PATH=\(written.path)\n"
                     ).utf8
                 ))
-                try Self.streamHeadlessArtifactIfRequested(
+                try streamHeadlessArtifactIfRequested(
                     at: written,
                     arguments: arguments
                 )
@@ -445,7 +498,7 @@ extension GlassLabView {
                     (report + "\nWrote \(destination.path)\n"
                         + "GLASS_LAB_ARTIFACT_PATH=\(destination.path)\n").utf8
                 ))
-                try Self.streamHeadlessArtifactIfRequested(
+                try streamHeadlessArtifactIfRequested(
                     at: destination,
                     arguments: arguments
                 )
@@ -466,12 +519,23 @@ extension GlassLabView {
                     (Self.goldenReport(meta) + "\nWrote \(destination.path)\n"
                         + "GLASS_LAB_ARTIFACT_PATH=\(destination.path)\n").utf8
                 ))
-                try Self.streamHeadlessArtifactIfRequested(
+                try streamHeadlessArtifactIfRequested(
                     at: destination,
                     arguments: arguments
                 )
                 state.testWindow.tearDown()
                 exit(0)
+            } else if verifyTintAmountFlag != nil {
+                guard #available(macOS 27.0, *) else {
+                    throw GlassLabGoldenExportError.invalidPlan(
+                        "Glass tint amount verification requires macOS 27"
+                    )
+                }
+                let result = try await performTintAmountVerification()
+                payload = try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
+                let passed = result["passed"] as? Bool == true
+                report = "Glass tint amount integration: \(passed ? "PASSED" : "FAILED")"
+                if !passed { exitCode = 2 }
             } else if resizeFlag != nil {
                 let result = try await performResizeRestampCheck()
                 payload = try JSONSerialization.data(
@@ -528,7 +592,7 @@ extension GlassLabView {
                 (report + "\nWrote \(written.path)\n"
                     + "GLASS_LAB_ARTIFACT_PATH=\(written.path)\n").utf8
             ))
-            try Self.streamHeadlessArtifactIfRequested(
+            try streamHeadlessArtifactIfRequested(
                 at: written,
                 arguments: arguments
             )
@@ -536,7 +600,7 @@ extension GlassLabView {
             var message = (error as? LocalizedError)?.errorDescription
                 ?? error.localizedDescription
             do {
-                try Self.streamHeadlessArtifactIfRequested(
+                try streamHeadlessArtifactIfRequested(
                     at: destination,
                     arguments: arguments
                 )
