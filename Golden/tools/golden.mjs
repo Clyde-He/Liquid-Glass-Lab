@@ -281,12 +281,22 @@ async function captureCore(app, partial) {
       directory: path.join(checkpointRoot, `static-${String(index).padStart(4, "0")}`),
     }),
   );
-  const priority = new Set(Object.values(plan.staticLabelFirstIndices).map(
-    (index) => Math.floor(index / STATIC_CHUNK_SIZE),
-  ));
+  const preferredLabels = [
+    "glass-tint-interaction",
+    "glass-clear-key-boundary",
+    "glass-nonconsumer-sentinel",
+    "glass-scale",
+    "glass-geometry",
+    "glass-model-anchor",
+    ...Object.keys(plan.staticLabelFirstIndices).sort(),
+  ];
+  const priorityChunks = [...new Set(preferredLabels.map((label) =>
+    plan.staticLabelFirstIndices[label]).filter(Number.isInteger).map((index) =>
+    Math.floor(index / STATIC_CHUNK_SIZE)))];
+  const priority = new Map(priorityChunks.map((index, rank) => [index, rank]));
   const staticCaptureOrder = [...staticChunks].sort((left, right) => {
-    const leftPriority = priority.has(left.index) ? 0 : 1;
-    const rightPriority = priority.has(right.index) ? 0 : 1;
+    const leftPriority = priority.get(left.index) ?? Number.MAX_SAFE_INTEGER;
+    const rightPriority = priority.get(right.index) ?? Number.MAX_SAFE_INTEGER;
     return leftPriority - rightPriority || left.index - right.index;
   });
   const startedAt = Date.now();
