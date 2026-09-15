@@ -14,7 +14,7 @@ function stableProjection(runs, side, { requirePairing = true } = {}) {
     if (identities.has(identity)) problems.push(`${side} run ${runIndex}: duplicate identity`);
     identities.add(identity);
     durations.set(identity, source.maximumAttachedAnimationDuration);
-    const run = structuredClone(source);
+    const run = { ...source };
     delete run.maximumAttachedAnimationDuration;
     delete run.samplingDuration;
     run.samples = stableEndpointSamples(run);

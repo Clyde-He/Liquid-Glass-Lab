@@ -13,7 +13,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CELL_FIELDS, axisValues, sweptAxes } from "./cell.mjs";
 import { ARCHIVE_FILES } from "./archive.mjs";
-import { projectStaticScalar, projectStaticTree } from "./snapshot-projections.mjs";
+import {
+  projectDynamicLearning, projectStaticScalar, projectStaticTopology, projectStaticTree,
+} from "./snapshot-projections.mjs";
 
 // .../Golden/tools/lib/golden.mjs -> .../Golden
 export const goldenDirectory = path.dirname(
@@ -66,16 +68,20 @@ export async function loadLearningSections(archiveDirectory) {
   );
   let dynamic = null;
   try {
-    dynamic = normalizeLearningDocument(JSON.parse(
+    dynamic = JSON.parse(
       await readFile(path.join(archiveDirectory, "dynamic.json"), "utf8")
-    ));
+    );
   } catch {
     // Learnings report an absent domain as unverifiable.
   }
+  return learningSectionsFromArchive({ static: staticDocument, dynamic });
+}
+
+export function learningSectionsFromArchive({ static: staticDocument, dynamic }) {
   return {
     "static-scalar": normalizeLearningDocument(projectStaticScalar(staticDocument)),
-    "static-tree": normalizeLearningDocument(projectStaticTree(staticDocument)),
-    dynamic,
+    "static-tree": normalizeLearningDocument(projectStaticTopology(staticDocument)),
+    dynamic: normalizeLearningDocument(projectDynamicLearning(dynamic)),
   };
 }
 

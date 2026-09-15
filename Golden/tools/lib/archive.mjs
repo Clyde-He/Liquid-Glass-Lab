@@ -8,7 +8,9 @@ import {
   dynamicLifecycleProblems, dynamicPairingProblems,
 } from "./dynamic-contract.mjs";
 import { compareStableDynamicRuns } from "./dynamic-equivalence.mjs";
-import { projectStaticTree, projectStyleSample } from "./snapshot-projections.mjs";
+import {
+  projectStyleSample, staticTopologySignature,
+} from "./snapshot-projections.mjs";
 import { tintDocumentGateProblems } from "./tint-compare.mjs";
 import { samplingProblems, comparableSampling } from "./sampling-coverage.mjs";
 import { compareTransparency, transparencyProblems } from "./transparency.mjs";
@@ -565,6 +567,11 @@ function countDifferences(left, right, pathName = "", examples = [], options = {
     const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
     for (const key of keys) {
       if (options.ignoredKeys?.has(key)) continue;
+      if (options.compareCommonFields
+          && (!Object.hasOwn(left, key) || !Object.hasOwn(right, key))) {
+        options.coverageGaps?.push(pathName ? `${pathName}.${key}` : key);
+        continue;
+      }
       count += countDifferences(left[key], right[key], pathName ? `${pathName}.${key}` : key,
         examples, options);
     }
@@ -597,26 +604,6 @@ function compareNamedValues(baseline, candidate, name, section) {
   return { differences, examples: [...new Set(examples)].slice(0, 12) };
 }
 
-function removeAsymmetricFields(left, right, pathName, gaps) {
-  if (!left || !right || typeof left !== "object" || typeof right !== "object") return;
-  if (Array.isArray(left) || Array.isArray(right)) {
-    if (!Array.isArray(left) || !Array.isArray(right)) return;
-    for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
-      removeAsymmetricFields(left[index], right[index], `${pathName}[${index}]`, gaps);
-    }
-    return;
-  }
-  for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
-    if (!Object.hasOwn(left, key) || !Object.hasOwn(right, key)) {
-      gaps.push(`${pathName}.${key}`);
-      delete left[key];
-      delete right[key];
-    } else {
-      removeAsymmetricFields(left[key], right[key], `${pathName}.${key}`, gaps);
-    }
-  }
-}
-
 export function compareStaticDocuments(baseline, candidate, {
   compareCommonFields = false,
 } = {}) {
@@ -634,19 +621,19 @@ export function compareStaticDocuments(baseline, candidate, {
   const volatileExamples = [];
   const coverageGaps = [];
   for (const key of new Set([...staticBaseline.keys(), ...staticCandidate.keys()])) {
-    const baselineSnapshot = structuredClone(staticBaseline.get(key)?.snapshot);
-    const candidateSnapshot = structuredClone(staticCandidate.get(key)?.snapshot);
-    if (compareCommonFields) {
-      removeAsymmetricFields(
-        baselineSnapshot, candidateSnapshot, key, coverageGaps
-      );
-    }
+    const baselineSnapshot = staticBaseline.get(key)?.snapshot;
+    const candidateSnapshot = staticCandidate.get(key)?.snapshot;
     const count = countDifferences(
       baselineSnapshot,
       candidateSnapshot,
       key,
       staticExamples,
-      { tolerance: 1e-6, ignoredKeys: new Set(["inputMaxHeadroom"]) }
+      {
+        tolerance: 1e-6,
+        ignoredKeys: new Set(["inputMaxHeadroom"]),
+        compareCommonFields,
+        coverageGaps,
+      }
     );
     if (count) staticChanged += 1;
     staticDifferences += count;
@@ -662,13 +649,15 @@ export function compareStaticDocuments(baseline, candidate, {
     if (volatileCount) volatileChanged += 1;
     volatileDifferences += volatileCount;
   }
-  const baselineTree = projectStaticTree(baseline);
-  const candidateTree = projectStaticTree(candidate);
   const baselineTopology = new Map(
-    baselineTree.rows.map((row) => [cellKey(row.cell), row.topologySignature])
+    baseline.observations.map((row) => [
+      cellKey(row.cell), staticTopologySignature(row.snapshot),
+    ])
   );
   const candidateTopology = new Map(
-    candidateTree.rows.map((row) => [cellKey(row.cell), row.topologySignature])
+    candidate.observations.map((row) => [
+      cellKey(row.cell), staticTopologySignature(row.snapshot),
+    ])
   );
   const topologyChanged = [...new Set([
     ...baselineTopology.keys(), ...candidateTopology.keys(),
@@ -693,7 +682,7 @@ export function compareStaticDocuments(baseline, candidate, {
 }
 
 function withoutGlassAmount(cell) {
-  const result = structuredClone(cell);
+  const result = { ...cell };
   delete result.glassAmount;
   return result;
 }
@@ -704,10 +693,10 @@ function alignedStaticForTransparency(baseline, candidate, transparency) {
     const observations = source
       .filter(({ cell }) => mode !== "axis"
         || cell.glassAmount === transparency.projectionAmount)
-      .map((observation) => ({
-        ...structuredClone(observation),
-        cell: mode === "axis" ? withoutGlassAmount(observation.cell) : observation.cell,
-      }));
+      .map((observation) => mode === "axis" ? {
+        ...observation,
+        cell: withoutGlassAmount(observation.cell),
+      } : observation);
     return {
       document: { ...archive.static, observations },
       outsideProjection: source.length - observations.length,
@@ -767,15 +756,18 @@ function alignedDynamicForTransparency(baseline, candidate, transparency) {
     const sourceRuns = archive.dynamic.runs;
     const runs = sourceRuns.filter(({ cell }) => mode !== "axis"
       || cell.glassAmount === transparency.projectionAmount).map((source) => {
-      const run = structuredClone(source);
-      if (mode === "axis") {
-        run.cell = withoutGlassAmount(run.cell);
-        run.samples = run.samples.map(legacyDynamicSample);
-        delete run.requestedDuration;
-        delete run.samplingDuration;
-        delete run.context;
-      }
-      return run;
+      if (mode !== "axis") return source;
+      const {
+        requestedDuration: _requestedDuration,
+        samplingDuration: _samplingDuration,
+        context: _context,
+        ...run
+      } = source;
+      return {
+        ...run,
+        cell: withoutGlassAmount(source.cell),
+        samples: source.samples.map(legacyDynamicSample),
+      };
     });
     return { runs, outsideProjection: sourceRuns.length - runs.length };
   };
@@ -833,7 +825,8 @@ export function compareArchives(baseline, candidate) {
   };
   dynamic.volatile = {
     inputMaxHeadroom: compareNamedValues(
-      baseline.dynamic.runs, candidate.dynamic.runs, "inputMaxHeadroom", "dynamic"
+      dynamicSampling.baseline, dynamicSampling.candidate,
+      "inputMaxHeadroom", "dynamic"
     ),
   };
   const documents = [];

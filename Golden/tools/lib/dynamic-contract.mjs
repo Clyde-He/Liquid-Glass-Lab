@@ -78,11 +78,17 @@ export function dynamicLifecycleProblems(run, index, side = "Dynamic") {
 }
 
 function pairMetadata(run) {
-  const metadata = structuredClone(run ?? {});
-  delete metadata.samples;
-  delete metadata.maximumAttachedAnimationDuration;
-  delete metadata.samplingDuration;
-  if (metadata.cell) delete metadata.cell.direction;
+  const {
+    samples: _samples,
+    maximumAttachedAnimationDuration: _maximumAttachedAnimationDuration,
+    samplingDuration: _samplingDuration,
+    cell,
+    ...metadata
+  } = run ?? {};
+  if (cell) {
+    const { direction: _direction, ...pairedCell } = cell;
+    metadata.cell = pairedCell;
+  }
   return metadata;
 }
 

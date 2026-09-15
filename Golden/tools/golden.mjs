@@ -474,8 +474,14 @@ async function archiveSetWith(staging, name) {
 }
 
 async function promote() {
+  const startedAt = Date.now();
+  const progress = (stage) => console.error(
+    `Golden promotion: ${stage}; elapsed ${duration((Date.now() - startedAt) / 1000)}`
+  );
   const staging = path.resolve(option("--staging", { required: true }));
+  progress("admitting candidate");
   const candidate = await admitArchive(staging);
+  progress("candidate admitted");
   const name = `macOS-${candidate.platform.major}`;
   const target = path.join(goldenDirectory, name);
   let baseline = null;
@@ -483,19 +489,25 @@ async function promote() {
   const baselineEntry = installed.find((archive) => archive.name === name)
     ?? installed.filter(({ major }) => major < candidate.platform.major).at(-1);
   if (baselineEntry) baseline = await admitArchive(baselineEntry.directory);
+  progress("baseline admitted");
   const comparison = baseline ? compareArchives(baseline, candidate) : null;
+  progress("archive comparison complete");
   const archives = await archiveSetWith(staging, name);
   const verification = await verifyArchiveSet({
     archives,
     includeCrossVersion: archives.length > 1,
     dispositions: await readDispositions(),
+    preloadedArchives: new Map([[name, candidate]]),
   });
+  progress("release verification complete");
   const report = {
     candidate: { name, directory: staging, platform: candidate.platform },
     baseline: baseline ? { directory: baseline.directory, platform: baseline.platform } : null,
     comparison,
     verification: {
       tally: verification.tally,
+      failures: [...verification.outcomes, ...verification.crossVersion]
+        .filter(({ status }) => status === "failed"),
       undispositionedSkips: verification.undispositionedSkips,
       staleDispositions: verification.staleDispositions,
     },

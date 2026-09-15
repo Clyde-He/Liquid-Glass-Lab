@@ -14,6 +14,18 @@ const digest = (value) => createHash("sha256")
   .update(JSON.stringify(canonical(value)))
   .digest("hex");
 
+export function staticTopologySignature(snapshot) {
+  return digest({
+    layers: (snapshot?.layers ?? []).map(({ path, layerClass, hasMask }) => ({
+      path, layerClass, hasMask,
+    })),
+    passes: (snapshot?.passes ?? []).map((pass) => ({
+      id: pass.id,
+      keys: Object.keys(pass.properties ?? {}).sort(),
+    })),
+  });
+}
+
 function resolved(property) {
   return property?.state === "value" ? property.value ?? null : null;
 }
@@ -112,26 +124,69 @@ export function projectStaticTree(staticDocument) {
         }]
       )),
     }]));
-    const topology = {
-      layers: Object.values(layers).map(({ path, layerClass, hasMask }) => ({
-        path, layerClass, hasMask,
-      })),
-      passes: Object.values(passes).map((pass) => ({
-        id: pass.id,
-        keys: Object.keys(pass.properties).sort(),
-      })),
-    };
     return {
       cell,
       accepted: true,
       participation: participation(cell),
-      topologySignature: digest(topology),
+      topologySignature: staticTopologySignature(snapshot),
       valueSignature: digest({ layers, passes }),
       layers,
       passes,
     };
   });
   return { schemaVersion: staticDocument.schemaVersion, section: "static-tree", rows };
+}
+
+/** Minimal tree vocabulary consumed by executable learnings. */
+export function projectStaticTopology(staticDocument) {
+  const rows = (staticDocument.observations ?? []).map(({ cell, snapshot }) => ({
+    cell,
+    accepted: true,
+    participation: participation(cell),
+    topologySignature: staticTopologySignature(snapshot),
+    passes: Object.fromEntries((snapshot?.passes ?? []).map((pass) => [pass.id, {
+      id: pass.id,
+      layerPath: pass.layerPath,
+      layerClass: pass.layerClass,
+      location: pass.location,
+      objectClass: pass.objectClass,
+      name: pass.name ?? null,
+      properties: Object.fromEntries(
+        Object.keys(pass.properties ?? {}).map((key) => [key, null])
+      ),
+    }])),
+  }));
+  return { schemaVersion: staticDocument.schemaVersion, section: "static-tree", rows };
+}
+
+function compactFilter(filter) {
+  return {
+    ...filter,
+    inputs: Object.fromEntries((filter.inputs ?? []).map(({ key, value }) => [key, value])),
+  };
+}
+
+/** Removes lossless native snapshots after deriving the legacy learning view. */
+export function projectDynamicLearning(dynamicDocument) {
+  if (!dynamicDocument) return null;
+  const runs = (dynamicDocument?.runs ?? []).map((run) => ({
+    ...run,
+    samples: (run.samples ?? []).map((sample) => {
+      if (!sample.snapshot) return sample;
+      const model = sample.snapshot.model ?? {};
+      return {
+        ...(sample.progress === undefined ? {} : { progress: sample.progress }),
+        requestedProgress: sample.requestedProgress,
+        elapsed: sample.elapsed,
+        phase: sample.phase,
+        filters: (model.filters ?? []).map(compactFilter),
+        effects: (model.effects ?? []).map(compactFilter),
+        layerLines: model.layerLines ?? [],
+        backdropSampling: model.backdropSampling ?? [],
+      };
+    }),
+  }));
+  return { ...dynamicDocument, runs };
 }
 
 export function projectStaticScalar(staticDocument) {
