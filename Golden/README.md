@@ -111,7 +111,7 @@ bun Golden/tools/compare.mjs Golden/macOS-26 Golden/macOS-27
 bun test Golden/tools/*.test.mjs
 ```
 
-`verify.mjs` admits the direct archive and runs every learning. A learning may pass, fail, or skip as unverifiable. A skip never looks green; reviewed exact exceptions remain in `verification-dispositions.json`.
+`verify.mjs` admits the direct archive and runs every applicable learning. Historical learnings keep consuming the 104-run baseline projection they were written against; macOS 27 axis-aware learnings can address the complete 273-run Dynamic document and claim their own coordinates from it. A learning may pass, fail, or skip as unverifiable. A skip never looks green; reviewed exact exceptions remain in `verification-dispositions.json`.
 
 `compare.mjs` compares complete archives by semantic observation identity. New macOS 27 archives compare the full transparency axis exactly. When one side is a legacy archive without `glassAmount`, comparison projects the new archive to the explicit `0.5` baseline and reports the additional coordinates and newly measured fields as coverage, without claiming the legacy value was known. Static numeric values use the documented `1e-6` comparison tolerance. The session-volatile `inputMaxHeadroom` is excluded from the equivalence verdict but its changed counts and examples are always reported separately; raw Golden retains it as display provenance, while the Consumer Catalog and strength controller leave it platform-owned. Topology is computed from the Snapshot rather than trusted from a stored signature.
 

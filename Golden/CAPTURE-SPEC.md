@@ -85,7 +85,7 @@ macOS 27 retains those 104 baseline runs at amount `0.5`, adds 97 unique Linear 
 
 Each insertion/removal pair is one physical lifecycle on the same renderer tree: the exact recorded insertion settled sample becomes removal preflight before removal is triggered. The pair must agree in both stable directions without tolerance. Backdrop and repeat sentinels retain their deliberate single-direction coverage. Every run records `requestedDuration`, actual `samplingDuration`, maximum attached animation duration, and the full capture context. Each sample stores one canonical native snapshot with model, presentation, model/presentation layer records, and attached animation timing/keyframe/spring facts. Compact filter/effect views are derived by readers and are not stored beside a duplicate raw payload.
 
-Linear progress is sampled at the declared fractions. System Default records the renderer's time-based lifecycle over its observed attached duration (or the explicitly labeled sampling fallback); it does not claim that Settings-slider preview/commit easing has been measured. Elapsed time is finite and nondecreasing; observed progress remains scheduler-dependent.
+Linear progress is sampled at the declared fractions. System Default records the renderer's time-based lifecycle over its observed attached duration (or the explicitly labeled sampling fallback); it does not claim that Settings-slider preview/commit easing has been measured. Elapsed time is finite and nondecreasing; observed progress remains scheduler-dependent. A macOS 27-only learning claims all 72 System Default coordinates from this document and checks their coverage, lifecycle, front-loaded timing envelope, amount invariance, and approximate insertion/removal reversibility.
 
 ### Tint
 
