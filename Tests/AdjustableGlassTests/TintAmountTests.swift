@@ -150,6 +150,44 @@ final class TintAmountTests: XCTestCase {
     }
 
     @MainActor
+    func testSystemFollowingRefreshesOnAttachmentAndReportsChangedNotifications() throws {
+        let defaults = UserDefaults.standard
+        let originalArguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+        defer { defaults.setVolatileDomain(originalArguments, forName: UserDefaults.argumentDomain) }
+
+        func setSystemAmount(_ amount: Double) {
+            var arguments = originalArguments
+            arguments["NSGlassTintAmount"] = amount
+            defaults.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        }
+
+        setSystemAmount(0.25)
+        let glass = AdjustableGlassEffectView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 120)
+        )
+        setSystemAmount(0.75)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.borderless], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView?.addSubview(glass)
+        XCTAssertEqual(try XCTUnwrap(glass.resolvedTintAmount), 0.75, accuracy: 1e-6)
+
+        var observed: [CGFloat?] = []
+        glass.onResolvedTintAmountChange = { observed.append($0) }
+        setSystemAmount(0.4)
+        NotificationCenter.default.post(name: GlassSystemTintAmount.didChange, object: nil)
+        XCTAssertEqual(observed.count, 1)
+        XCTAssertEqual(try XCTUnwrap(observed[0]), 0.4, accuracy: 1e-6)
+        XCTAssertEqual(try XCTUnwrap(glass.resolvedTintAmount), 0.4, accuracy: 1e-6)
+
+        NotificationCenter.default.post(name: GlassSystemTintAmount.didChange, object: nil)
+        XCTAssertEqual(observed.count, 1)
+    }
+
+    @MainActor
     func testSystemReaderUsesRegistrationDefaultsAndRejectsInvalidValues() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "glass-tint-test-\(UUID().uuidString)"))
         defaults.setVolatileDomain(["NSGlassTintAmount":0.25],forName:UserDefaults.argumentDomain)
@@ -187,18 +225,16 @@ final class TintAmountTests: XCTestCase {
         // Unlike a preference-only test, damage the actual native tree first.
         // Do not yield after the notification: the 1-second guard must not
         // be what repairs the material while a wrong frame is presented.
-        for notification in [GlassSystemTintAmount.didChange, UserDefaults.didChangeNotification] {
-            let target = try XCTUnwrap(GlassMaterialAccess.glassBackgroundTarget(under: glass))
-            GlassMaterialAccess.write(0.9, forKey: "inputBlurFillNormalOpacity", to: target)
-            GlassMaterialAccess.setMarginWidth(expectedMargin + 16, under: glass)
-            XCTAssertFalse(glass.materialStrength.frozenStyleIsCurrentlyApplied)
-            NotificationCenter.default.post(name: notification, object: nil)
-            let repaired = try XCTUnwrap(GlassMaterialAccess.glassBackgroundTarget(under: glass))
-            XCTAssertEqual(try XCTUnwrap(GlassMaterialAccess.readNumbers(from: repaired)["inputBlurFillNormalOpacity"]), 0.4, accuracy: 1e-6)
-            XCTAssertEqual(try XCTUnwrap(GlassMaterialAccess.marginWidth(under: glass)), expectedMargin, accuracy: 1e-6)
-            XCTAssertEqual(glass.tintAmount, 0.4)
-            XCTAssertEqual(glass.effectControllerGeneration, originalGeneration)
-        }
+        let target = try XCTUnwrap(GlassMaterialAccess.glassBackgroundTarget(under: glass))
+        GlassMaterialAccess.write(0.9, forKey: "inputBlurFillNormalOpacity", to: target)
+        GlassMaterialAccess.setMarginWidth(expectedMargin + 16, under: glass)
+        XCTAssertFalse(glass.materialStrength.frozenStyleIsCurrentlyApplied)
+        NotificationCenter.default.post(name: GlassSystemTintAmount.didChange, object: nil)
+        let repaired = try XCTUnwrap(GlassMaterialAccess.glassBackgroundTarget(under: glass))
+        XCTAssertEqual(try XCTUnwrap(GlassMaterialAccess.readNumbers(from: repaired)["inputBlurFillNormalOpacity"]), 0.4, accuracy: 1e-6)
+        XCTAssertEqual(try XCTUnwrap(GlassMaterialAccess.marginWidth(under: glass)), expectedMargin, accuracy: 1e-6)
+        XCTAssertEqual(glass.tintAmount, 0.4)
+        XCTAssertEqual(glass.effectControllerGeneration, originalGeneration)
 
         // The shader can be correct while backdrop downsampling still follows
         // the system. This was invisible to the previous frozen readback.

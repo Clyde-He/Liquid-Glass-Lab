@@ -1967,7 +1967,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     override public func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         observeContext(of: window)
-        refreshNowAndAfterSystemRestamp()
+        reconcileContextChange()
         materialWindowDidChange?()
     }
 
@@ -1985,9 +1985,12 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         let center = NotificationCenter.default
         center.removeObserver(self)
         if GlassSystemTintAmount.isSupported {
-            for name in [GlassSystemTintAmount.didChange, UserDefaults.didChangeNotification] {
-                center.addObserver(self, selector: #selector(systemTintAmountDidChange), name: name, object: nil)
-            }
+            center.addObserver(
+                self,
+                selector: #selector(systemTintAmountDidChange),
+                name: GlassSystemTintAmount.didChange,
+                object: nil
+            )
         }
         for name in [
             NSApplication.didBecomeActiveNotification,
@@ -2039,6 +2042,10 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     }
 
     @objc private func contextDidChange(_ note: Notification) {
+        reconcileContextChange()
+    }
+
+    private func reconcileContextChange() {
         let previousResolvedAmount = effectiveTintAmount
         refreshCachedSystemTintAmount()
         if requestedTintAmount == nil { requestedConfigurationDidChange() }
