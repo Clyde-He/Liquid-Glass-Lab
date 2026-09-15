@@ -86,6 +86,29 @@ function pairMetadata(run) {
   return metadata;
 }
 
+function isRetainedSystemRemovalEndpoint(run, sample) {
+  const endpointEpsilon = 1e-3;
+  if (run?.animationMode !== "System Default" || !Number.isFinite(sample?.progress)
+      || Math.abs(sample.progress) > endpointEpsilon) return false;
+  const snapshot = sample?.snapshot;
+  if (!snapshot?.model || !Array.isArray(snapshot.animations)
+      || snapshot.animations.length !== 0 || !Array.isArray(snapshot.modelLayers)) {
+    return false;
+  }
+  const backgrounds = (snapshot.model.filters ?? [])
+    .filter(({ name }) => name === "glassBackground");
+  if (backgrounds.length === 0) return false;
+  const layersByPath = new Map(snapshot.modelLayers.map((layer) => [layer.path, layer]));
+  if (backgrounds.some(({ path }) => {
+    const opacity = layersByPath.get(path)?.opacity;
+    return !Number.isFinite(opacity) || Math.abs(opacity) > endpointEpsilon;
+  })) return false;
+  return (snapshot.model.effects ?? [])
+    .filter(({ effectClass }) => effectClass === "CASDFKeyFillHighlightEffect")
+    .every(({ layerOpacity }) => Number.isFinite(layerOpacity)
+      && Math.abs(layerOpacity) <= endpointEpsilon);
+}
+
 export function dynamicPairingProblems(runs, side = "Dynamic", {
   enforceCardinality = true,
 } = {}) {
@@ -148,9 +171,16 @@ export function dynamicPairingProblems(runs, side = "Dynamic", {
         + `insertion run ${pair.insertion.index} settled endpoint`
       );
     }
-    if (insertionPreflight && removalSettled
-        && JSON.stringify(stableSamplePayload(insertionPreflight))
-          !== JSON.stringify(stableSamplePayload(removalSettled))) {
+    const removalReturnsToPreflight = insertionPreflight && removalSettled
+      && JSON.stringify(stableSamplePayload(insertionPreflight))
+        === JSON.stringify(stableSamplePayload(removalSettled));
+    // macOS 27's System Default removal can leave the private glass subtree
+    // attached after its visual contribution reaches a sub-permil endpoint.
+    // Keep that native
+    // topology in Golden, but only accept it when the face, backdrop owner,
+    // rim owner, and animation inventory prove it is fully dematerialized.
+    if (insertionPreflight && removalSettled && !removalReturnsToPreflight
+        && !isRetainedSystemRemovalEndpoint(pair.removal.run, removalSettled)) {
       problems.push(
         `${side} removal run ${pair.removal.index} settled endpoint does not match `
         + `insertion run ${pair.insertion.index} preflight`

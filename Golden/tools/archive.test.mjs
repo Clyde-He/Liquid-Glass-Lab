@@ -4,6 +4,7 @@ import {
   compareArchives, validateArchive, validateDynamicDocument,
   validateCaptureDocument, validateStaticDocument,
 } from "./lib/archive.mjs";
+import { dynamicPairingProblems } from "./lib/dynamic-contract.mjs";
 
 const property = (value, state = "value") => ({
   state,
@@ -381,6 +382,43 @@ test("Dynamic removal must continue from the exact paired insertion endpoint", (
   candidate.dynamic.runs[1].samples[0].layerLines = ["independent warm-up endpoint"];
   assert.ok(validateArchive(candidate).some((problem) =>
     problem.includes("preflight does not match insertion run")));
+});
+
+test("System Default removal may retain only a fully dematerialized native tree", () => {
+  const insertion = run(0, "core", "insertion");
+  const removal = run(0, "core", "removal", "present", "retained");
+  removal.animationMode = insertion.animationMode = "System Default";
+  removal.samples[0] = structuredClone(insertion.samples.at(-1));
+  removal.samples[0].phase = "preflight";
+  removal.samples[0].requestedProgress = 0;
+  removal.samples.at(-1).progress = 0;
+  removal.samples.at(-1).snapshot = {
+    animations: [],
+    model: {
+      filters: [{ name: "glassBackground", path: "root.backdrop" }],
+      effects: [{ effectClass: "CASDFKeyFillHighlightEffect", layerOpacity: 0 }],
+    },
+    modelLayers: [{ path: "root.backdrop", opacity: 0 }],
+  };
+  assert.deepEqual(dynamicPairingProblems([insertion, removal], "Dynamic", {
+    enforceCardinality: false,
+  }), []);
+
+  removal.samples.at(-1).progress = 0.0005;
+  removal.samples.at(-1).snapshot.modelLayers[0].opacity = 0.0005;
+  assert.deepEqual(dynamicPairingProblems([insertion, removal], "Dynamic", {
+    enforceCardinality: false,
+  }), []);
+
+  removal.samples.at(-1).snapshot.modelLayers[0].opacity = 0.01;
+  assert.ok(dynamicPairingProblems([insertion, removal], "Dynamic", {
+    enforceCardinality: false,
+  }).some((problem) => problem.includes("settled endpoint does not match")));
+  removal.samples.at(-1).snapshot.modelLayers[0].opacity = 0;
+  removal.samples.at(-1).snapshot.animations.push({ duration: 0.1 });
+  assert.ok(dynamicPairingProblems([insertion, removal], "Dynamic", {
+    enforceCardinality: false,
+  }).some((problem) => problem.includes("settled endpoint does not match")));
 });
 
 test("whole-archive comparison reports value drift without inventing module gates", () => {
