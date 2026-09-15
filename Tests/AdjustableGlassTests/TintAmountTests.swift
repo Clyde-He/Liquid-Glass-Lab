@@ -108,6 +108,48 @@ final class TintAmountTests: XCTestCase {
     }
 
     @MainActor
+    func testResolvedAmountCallbackReportsEffectiveChangesAndCoalescesBatches() throws {
+        let glass = AdjustableGlassEffectView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 120)
+        )
+        glass.tintAmount = 0
+        var observed: [CGFloat?] = []
+        glass.onResolvedTintAmountChange = { observed.append($0) }
+
+        glass.tintAmount = 0.25
+        glass.tintAmount = 0.25
+        XCTAssertEqual(observed.count, 1)
+        XCTAssertEqual(try XCTUnwrap(observed[0]), 0.25, accuracy: 1e-6)
+
+        observed.removeAll()
+        glass.performConfigurationUpdates {
+            glass.tintAmount = 0.5
+            glass.tintAmount = 0.75
+        }
+        XCTAssertEqual(observed.count, 1)
+        XCTAssertEqual(try XCTUnwrap(observed[0]), 0.75, accuracy: 1e-6)
+
+        let systemAmount = GlassSystemTintAmount.read() ?? 0.5
+        glass.tintAmount = systemAmount < 0.5 ? 1 : 0
+        observed.removeAll()
+        glass.tintAmount = nil
+        XCTAssertEqual(observed.count, 1)
+        XCTAssertEqual(
+            try XCTUnwrap(observed[0]),
+            systemAmount,
+            accuracy: 1e-6
+        )
+
+        glass.tintAmount = systemAmount < 0.5 ? 1 : 0
+        observed.removeAll()
+        NotificationCenter.default.post(
+            name: GlassSystemTintAmount.didChange,
+            object: nil
+        )
+        XCTAssertTrue(observed.isEmpty)
+    }
+
+    @MainActor
     func testSystemReaderUsesRegistrationDefaultsAndRejectsInvalidValues() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "glass-tint-test-\(UUID().uuidString)"))
         defaults.setVolatileDomain(["NSGlassTintAmount":0.25],forName:UserDefaults.argumentDomain)

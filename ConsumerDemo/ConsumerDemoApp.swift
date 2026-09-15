@@ -217,6 +217,12 @@ private final class ConsumerDemoAppDelegate:
             self.layoutHUDPanel()
             self.updateHUDDetail()
         }
+        if #available(macOS 27.0, *),
+           AdjustableGlassEffectView.supportsTintAmount {
+            glassView.onResolvedTintAmountChange = { [weak self] amount in
+                self?.updateTintAmountReadout(amount)
+            }
+        }
 
         layoutHUDPanel()
         hudPanel.orderFront(nil)
@@ -731,16 +737,18 @@ private final class ConsumerDemoAppDelegate:
         if #available(macOS 27.0, *),
            AdjustableGlassEffectView.supportsTintAmount {
             tintAmountSlider.isEnabled = systemTintAmountToggle.state != .on
-            tintAmountValue.stringValue = systemTintAmountToggle.state == .on
-                ? "Auto"
-                : String(
-                    format: "%.2f",
-                    Double(glassView.resolvedTintAmount ?? 0.5)
-                )
+            updateTintAmountReadout(glassView.resolvedTintAmount)
         }
         layoutHUDPanel()
         updateHUDDetail()
         render(status: glassView.status)
+    }
+
+    private func updateTintAmountReadout(_ amount: CGFloat?) {
+        tintAmountValue.stringValue = String(
+            format: "%.2f",
+            Double(amount ?? 0.5)
+        )
     }
 
     private func updateHUDDetail() {

@@ -1483,8 +1483,16 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
             guard Self.supportsTintAmount else { return }
             let normalized = newValue.map { CGFloat(GlassMaterialTintAmount.normalize(Double($0))) }
             guard normalized != requestedTintAmount else { return }
+            if requestedTintAmount == nil {
+                refreshCachedSystemTintAmount()
+            }
+            let previousResolvedAmount = effectiveTintAmount
             requestedTintAmount = normalized
+            if requestedTintAmount == nil {
+                refreshCachedSystemTintAmount()
+            }
             requestedConfigurationDidChange()
+            resolvedTintAmountDidChange(from: previousResolvedAmount)
         }
     }
 
@@ -1492,6 +1500,15 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     @available(macOS 27.0, *)
     public var resolvedTintAmount: CGFloat? {
         effectiveTintAmount.map { CGFloat($0) }
+    }
+
+    /// Reports effective Glass appearance changes, including changes received
+    /// while following the system. Configuration batches emit at most one
+    /// callback for their final resolved value.
+    @available(macOS 27.0, *)
+    public var onResolvedTintAmountChange: ((CGFloat?) -> Void)? {
+        get { resolvedTintAmountChangeHandler }
+        set { resolvedTintAmountChangeHandler = newValue }
     }
 
     /// Whether this build is running on the one macOS major whose Glass
@@ -1503,7 +1520,6 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     private var effectiveTintAmount: Double? {
         guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 27 else { return nil }
         if let requestedTintAmount { return Double(requestedTintAmount) }
-        if let current = GlassSystemTintAmount.read() { lastSystemTintAmount = current }
         return lastSystemTintAmount
     }
 
@@ -1596,9 +1612,13 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         let needsConfigurationUpdate = hasDeferredConfigurationUpdate
         let needsStrengthRefresh = hasDeferredStrengthRefresh
         let needsSystemRestampRefresh = hasDeferredSystemRestampRefresh
+        let hasResolvedTintAmountChange = hasDeferredResolvedTintAmountChange
+        let resolvedTintAmountBeforeChange = resolvedTintAmountBeforeDeferredChange
         hasDeferredConfigurationUpdate = false
         hasDeferredStrengthRefresh = false
         hasDeferredSystemRestampRefresh = false
+        hasDeferredResolvedTintAmountChange = false
+        resolvedTintAmountBeforeDeferredChange = nil
 
         let controllerApplied = needsConfigurationUpdate
             && synchronizeRequestedConfiguration()
@@ -1608,6 +1628,9 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
         if needsSystemRestampRefresh {
             scheduleMaterialStrengthRefresh()
         }
+        if hasResolvedTintAmountChange {
+            deliverResolvedTintAmountChange(from: resolvedTintAmountBeforeChange)
+        }
     }
 
     private(set) lazy var materialStrength = GlassMaterialStrength(glass: self)
@@ -1616,7 +1639,7 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     private var isApplyingControlledConfiguration = false
     private var requestedEffectAmount: CGFloat = 1
     private var requestedTintAmount: CGFloat?
-    private var lastSystemTintAmount: Double = 0.5
+    private var lastSystemTintAmount: Double = GlassSystemTintAmount.read() ?? 0.5
     private var requestedTintColor: NSColor?
     private var requestedExperimentalOuterPasses: AdjustableGlassOuterPasses =
         GlassMaterialRenderExperiment.currentProductDefault.outerPasses
@@ -1632,6 +1655,9 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     private var hasDeferredConfigurationUpdate = false
     private var hasDeferredStrengthRefresh = false
     private var hasDeferredSystemRestampRefresh = false
+    private var hasDeferredResolvedTintAmountChange = false
+    private var resolvedTintAmountBeforeDeferredChange: Double?
+    private var resolvedTintAmountChangeHandler: ((CGFloat?) -> Void)?
     private var referenceWindowCloseObserver: NSObjectProtocol?
     private var referenceHostUpdateDepth = 0
 
@@ -2004,14 +2030,44 @@ public final class AdjustableGlassEffectView: NSGlassEffectView {
     }
 
     private func reconcileSystemTintAmountChange() {
+        let previousResolvedAmount = effectiveTintAmount
+        refreshCachedSystemTintAmount()
         if requestedTintAmount == nil { requestedConfigurationDidChange() }
         refreshMaterialStrength()
         updateRequiredWindowInset()
+        resolvedTintAmountDidChange(from: previousResolvedAmount)
     }
 
     @objc private func contextDidChange(_ note: Notification) {
+        let previousResolvedAmount = effectiveTintAmount
+        refreshCachedSystemTintAmount()
         if requestedTintAmount == nil { requestedConfigurationDidChange() }
         refreshNowAndAfterSystemRestamp()
+        resolvedTintAmountDidChange(from: previousResolvedAmount)
+    }
+
+    private func refreshCachedSystemTintAmount() {
+        if let current = GlassSystemTintAmount.read() {
+            lastSystemTintAmount = current
+        }
+    }
+
+    private func resolvedTintAmountDidChange(from previous: Double?) {
+        guard previous != effectiveTintAmount else { return }
+        if configurationUpdateDepth > 0 {
+            if !hasDeferredResolvedTintAmountChange {
+                resolvedTintAmountBeforeDeferredChange = previous
+                hasDeferredResolvedTintAmountChange = true
+            }
+            return
+        }
+        deliverResolvedTintAmountChange(from: previous)
+    }
+
+    private func deliverResolvedTintAmountChange(from previous: Double?) {
+        let current = effectiveTintAmount
+        guard previous != current else { return }
+        resolvedTintAmountChangeHandler?(current.map { CGFloat($0) })
     }
 
     /// Refreshes immediately, then once more from a follow-up main-actor job.
