@@ -277,6 +277,27 @@ function captureProblems(archive) {
   return problems;
 }
 
+function comparableCaptureIdentity(capture) {
+  const transparency = capture?.transparency;
+  let normalizedTransparency = null;
+  if (transparency !== undefined) {
+    normalizedTransparency = transparencyProblems(transparency).length === 0
+      ? {
+        version: transparency.version,
+        amount: transparency.control === "processOverridePerObservation"
+          ? transparency.baselineAmount : transparency.amount,
+      }
+      : { invalid: true };
+  }
+  return {
+    schemaVersion: capture?.schemaVersion ?? null,
+    operatingSystem: capture?.operatingSystem ?? null,
+    architecture: capture?.architecture ?? null,
+    displaySignature: capture?.displaySignature ?? null,
+    transparency: normalizedTransparency,
+  };
+}
+
 export function validateCaptureDocument(capture, staticDocument = null) {
   return captureProblems({
     capture,
@@ -513,11 +534,20 @@ function validateSemantic(archive) {
 
 function embeddedOSProblems(archive) {
   const problems = [];
+  const requiresCaptureContext = archive.platform.major === 27
+    && archive.capture?.transparency?.control === "processOverridePerObservation";
   for (const [name, document] of [
     ...TINT_DOCUMENTS.map(([id, key]) => [id, archive[key]]),
     ["semantic.usage-trees", archive.semantic],
   ]) {
     if (!document) continue;
+    if (requiresCaptureContext && !document.capture) {
+      problems.push(`${name} lacks capture context required by canonical macOS 27`);
+    } else if (document.capture
+        && JSON.stringify(comparableCaptureIdentity(document.capture))
+          !== JSON.stringify(comparableCaptureIdentity(archive.capture))) {
+      problems.push(`${name} capture context differs from capture.json`);
+    }
     if (archive.platform.major !== 27
         && (document.transparency !== undefined
           || document.capture?.transparency !== undefined

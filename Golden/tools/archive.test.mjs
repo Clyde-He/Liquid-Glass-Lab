@@ -369,6 +369,47 @@ test("macOS 26 rejects the macOS 27-only Glass amount coordinate", () => {
     problem.includes("glassAmount must be absent outside macOS 27")));
 });
 
+test("canonical archives require matching auxiliary capture context", () => {
+  const candidate = archive();
+  candidate.capture.transparency = {
+    version: 1,
+    baselineAmount: 0.5,
+    control: "processOverridePerObservation",
+  };
+  const auxiliary = [
+    candidate.tintSweep, candidate.tintFocused, candidate.tintHue,
+    candidate.tintSync, candidate.tintWideGamut, candidate.semantic,
+  ];
+  for (const document of auxiliary) {
+    document.transparency = {
+      version: 1,
+      amount: 0.5,
+      control: "processOverride",
+    };
+    document.capture = {
+      ...candidate.capture,
+      capturedAt: "2026-08-12T00:01:00Z",
+      transparency: document.transparency,
+    };
+  }
+  for (const document of [candidate.tintSweep, candidate.tintFocused, candidate.tintHue]) {
+    document.environment.glassAmount = 0.5;
+  }
+
+  let problems = validateArchive(candidate);
+  assert.equal(problems.some((problem) => problem.includes("capture context")), false);
+
+  candidate.semantic.capture.displaySignature = "different display";
+  problems = validateArchive(candidate);
+  assert.ok(problems.some((problem) =>
+    problem.includes("semantic.usage-trees capture context differs")));
+
+  delete candidate.semantic.capture;
+  problems = validateArchive(candidate);
+  assert.ok(problems.some((problem) =>
+    problem.includes("semantic.usage-trees lacks capture context")));
+});
+
 test("paired Tint evidence cannot pass with empty or partial planned coverage", () => {
   const empty = archive();
   empty.tintSync.rows = [];
