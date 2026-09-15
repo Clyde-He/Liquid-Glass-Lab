@@ -4,6 +4,7 @@ import { cellKey, LEGACY_CELL_FIELDS } from "./lib/cell.mjs";
 import {
   compareTransparency, transparencyProblems,
 } from "./lib/transparency.mjs";
+import { learningCoordinateDocuments } from "./lib/golden.mjs";
 
 test("transparency provenance distinguishes fixed and canonical-axis captures", () => {
   const fixed = { version: 1, amount: 0.5, control: "processOverride" };
@@ -47,4 +48,41 @@ test("glassAmount joins macOS 27 rows without changing the legacy coordinate", (
     cellKey({ ...cell, glassAmount: 0.25 }, LEGACY_CELL_FIELDS),
     cellKey({ ...cell, glassAmount: 0.5 }, LEGACY_CELL_FIELDS)
   );
+});
+
+test("existing learnings consume only the historical experiment inside an axis archive", () => {
+  const row = (glassAmount, extra = {}) => ({
+    cell: { glassAmount, direction: extra.direction ?? null },
+    animationMode: extra.animationMode,
+    slice: extra.slice,
+  });
+  const documents = learningCoordinateDocuments({
+    capture: {
+      transparency: {
+        version: 1,
+        baselineAmount: 0.5,
+        control: "processOverridePerObservation",
+      },
+    },
+    static: { observations: [row(0), row(0.5), row(1)] },
+    dynamic: { runs: [
+      row(0.5, { animationMode: "Linear", slice: "core" }),
+      row(0.5, { animationMode: "System Default", slice: "core" }),
+      row(0.5, { animationMode: "Linear", slice: "backdrop", direction: "removal" }),
+      row(1, { animationMode: "Linear", slice: "core" }),
+    ] },
+  });
+  assert.equal(documents.static.observations.length, 1);
+  assert.equal(documents.dynamic.runs.length, 1);
+  assert.equal(documents.dynamic.runs[0].slice, "core");
+});
+
+test("legacy learning documents remain unchanged", () => {
+  const staticDocument = { observations: [{ cell: {} }] };
+  const dynamic = { runs: [{ cell: {} }] };
+  const documents = learningCoordinateDocuments({
+    capture: { schemaVersion: 2 }, static: staticDocument, dynamic,
+  });
+  assert.equal(documents.static, staticDocument);
+  assert.equal(documents.dynamic, dynamic);
 });

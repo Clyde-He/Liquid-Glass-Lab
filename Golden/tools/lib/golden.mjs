@@ -63,21 +63,53 @@ export async function loadEvidenceDocument(directory, idOrAlias) {
 
 /** Materializes the projection sections consumed by existing learnings. */
 export async function loadLearningSections(archiveDirectory) {
-  const staticDocument = JSON.parse(
-    await readFile(path.join(archiveDirectory, "static.json"), "utf8")
-  );
+  const [capture, staticDocument] = await Promise.all([
+    readFile(path.join(archiveDirectory, ARCHIVE_FILES.capture), "utf8").then(JSON.parse),
+    readFile(path.join(archiveDirectory, ARCHIVE_FILES.static), "utf8").then(JSON.parse),
+  ]);
   let dynamic = null;
   try {
     dynamic = JSON.parse(
-      await readFile(path.join(archiveDirectory, "dynamic.json"), "utf8")
+      await readFile(path.join(archiveDirectory, ARCHIVE_FILES.dynamic), "utf8")
     );
   } catch {
     // Learnings report an absent domain as unverifiable.
   }
-  return learningSectionsFromArchive({ static: staticDocument, dynamic });
+  return learningSectionsFromArchive({ capture, static: staticDocument, dynamic });
 }
 
-export function learningSectionsFromArchive({ static: staticDocument, dynamic }) {
+/**
+ * Existing learnings describe the historical core experiment. A canonical
+ * transparency archive retains that experiment at its declared midpoint and
+ * adds orthogonal amount/mode coordinates around it. Keep the full evidence in
+ * Golden while feeding each learning exactly the experiment its claim names.
+ */
+export function learningCoordinateDocuments({ capture, static: staticDocument, dynamic }) {
+  const transparency = capture?.transparency;
+  if (transparency?.control !== "processOverridePerObservation") {
+    return { static: staticDocument, dynamic };
+  }
+  const baseline = transparency.baselineAmount;
+  return {
+    static: {
+      ...staticDocument,
+      observations: (staticDocument?.observations ?? []).filter(
+        ({ cell }) => cell.glassAmount === baseline
+      ),
+    },
+    dynamic: dynamic ? {
+      ...dynamic,
+      runs: (dynamic.runs ?? []).filter(({ cell, animationMode, slice }) =>
+        cell.glassAmount === baseline
+          && animationMode === "Linear"
+          && !(slice === "backdrop" && cell.direction === "removal")
+      ),
+    } : null,
+  };
+}
+
+export function learningSectionsFromArchive(archive) {
+  const { static: staticDocument, dynamic } = learningCoordinateDocuments(archive);
   return {
     "static-scalar": normalizeLearningDocument(projectStaticScalar(staticDocument)),
     "static-tree": normalizeLearningDocument(projectStaticTopology(staticDocument)),
