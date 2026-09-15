@@ -34,6 +34,7 @@ let package = Package(
             name: "AdjustableGlassTests",
             dependencies: ["AdjustableGlass"],
             path: "Tests/AdjustableGlassTests",
+            resources: [.process("Fixtures")],
             swiftSettings: [
                 .defaultIsolation(MainActor.self),
             ]
