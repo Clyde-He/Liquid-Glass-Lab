@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
-import { access, cp, mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
+import { access, cp, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -42,8 +42,13 @@ const TINT_DOCUMENTS = [
 ];
 
 const gunzipAsync = promisify(gunzip);
-const COMPRESSED_ARCHIVE_FILES = new Set(
-  Object.values(ARCHIVE_FILES).filter((file) => file !== ARCHIVE_FILES.capture)
+const COMPRESSED_ARCHIVE_FILES = new Set([
+  ARCHIVE_FILES.static,
+  ARCHIVE_FILES.dynamic,
+  ARCHIVE_FILES.semantic,
+]);
+const COMPACT_ARCHIVE_FILES = new Set(
+  TINT_DOCUMENTS.map(([, key]) => ARCHIVE_FILES[key])
 );
 
 export function platformFromCapture(capture) {
@@ -952,6 +957,20 @@ export async function copyArchive(source, destination) {
       );
       await rename(temporary, compressed);
       await rm(plain);
+    } finally {
+      await rm(temporary, { force: true });
+    }
+  }
+  for (const file of COMPACT_ARCHIVE_FILES) {
+    const plain = path.join(destination, file);
+    const temporary = `${plain}.${process.pid}.tmp`;
+    try {
+      const document = await readArchiveJSON(destination, file);
+      await writeFile(temporary, `${JSON.stringify(document)}\n`, { flag: "wx" });
+      await rename(temporary, plain);
+      await rm(`${plain}.gz`, { force: true });
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
     } finally {
       await rm(temporary, { force: true });
     }

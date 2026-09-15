@@ -504,6 +504,7 @@ test("accepted storage compresses large documents behind the logical JSON names"
       writeFile(path.join(source, "static.json"), JSON.stringify(staticDocument)),
       writeFile(path.join(source, "dynamic.json"), JSON.stringify(dynamicDocument)),
       writeFile(path.join(source, "semantic-usage-trees.json"), "{\"entries\":[]}\n"),
+      writeFile(path.join(source, "tint-parameterization-sweep.json"), "{\n  \"rows\": []\n}\n"),
     ]);
     await copyArchive(source, destination);
     assert.equal(existsSync(path.join(destination, "static.json")), false);
@@ -511,9 +512,14 @@ test("accepted storage compresses large documents behind the logical JSON names"
     assert.equal(existsSync(path.join(destination, "static.json.gz")), true);
     assert.equal(existsSync(path.join(destination, "dynamic.json.gz")), true);
     assert.equal(existsSync(path.join(destination, "semantic-usage-trees.json.gz")), true);
+    assert.equal(existsSync(path.join(destination, "tint-parameterization-sweep.json.gz")), false);
     assert.deepEqual(await readArchiveJSON(destination, "static.json"), staticDocument);
     assert.deepEqual(await readArchiveJSON(destination, "dynamic.json"), dynamicDocument);
     assert.equal(await readFile(path.join(destination, "capture.json"), "utf8"), "{}\n");
+    assert.equal(
+      await readFile(path.join(destination, "tint-parameterization-sweep.json"), "utf8"),
+      "{\"rows\":[]}\n",
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
