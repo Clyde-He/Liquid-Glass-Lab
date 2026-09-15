@@ -432,7 +432,9 @@ async function capture() {
   const usesTransparency = platform.major === 27;
   for (const [flag, file] of drivers) {
     const destination = path.join(partial, file);
-    if (!existsSync(destination)) {
+    // Tint documents are also their resumable checkpoints. Feed them back to
+    // the driver, which validates the context and returns quickly if complete.
+    if (TINT_CHECKPOINT_FLAGS.has(flag) || !existsSync(destination)) {
       runDriver(app, flag, destination, { transparency: usesTransparency });
     }
   }
