@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  compareArchives, copyArchive, readArchiveJSON, validateArchive, validateDynamicDocument,
-  validateCaptureDocument, validateStaticDocument,
+  captureContextsMatch, compareArchives, copyArchive, readArchiveJSON, validateArchive,
+  validateDynamicDocument, validateCaptureDocument, validateStaticDocument,
 } from "./lib/archive.mjs";
 import { dynamicPairingProblems } from "./lib/dynamic-contract.mjs";
 
@@ -398,7 +398,12 @@ test("canonical archives require matching auxiliary capture context", () => {
 
   let problems = validateArchive(candidate);
   assert.equal(problems.some((problem) => problem.includes("capture context")), false);
+  assert.equal(captureContextsMatch(candidate.capture, candidate.semantic.capture), true);
 
+  const architecture = candidate.semantic.capture.architecture;
+  candidate.semantic.capture.architecture = architecture === "arm64" ? "x86_64" : "arm64";
+  assert.equal(captureContextsMatch(candidate.capture, candidate.semantic.capture), false);
+  candidate.semantic.capture.architecture = architecture;
   candidate.semantic.capture.displaySignature = "different display";
   problems = validateArchive(candidate);
   assert.ok(problems.some((problem) =>

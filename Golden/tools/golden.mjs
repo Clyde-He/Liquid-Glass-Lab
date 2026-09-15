@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
   ARCHIVE_FILES, acceptedArchives, admitArchive, admitCoreArchive, compareArchives,
-  compareStaticDocuments, copyArchive, finalizeStaging, platformFromCapture,
+  captureContextsMatch, compareStaticDocuments, copyArchive, finalizeStaging, platformFromCapture,
   validateCaptureDocument, validateDynamicDocument, validateStaticDocument,
   compareTransparency,
 } from "./lib/archive.mjs";
@@ -432,6 +432,13 @@ async function capture() {
   const usesTransparency = platform.major === 27;
   for (const [flag, file] of drivers) {
     const destination = path.join(partial, file);
+    const hasCheckpoint = TINT_CHECKPOINT_FLAGS.has(flag) && existsSync(destination);
+    if (usesTransparency && hasCheckpoint) {
+      const checkpoint = JSON.parse(await readFile(destination, "utf8"));
+      if (!captureContextsMatch(captureDocument, checkpoint.capture)) {
+        throw new Error(`${file} cannot resume in a different capture context`);
+      }
+    }
     // Tint documents are also their resumable checkpoints. Feed them back to
     // the driver, which validates the context and returns quickly if complete.
     if (TINT_CHECKPOINT_FLAGS.has(flag) || !existsSync(destination)) {

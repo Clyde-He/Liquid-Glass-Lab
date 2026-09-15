@@ -298,6 +298,11 @@ function comparableCaptureIdentity(capture) {
   };
 }
 
+export function captureContextsMatch(reference, candidate) {
+  return JSON.stringify(comparableCaptureIdentity(reference))
+    === JSON.stringify(comparableCaptureIdentity(candidate));
+}
+
 export function validateCaptureDocument(capture, staticDocument = null) {
   return captureProblems({
     capture,
@@ -544,8 +549,7 @@ function embeddedOSProblems(archive) {
     if (requiresCaptureContext && !document.capture) {
       problems.push(`${name} lacks capture context required by canonical macOS 27`);
     } else if (document.capture
-        && JSON.stringify(comparableCaptureIdentity(document.capture))
-          !== JSON.stringify(comparableCaptureIdentity(archive.capture))) {
+        && !captureContextsMatch(archive.capture, document.capture)) {
       problems.push(`${name} capture context differs from capture.json`);
     }
     if (archive.platform.major !== 27
