@@ -48,6 +48,7 @@ final class GlassEffectController {
     struct Configuration: Equatable {
         var variant: Variant
         var visibility: Double
+        var tintAmount: Double?
         var appearance: Appearance
         var tint: NSColor?
         var emphasis: Emphasis
@@ -55,12 +56,15 @@ final class GlassEffectController {
         init(
             variant: Variant = .regular,
             visibility: Double = 1,
+            tintAmount: Double? = nil,
             appearance: Appearance = .system,
             tint: NSColor? = nil,
             emphasis: Emphasis = .normal
         ) {
             self.variant = variant
             self.visibility = min(max(visibility, 0), 1)
+            self.tintAmount = GlassMaterialTintAmount.isSupported
+                ? tintAmount.map(GlassMaterialTintAmount.normalize) : nil
             self.appearance = appearance
             self.tint = tint
             self.emphasis = emphasis
@@ -72,6 +76,7 @@ final class GlassEffectController {
         ) -> Bool {
             lhs.variant == rhs.variant
                 && lhs.visibility == rhs.visibility
+                && lhs.tintAmount == rhs.tintAmount
                 && lhs.appearance == rhs.appearance
                 && lhs.emphasis == rhs.emphasis
                 && Self.colorsMatch(lhs.tint, rhs.tint)
@@ -142,6 +147,8 @@ final class GlassEffectController {
                 max(configuration.visibility, 0),
                 1
             )
+            configuration.tintAmount = GlassMaterialTintAmount.isSupported
+                ? configuration.tintAmount.map(GlassMaterialTintAmount.normalize) : nil
             guard configuration != oldValue else { return }
             let requiresFullMaterialInstall =
                 Self.requiresFullMaterialInstall(
@@ -194,7 +201,8 @@ final class GlassEffectController {
         from oldConfiguration: Configuration,
         to newConfiguration: Configuration
     ) -> Bool {
-        oldConfiguration.variant != newConfiguration.variant
+        oldConfiguration.tintAmount != newConfiguration.tintAmount
+            || oldConfiguration.variant != newConfiguration.variant
             || oldConfiguration.appearance != newConfiguration.appearance
             || oldConfiguration.emphasis != newConfiguration.emphasis
     }
@@ -208,6 +216,7 @@ final class GlassEffectController {
     ) -> Bool {
         oldConfiguration.variant == newConfiguration.variant
             && oldConfiguration.visibility == newConfiguration.visibility
+            && oldConfiguration.tintAmount == newConfiguration.tintAmount
             && oldConfiguration.appearance == newConfiguration.appearance
             && oldConfiguration.emphasis == newConfiguration.emphasis
             && !Self.colorsMatch(
@@ -526,7 +535,10 @@ final class GlassEffectController {
             for: cell,
             at: Double(shortSide)
         ) {
-            return windowInset(for: sample.marginWidth)
+            let adjusted = configuration.tintAmount.flatMap {
+                GlassMaterialTintAmount.bundled?.applying(to: sample, cell: cell, amount: $0)
+            } ?? sample
+            return windowInset(for: adjusted.marginWidth)
         }
         return windowInset(
             for: atlasProvider.conservativeMainOnMargin(for: shortSide)
@@ -667,7 +679,8 @@ final class GlassEffectController {
 
         glassView.applyControlledConfiguration(
             style: configuration.variant == .clear ? .clear : .regular,
-            amount: configuration.visibility
+            amount: configuration.visibility,
+            tintAmount: configuration.tintAmount
         )
         // Setting a tint for the first time makes AppKit insert the whole Tint
         // branch into the private tree. An unresolved color is staged at alpha

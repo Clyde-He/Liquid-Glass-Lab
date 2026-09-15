@@ -215,6 +215,28 @@ enum GlassMaterialAccess {
         )
     }
 
+    // MARK: Backdrop sampling
+
+    /// This is the backdrop's downsampling ratio, not contentsScale or a
+    /// glassBackground filter input. AppKit changes it independently of the
+    /// shader vector when the macOS 27 system tint amount changes.
+    static func backdropScale(under glass: NSGlassEffectView) -> Double? {
+        guard let layer = backdropLayer(under: glass),
+              let scale = valueIfResponds(forKey: "scale", on: layer) as? NSNumber,
+              scale.doubleValue.isFinite, scale.doubleValue > 0 else { return nil }
+        return scale.doubleValue
+    }
+
+    static func setBackdropScale(_ scale: Double, under glass: NSGlassEffectView) {
+        guard scale.isFinite, scale > 0,
+              let layer = backdropLayer(under: glass),
+              layer.responds(to: NSSelectorFromString("setScale:")) else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.setValue(scale, forKey: "scale")
+        CATransaction.commit()
+    }
+
     // MARK: Render bounds
 
     /// `CABackdropLayer.marginWidth`, the room the backdrop reserves for

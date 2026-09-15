@@ -126,6 +126,10 @@ private final class ConsumerDemoAppDelegate:
         action: nil
     )
     private let visibilityValue = NSTextField(labelWithString: "1.00")
+    private let systemTintAmountToggle = NSButton(checkboxWithTitle: "System", target: nil, action: nil)
+    private let tintAmountSlider = NSSlider(value: 0.5, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let tintAmountValue = NSTextField(labelWithString: "0.50")
+
     private let widthSlider = NSSlider(
         value: 320,
         minValue: 160,
@@ -237,7 +241,7 @@ private final class ConsumerDemoAppDelegate:
 
     private func buildControlWindow() -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 640),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -257,12 +261,15 @@ private final class ConsumerDemoAppDelegate:
         appearanceControl.selectedSegment = 0
         for slider in [
             visibilitySlider,
+            tintAmountSlider,
             widthSlider,
             heightSlider,
             cornerRadiusSlider,
         ] {
             slider.isContinuous = true
         }
+        systemTintAmountToggle.state = .on
+        tintAmountSlider.isEnabled = false
         outerShadowToggle.state = .off
         panelLevelControl.selectedSegment = 1
         placementControl.selectedSegment = 0
@@ -284,9 +291,11 @@ private final class ConsumerDemoAppDelegate:
             emphasisControl,
             appearanceControl,
             visibilitySlider,
+            tintAmountSlider,
             widthSlider,
             heightSlider,
             cornerRadiusSlider,
+            systemTintAmountToggle,
             tintToggle,
             tintWell,
             outerShadowToggle,
@@ -306,6 +315,10 @@ private final class ConsumerDemoAppDelegate:
         visibilityRow.spacing = 10
         visibilityValue.alignment = .right
         visibilityValue.widthAnchor.constraint(equalToConstant: 42).isActive = true
+
+        let tintAmountRow = NSStackView(views: [systemTintAmountToggle, sliderRow(tintAmountSlider, value: tintAmountValue)])
+        tintAmountRow.orientation = .horizontal
+        tintAmountRow.spacing = 10
 
         let widthRow = sliderRow(widthSlider, value: widthValue)
         let heightRow = sliderRow(heightSlider, value: heightValue)
@@ -344,12 +357,17 @@ private final class ConsumerDemoAppDelegate:
         actions.orientation = .horizontal
         actions.spacing = 10
 
-        let stack = NSStackView(views: [
+        var controls: [NSView] = [
             title,
             labeledRow("Variant", variantControl),
             labeledRow("Emphasis", emphasisControl),
             labeledRow("Appearance", appearanceControl),
             labeledRow("Visibility", visibilityRow),
+        ]
+        if AdjustableGlassEffectView.supportsTintAmount {
+            controls.append(labeledRow("Glass Amount", tintAmountRow))
+        }
+        controls += [
             labeledRow("Tint", tintRow),
             labeledRow("Width", widthRow),
             labeledRow("Height", heightRow),
@@ -361,7 +379,8 @@ private final class ConsumerDemoAppDelegate:
             actions,
             separator(),
             statusLabel,
-        ])
+        ]
+        let stack = NSStackView(views: controls)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 16
@@ -697,6 +716,11 @@ private final class ConsumerDemoAppDelegate:
                     nil
                 }
             }()
+            if #available(macOS 27.0, *),
+               AdjustableGlassEffectView.supportsTintAmount {
+                glassView.tintAmount = systemTintAmountToggle.state == .on
+                    ? nil : CGFloat(tintAmountSlider.doubleValue)
+            }
             glassView.effectAmount = CGFloat(visibility)
             glassView.tintColor = tintToggle.state == .on
                 ? tintWell.color
@@ -704,6 +728,16 @@ private final class ConsumerDemoAppDelegate:
             glassView.hasOuterShadow = outerShadowToggle.state == .on
         }
 
+        if #available(macOS 27.0, *),
+           AdjustableGlassEffectView.supportsTintAmount {
+            tintAmountSlider.isEnabled = systemTintAmountToggle.state != .on
+            tintAmountValue.stringValue = systemTintAmountToggle.state == .on
+                ? "Auto"
+                : String(
+                    format: "%.2f",
+                    Double(glassView.resolvedTintAmount ?? 0.5)
+                )
+        }
         layoutHUDPanel()
         updateHUDDetail()
         render(status: glassView.status)
