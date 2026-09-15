@@ -42,6 +42,16 @@ async function loadLearnings() {
   return learnings;
 }
 
+/** A learning may name the OS majors whose captured feature surface it uses. */
+export function learningAppliesToOS(learning, osDirectory) {
+  if (!Object.hasOwn(learning, "osMajors")) return true;
+  if (!Array.isArray(learning.osMajors)
+      || learning.osMajors.some((major) => !Number.isInteger(major))) {
+    throw new Error(`${learning.id}: osMajors must be an array of integers`);
+  }
+  return learning.osMajors.includes(Number(osDirectory.slice(6)));
+}
+
 async function runLearning(learning, body, context) {
   const observations = [];
   try {
@@ -147,6 +157,7 @@ export async function verifyArchiveSet({
   for (const archive of archives) {
     const sections = loaded.get(archive.name);
     for (const learning of learnings.filter(({ kind }) => kind !== "cross-version")) {
+      if (!learningAppliesToOS(learning, archive.name)) continue;
       const missing = (learning.sections ?? []).find((name) => !sections?.[name]);
       if (missing) {
         outcomes.push({ osDirectory: archive.name, id: learning.id, claim: learning.claim,

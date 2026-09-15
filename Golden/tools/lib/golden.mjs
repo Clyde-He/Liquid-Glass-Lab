@@ -106,12 +106,24 @@ export function learningCoordinateDocuments({ capture, static: staticDocument, d
   };
 }
 
+/**
+ * The historical `dynamic` section above deliberately remains the 104-run
+ * experiment its learnings describe. Axis-aware learnings get a second
+ * read-time view of the complete Dynamic document, without creating another
+ * captured artifact or moving any coordinate outside Golden.
+ */
+export function transparencyDynamicLearningDocument({ capture, dynamic }) {
+  if (capture?.transparency?.control !== "processOverridePerObservation") return null;
+  return normalizeLearningDocument(projectDynamicLearning(dynamic));
+}
+
 export function learningSectionsFromArchive(archive) {
   const { static: staticDocument, dynamic } = learningCoordinateDocuments(archive);
   return {
     "static-scalar": normalizeLearningDocument(projectStaticScalar(staticDocument)),
     "static-tree": normalizeLearningDocument(projectStaticTopology(staticDocument)),
     dynamic: normalizeLearningDocument(projectDynamicLearning(dynamic)),
+    "dynamic-transparency": transparencyDynamicLearningDocument(archive),
   };
 }
 

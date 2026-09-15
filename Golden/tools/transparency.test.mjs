@@ -4,7 +4,10 @@ import { cellKey, LEGACY_CELL_FIELDS } from "./lib/cell.mjs";
 import {
   compareTransparency, transparencyProblems,
 } from "./lib/transparency.mjs";
-import { learningCoordinateDocuments } from "./lib/golden.mjs";
+import {
+  learningCoordinateDocuments, transparencyDynamicLearningDocument,
+} from "./lib/golden.mjs";
+import { learningAppliesToOS } from "./lib/verify-engine.mjs";
 
 test("transparency provenance distinguishes fixed and canonical-axis captures", () => {
   const fixed = { version: 1, amount: 0.5, control: "processOverride" };
@@ -75,6 +78,34 @@ test("existing learnings consume only the historical experiment inside an axis a
   assert.equal(documents.static.observations.length, 1);
   assert.equal(documents.dynamic.runs.length, 1);
   assert.equal(documents.dynamic.runs[0].slice, "core");
+});
+
+test("axis-aware learnings can consume the complete Dynamic document", () => {
+  const dynamic = { runs: [
+    { cell: { glassAmount: 0 }, animationMode: "System Default", samples: [] },
+    { cell: { glassAmount: 0.5 }, animationMode: "Linear", samples: [] },
+    { cell: { glassAmount: 1 }, animationMode: "System Default", samples: [] },
+  ] };
+  const document = transparencyDynamicLearningDocument({
+    capture: {
+      transparency: {
+        version: 1,
+        baselineAmount: 0.5,
+        control: "processOverridePerObservation",
+      },
+    },
+    dynamic,
+  });
+  assert.equal(document.runs.length, 3);
+  assert.deepEqual(document.axes.values.glassAmount, [0, 0.5, 1]);
+  assert.equal(transparencyDynamicLearningDocument({ capture: {}, dynamic }), null);
+});
+
+test("OS-specific learnings are not scheduled on other archives", () => {
+  const learning = { id: "macOS-27-only", osMajors: [27] };
+  assert.equal(learningAppliesToOS(learning, "macOS-26"), false);
+  assert.equal(learningAppliesToOS(learning, "macOS-27"), true);
+  assert.equal(learningAppliesToOS({ id: "all" }, "macOS-26"), true);
 });
 
 test("legacy learning documents remain unchanged", () => {
