@@ -22,6 +22,9 @@ glassView.style = .clear
 glassView.effectAmount = 0.72       // effect strength, not alphaValue
 if #available(macOS 27.0, *), AdjustableGlassEffectView.supportsTintAmount {
     glassView.tintAmount = nil      // follow the system; or use 0...1
+    glassView.onResolvedTintAmountChange = { amount in
+        updateGlassAmountReadout(amount)
+    }
 }
 glassView.appearance = nil          // system; or an NSAppearance override
 glassView.tintColor = pickedColor
@@ -44,6 +47,7 @@ The API intentionally follows `NSGlassEffectView` where AppKit already has the r
 | `effectAmount` | Added continuous glass amount in `0...1` |
 | `tintAmount` | macOS 27-only appearance slider: `nil` follows the system, `0...1` pins clearer → more tinted material |
 | `resolvedTintAmount` | macOS 27-only resolved slider request |
+| `onResolvedTintAmountChange` | macOS 27-only callback when the effective system/manual amount changes |
 | `supportsTintAmount` | `true` only when the running system major is exactly macOS 27 |
 | `effectState` | Added deterministic `.active` / `.inactive` material |
 | `hasOuterShadow` | Retains the bounds-extending shadow; when `false`, native backdrop sampling is preserved while window room is limited to a 1pt safety inset on every supported macOS version |
@@ -54,7 +58,7 @@ The API intentionally follows `NSGlassEffectView` where AppKit already has the r
 | `status`, `onStatusChange`, `prepareIfNeeded()` | Readiness and retry surface |
 | `performConfigurationUpdates(_:)` | Applies several property changes as one material transaction |
 
-On macOS 27, `tintAmount` defaults to system following and stays independent of `effectAmount` and `tintColor`. Set it to `0.75` for a manual appearance, or back to `nil` to resume following. The material interpolates through measured `0`, `0.5`, `1` anchors before applying Materialize progress, retaining Clear's discrete blur gates and margin change. Native geometry caps, sampling gates and the logarithmic output bound are resolved separately so atlas interpolation does not blur their turning points. Finite values are clamped to `0...1`; NaN uses `0.5`. The two properties carry macOS 27 API availability, and `supportsTintAmount` also rejects future unmeasured system majors. Other macOS majors retain their existing material path. `resolvedTintAmount` describes the requested appearance; `status` remains the authority for installation readiness.
+On macOS 27, `tintAmount` defaults to system following and stays independent of `effectAmount` and `tintColor`. Set it to `0.75` for a manual appearance, or back to `nil` to resume following. `onResolvedTintAmountChange` reports effective-value changes from either source; a configuration batch emits at most one callback for its final value, and a system change during manual mode does not emit because the resolved value remains pinned. The material interpolates through measured `0`, `0.5`, `1` anchors before applying Materialize progress, retaining Clear's discrete blur gates and margin change. Native geometry caps, sampling gates and the logarithmic output bound are resolved separately so atlas interpolation does not blur their turning points. Finite values are clamped to `0...1`; NaN uses `0.5`. The three amount properties carry macOS 27 API availability, and `supportsTintAmount` also rejects future unmeasured system majors. Other macOS majors retain their existing material path. `resolvedTintAmount` describes the requested appearance; `status` remains the authority for installation readiness.
 
 Controlled macOS 27 glass selects backdrop sampling with the native Regular perceptual rule (`0.5`, `0.25`, `0.125`); Clear retains its native fixed `0.5`. Selection uses the requested material endpoint, including geometry, appearance and participation, and stays constant through Materialize just as native insertion/removal does. System changes therefore update system-following views without changing a manually selected material. Sampling is also included in drift detection and repair.
 

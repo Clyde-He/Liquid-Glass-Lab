@@ -9,6 +9,7 @@ The project follows [Semantic Versioning](https://semver.org/). While the packag
 ### Added
 
 - Added macOS 27-only `tintAmount` with system following by default, manual `0...1` control, and `resolvedTintAmount` readback, independently of `effectAmount` and colored Tint.
+- Added `onResolvedTintAmountChange` so Consumer interfaces can observe effective system/manual Glass amount changes without polling.
 - Added a measured three-anchor material model, a Golden-derived native-coordinate regression fixture, and a live system-following/override verification harness.
 - Added a macOS 27-only Glass Amount slider and System checkbox to Consumer Demo.
 - Added macOS 27-only native Glass Amount controls to Lab, live Backdrop Scale editing and audit readouts, and sampling records for Static, Dynamic and Semantic captures.
