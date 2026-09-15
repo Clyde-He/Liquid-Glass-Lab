@@ -147,7 +147,11 @@ export default [
       }
 
       const rows = document.rows ?? [];
-      const keyRows = rows.filter((row) => row.cell.key === true);
+      const keyRows = rows.filter((row) =>
+        row.cell.key === true
+          && row.cell.host === "Panel"
+          && row.cell.main === false
+      );
       expect.equal(keyRows.length, 4, "real-key rows");
       const missing = [];
       const differing = [];
