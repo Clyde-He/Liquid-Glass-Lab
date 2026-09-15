@@ -3510,7 +3510,10 @@ enum GlassLabTuning {
     }
 
     /// Bounded full-tree settle used by canonical Static capture. Three
-    /// consecutive complete typed reads must agree. No property exclusions or
+    /// consecutive complete typed reads must agree, and the fresh view must
+    /// have existed for at least 800 ms. The minimum horizon prevents an early
+    /// unchanged Recipe tree from masquerading as settled while faster polling
+    /// avoids stacking another fixed delay on top. No property exclusions or
     /// tolerances are hidden here: exhaustion rejects the occurrence.
     @MainActor
     static func settledResolvedTreeSnapshot(
@@ -3519,7 +3522,8 @@ enum GlassLabTuning {
         var previous: GoldenResolvedSnapshot?
         var stableMatches = 0
         var observedSnapshot = false
-        for _ in 0..<16 {
+        let startedAt = Date()
+        for poll in 0..<30 {
             try Task.checkCancellation()
             guard NSApp.isActive else {
                 throw MatrixCaptureError.applicationInactive
@@ -3536,12 +3540,17 @@ enum GlassLabTuning {
             observedSnapshot = true
             if current == previous {
                 stableMatches += 1
-                if stableMatches >= 2 { return current }
+                if stableMatches >= 2,
+                   Date().timeIntervalSince(startedAt) >= 0.8 {
+                    return current
+                }
             } else {
                 stableMatches = 0
             }
             previous = current
-            try await Task.sleep(for: .milliseconds(300))
+            if poll < 29 {
+                try await Task.sleep(for: .milliseconds(100))
+            }
         }
         if !observedSnapshot { throw MatrixCaptureError.missingLayerTree }
         throw MatrixCaptureError.unstableResolvedTree

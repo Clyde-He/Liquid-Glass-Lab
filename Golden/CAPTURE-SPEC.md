@@ -67,7 +67,7 @@ Stored topology/value signatures are forbidden; they are computed from the Snaps
 
 ## Settling and context
 
-Each Static occurrence gets a fresh glass rebuild. The driver verifies requested appearance, Main/Key participation, host, app activation, and the active macOS 27 Glass coordinate before and after observation. It polls complete Snapshots with bounded `5 × 16` attempts and requires three consecutive equal reads. Exhaustion fails that occurrence and prevents staging finalization. There are no tolerances, field exclusions, or pre-authorized unstable-property lists.
+Each Static occurrence gets a fresh glass rebuild. The driver verifies requested appearance, Main/Key participation, host, app activation, and the active macOS 27 Glass coordinate after observation. It polls complete Snapshots every 100 ms for up to three seconds per rebuild, requires three consecutive equal reads, and cannot accept before the fresh view has existed for 800 ms. Exhaustion after five rebuilds fails that occurrence and prevents staging finalization. There are no tolerances, field exclusions, or pre-authorized unstable-property lists.
 
 The same settled Snapshot serves all Static projections. There is no scalar sweep, recursive sweep, Style Atlas sweep, or GUI Catalog export.
 

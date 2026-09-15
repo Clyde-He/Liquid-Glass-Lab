@@ -43,6 +43,54 @@ enum GlassLabGoldenExportError: LocalizedError {
     }
 }
 
+private struct GoldenCaptureProgressMeter {
+    let section: String
+    let total: Int
+    private let startedAt = Date()
+    private var lastEmission = Date.distantPast
+
+    init(section: String, total: Int) {
+        self.section = section
+        self.total = total
+        emit(completed: 0, context: "starting", force: true)
+    }
+
+    mutating func update(completed: Int, context: String) {
+        emit(
+            completed: completed,
+            context: context,
+            force: completed == 1 || completed == total
+        )
+    }
+
+    private mutating func emit(
+        completed: Int,
+        context: String,
+        force: Bool
+    ) {
+        guard ProcessInfo.processInfo.arguments.contains("--artifact-stdout") else {
+            return
+        }
+        let now = Date()
+        guard force || now.timeIntervalSince(lastEmission) >= 1 else { return }
+        let elapsed = max(0, now.timeIntervalSince(startedAt))
+        let eta = completed > 0
+            ? elapsed / Double(completed) * Double(max(0, total - completed))
+            : 0
+        let line = [
+            "GOLDEN_PROGRESS",
+            "section=\(section)",
+            "completed=\(completed)",
+            "total=\(total)",
+            "elapsed=\(String(format: "%.1f", elapsed))s",
+            "eta=\(String(format: "%.1f", eta))s",
+            "context=\(context)",
+        ].joined(separator: " ") + "\n"
+        FileHandle.standardError.write(Data(line.utf8))
+        lastEmission = now
+    }
+}
+
 extension GlassLabView {
     private enum GoldenTransparencyCaptureMode {
         case unavailable
@@ -352,7 +400,7 @@ extension GlassLabView {
 
     // MARK: - Static context settling
 
-    /// Rebuilds and settles one exact coordinate. All 16 polls observe the same
+    /// Rebuilds and settles one exact coordinate. Every poll observes the same
     /// fresh glass; failure after five bounded attempts aborts the whole archive.
     func captureStaticSnapshot(
         _ context: GlassLabGoldenPlan.StaticContext,
@@ -393,16 +441,6 @@ extension GlassLabView {
             // alongside the recipe, instead of inheriting AppKit's default.
             glass.cornerRadius = context.cornerRadius
             GlassLabTuning.applyRecipe(from: state, to: glass)
-            try await Task.sleep(for: .milliseconds(700))
-
-            guard NSApp.isActive else {
-                lastFailure = "the application was inactive"
-                continue
-            }
-            if let mismatch = staticContextMismatch(context, glass: glass) {
-                lastFailure = mismatch
-                continue
-            }
             do {
                 let snapshot = try await GlassLabTuning.settledResolvedTreeSnapshot(
                     from: glass
@@ -480,6 +518,10 @@ extension GlassLabView {
         contexts: [GlassLabGoldenPlan.StaticContext]
     ) async throws -> GoldenStaticDocument {
         var observations: [GoldenStaticObservation] = []
+        var meter = GoldenCaptureProgressMeter(
+            section: "static",
+            total: contexts.count
+        )
 
         for (index, context) in contexts.enumerated() {
             if let amount = context.glassAmount {
@@ -505,6 +547,10 @@ extension GlassLabView {
             ))
             state.reportOutput = "Golden static: \(observations.count)/"
                 + "\(contexts.count) observations."
+            meter.update(
+                completed: observations.count,
+                context: context.label
+            )
         }
 
         guard !observations.isEmpty else {
@@ -523,6 +569,10 @@ extension GlassLabView {
         contexts: [GlassLabGoldenPlan.DynamicContext]
     ) async throws -> GoldenDynamicDocument {
         var runs: [GoldenDynamicRun] = []
+        var meter = GoldenCaptureProgressMeter(
+            section: "dynamic",
+            total: contexts.count
+        )
         var precedingInsertion: (
             identity: String,
             capture: GlassLabMaterializeCapture
@@ -578,6 +628,10 @@ extension GlassLabView {
                 slice: context.slice,
                 glassAmount: context.glassAmount
             ))
+            meter.update(
+                completed: runs.count,
+                context: context.slice + ":" + context.animationMode.rawValue
+            )
             precedingInsertion = context.direction == .insertion
                 ? (context.lifecycleIdentity, capture)
                 : nil
