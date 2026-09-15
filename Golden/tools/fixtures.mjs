@@ -60,6 +60,6 @@ if (process.argv.includes("--check")) {
     throw new Error("Bundled tint-amount fixture is stale");
   }
 } else {
-  await writeFile(output, `${JSON.stringify(rows, null, 2)}\n`);
+  await writeFile(output, `${JSON.stringify(rows)}\n`);
 }
 console.error(`${rows.length} native tint-amount observations projected from accepted Golden`);

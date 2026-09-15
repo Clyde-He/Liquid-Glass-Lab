@@ -632,7 +632,7 @@ async function writeJSONAtomic(output, value) {
     path.dirname(output), `.${path.basename(output)}.${process.pid}.tmp`
   );
   await mkdir(path.dirname(output), { recursive: true });
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`);
+  await writeFile(temporary, `${JSON.stringify(value)}\n`);
   await rename(temporary, output);
 }
 
