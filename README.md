@@ -19,6 +19,7 @@ Start with:
 - [SwiftUI Glass Reverse Engineering](./Documentation/SwiftUIGlassReverseEngineering.md)
 - [Glass Lab Playground](./Documentation/GlassLabPlayground.md)
 - [Glass Research Roadmap](./Documentation/GlassResearchRoadmap.md)
+- [macOS 27 Release and Glass Transparency Study](./Documentation/GlassTransparencyStudy.md)
 
 ## AdjustableGlass Swift Package
 
