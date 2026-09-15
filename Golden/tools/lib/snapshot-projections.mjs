@@ -87,6 +87,13 @@ export function projectStaticTree(staticDocument) {
       masksToBounds: layer.masksToBounds,
       cornerRadius: layer.cornerRadius,
       hasMask: layer.hasMask,
+      properties: Object.fromEntries(Object.entries(layer.properties ?? {}).map(
+        ([key, property]) => [key, {
+          state: property.state,
+          ...(property.state === "value" ? { value: auditDescription(property.value) } : {}),
+          attributes: property.attributes ?? {},
+        }]
+      )),
     }]));
     const passes = Object.fromEntries(snapshot.passes.map((pass) => [pass.id, {
       id: pass.id,
@@ -174,9 +181,11 @@ export function projectStaticScalar(staticDocument) {
 
     const geometry = {};
     const marginWidth = number(backdrop?.properties?.marginWidth);
+    const backdropScale = number(backdrop?.properties?.scale);
     const outputMinimum = number(output?.properties?.minimum);
     const outputMaximum = number(output?.properties?.maximum);
     if (marginWidth !== null) geometry.backdropMarginWidth = marginWidth;
+    if (backdropScale !== null) geometry.backdropScale = backdropScale;
     if (outputMinimum !== null) geometry.sdfOutputMinimum = outputMinimum;
     if (outputMaximum !== null) geometry.sdfOutputMaximum = outputMaximum;
 
@@ -211,6 +220,13 @@ const PLATFORM_OWNED_NUMERIC_KEYS = new Set(["inputMaxHeadroom"]);
 
 function consumerColor(property) {
   return color(property)?.extendedSRGB ?? null;
+}
+
+export function projectBackdropScale(snapshot) {
+  const backdrop = snapshot?.layers?.find(
+    (layer) => layer.layerClass === "CABackdropLayer"
+  );
+  return number(backdrop?.properties?.scale);
 }
 
 /** Pure narrow runtime projection. Null means the Snapshot is not replay-safe. */

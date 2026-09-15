@@ -1,6 +1,7 @@
 export const DYNAMIC_CELL_FIELDS = [
   "variant", "subvariant", "main", "key", "subdued", "appearance",
   "backdrop", "tint", "width", "height", "cornerRadius", "host", "direction",
+  "glassAmount",
 ];
 
 export const DYNAMIC_PHASES = [
@@ -21,6 +22,7 @@ export function dynamicRunIdentity(run, { includeDirection = true } = {}) {
     : DYNAMIC_CELL_FIELDS.filter((field) => field !== "direction");
   return JSON.stringify([
     run?.slice ?? null,
+    run?.animationMode ?? null,
     ...fields.map((field) => run?.cell?.[field] ?? null),
   ]);
 }
@@ -32,6 +34,7 @@ function stripRuntimeVolatileFields(value) {
     return;
   }
   delete value.elapsed;
+  delete value.beginTime;
   delete value.inputMaxHeadroom;
   for (const child of Object.values(value)) stripRuntimeVolatileFields(child);
 }
@@ -78,6 +81,7 @@ function pairMetadata(run) {
   const metadata = structuredClone(run ?? {});
   delete metadata.samples;
   delete metadata.maximumAttachedAnimationDuration;
+  delete metadata.samplingDuration;
   if (metadata.cell) delete metadata.cell.direction;
   return metadata;
 }

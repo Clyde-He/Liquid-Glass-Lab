@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { cp, mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { cellKey, CELL_FIELDS } from "./cell.mjs";
+import { cellKey, LEGACY_CELL_FIELDS } from "./cell.mjs";
 import { catalogFromArchive } from "./catalog.mjs";
 import {
   dynamicLifecycleProblems, dynamicPairingProblems,
@@ -10,6 +10,10 @@ import {
 import { compareStableDynamicRuns } from "./dynamic-equivalence.mjs";
 import { projectStaticTree, projectStyleSample } from "./snapshot-projections.mjs";
 import { tintDocumentGateProblems } from "./tint-compare.mjs";
+import { samplingProblems, comparableSampling } from "./sampling-coverage.mjs";
+import { compareTransparency, transparencyProblems } from "./transparency.mjs";
+
+export { compareTransparency } from "./transparency.mjs";
 
 export const ARCHIVE_FILES = {
   capture: "capture.json",
@@ -79,9 +83,48 @@ function matrixIsFinite(matrix) {
   return Array.isArray(matrix) && matrix.length === 20 && matrix.every(Number.isFinite);
 }
 
+function typedValueProblems(value, at = "value") {
+  const problems = [];
+  function typed(node, label) {
+    const type = node?.type;
+    const data = node?.[type];
+    const valid = {
+      number: () => Number.isFinite(data),
+      boolean: () => typeof data === "boolean",
+      string: () => typeof data === "string",
+      opaque: () => typeof node.opaqueType === "string",
+      matrix: () => Array.isArray(data?.coefficients)
+        && data.coefficients.length === 20 && data.coefficients.every(Number.isFinite),
+      color: () => Array.isArray(data?.components) && data.components.every(Number.isFinite),
+      point: () => ["x", "y"].every((key) => Number.isFinite(data?.[key])),
+      size: () => ["x", "y"].every((key) => Number.isFinite(data?.[key])),
+      rect: () => ["x", "y", "width", "height"].every((key) => Number.isFinite(data?.[key])),
+      array: () => Array.isArray(data),
+      dictionary: () => data && typeof data === "object" && !Array.isArray(data),
+    }[type];
+    if (!valid || !valid()) problems.push(`${label}: invalid typed ${type}`);
+    else if (type === "array" || type === "dictionary") {
+      Object.entries(data).forEach(([key, child]) => typed(child, `${label}.${key}`));
+    }
+  }
+  function visit(node, label) {
+    if (!node || typeof node !== "object") return;
+    if (Object.hasOwn(node, "state") && Object.hasOwn(node, "attributes")) {
+      if (!["value", "nil", "unreadable"].includes(node.state)
+          || (node.state === "value") !== Object.hasOwn(node, "value")) {
+        problems.push(`${label}: invalid property state`);
+      } else if (node.state === "value") typed(node.value, `${label}.value`);
+    }
+    Object.entries(node).forEach(([key, child]) => visit(child, `${label}.${key}`));
+  }
+  visit(value, at);
+  return problems;
+}
+
 function cellProblems(cell, label) {
   const problems = [];
-  const missing = [...CELL_FIELDS, "shortSide"].filter((field) => !Object.hasOwn(cell ?? {}, field));
+  const missing = [...LEGACY_CELL_FIELDS, "shortSide"]
+    .filter((field) => !Object.hasOwn(cell ?? {}, field));
   if (missing.length) problems.push(`${label}: cell is missing ${missing.join(", ")}`);
   if (!finite(cell)) problems.push(`${label}: cell contains a non-finite value`);
   if (Number.isFinite(cell?.width) && Number.isFinite(cell?.height)
@@ -104,6 +147,7 @@ export function validateStaticDocument(document) {
     if (observations.has(key)) problems.push(`static observation ${index} duplicates ${key}`);
     observations.set(key, observation);
     const snapshot = observation.snapshot;
+    problems.push(...typedValueProblems(snapshot, `static observation ${index}`));
     if (!snapshot || !Number.isFinite(snapshot.shortSide)
         || !Array.isArray(snapshot.layers) || snapshot.layers.length === 0
         || !Array.isArray(snapshot.passes) || !finite(snapshot)) {
@@ -160,11 +204,67 @@ export function validateStaticDocument(document) {
 }
 
 function captureProblems(archive) {
-  const problems = [];
+  const problems = transparencyProblems(archive.capture?.transparency);
+  const canonical27 = archive.platform.major === 27
+    && archive.capture?.transparency?.control === "processOverridePerObservation";
+  if (archive.platform.major !== 27 && archive.capture?.transparency !== undefined) {
+    problems.push("Glass transparency provenance is supported only on macOS 27");
+  }
+  if (canonical27) {
+    for (const [index, observation] of (archive.static?.observations ?? []).entries()) {
+      if (Object.hasOwn(observation, "raw")) {
+        problems.push(`Static observation ${index}: duplicate raw payload is forbidden`);
+      }
+      for (const layer of observation.snapshot?.layers ?? []) {
+        for (const field of [
+          "position", "anchorPoint", "zPosition", "contentsScale",
+          "transform", "sublayerTransform", "affineTransform", "properties",
+        ]) {
+          if (!Object.hasOwn(layer, field)) {
+            problems.push(`Static observation ${index}: layer ${layer.path} lacks ${field}`);
+          }
+        }
+        if (layer.layerClass !== "CABackdropLayer") continue;
+        const scale = layer.properties?.scale;
+        if (scale?.state !== "value" || scale.value?.type !== "number"
+            || !Number.isFinite(scale.value.number) || scale.value.number <= 0) {
+          problems.push(`Static observation ${index}: missing readable backdrop scale at ${layer.path}`);
+        }
+      }
+    }
+  }
   if (archive.capture?.schemaVersion !== 2 || archive.platform.major === null
       || !archive.platform.build || !archive.platform.architecture
       || !archive.platform.displaySignature || !archive.capture.capturedAt) {
     problems.push("capture.json lacks schema-2 OS/build/architecture/display provenance");
+  }
+  return problems;
+}
+
+function coordinateCoverageProblems(archive) {
+  const problems = [];
+  const canonical27 = archive.platform.major === 27
+    && archive.capture?.transparency?.control === "processOverridePerObservation";
+  const expectedStatic = canonical27 ? 1_750 : 776;
+  if (archive.static?.observations?.length !== expectedStatic) {
+    problems.push(`static.json must contain ${expectedStatic} observations; got ${archive.static?.observations?.length ?? 0}`);
+  }
+  const cells = [
+    ...(archive.static?.observations ?? []).map(({ cell }) => cell),
+    ...(archive.static?.consumerCells ?? []),
+    ...(archive.dynamic?.runs ?? []).map(({ cell }) => cell),
+  ];
+  if (canonical27) {
+    if (cells.some((cell) => !Number.isFinite(cell?.glassAmount)
+        || cell.glassAmount < 0 || cell.glassAmount > 1)) {
+      problems.push("canonical macOS 27 coordinates require glassAmount in 0...1");
+    }
+    if ((archive.static?.consumerCells ?? []).some(({ glassAmount }) => glassAmount !== 0.5)) {
+      problems.push("Consumer cells must remain the macOS 27 0.5 baseline projection");
+    }
+  } else if (archive.platform.major !== 27
+      && cells.some((cell) => Object.hasOwn(cell ?? {}, "glassAmount"))) {
+    problems.push("glassAmount must be absent outside macOS 27");
   }
   return problems;
 }
@@ -195,6 +295,7 @@ export async function admitCoreArchive(directory) {
   }
   const problems = [
     ...captureProblems(archive),
+    ...coordinateCoverageProblems(archive),
     ...validateStaticDocument(archive.static),
     ...validateDynamic(archive),
     ...catalogProblems(archive),
@@ -209,16 +310,40 @@ function validateDynamic(archive) {
   if (archive.dynamic?.schemaVersion !== 2 || !Array.isArray(runs)) {
     return ["dynamic.json must be a schema-2 run document"];
   }
-  if (runs.length !== 104) problems.push(`dynamic.json must contain 104 runs; got ${runs.length}`);
+  const canonical27 = archive.platform.major === 27
+    && archive.capture?.transparency?.control === "processOverridePerObservation";
+  const expectedRuns = canonical27 ? 273 : 104;
+  if (runs.length !== expectedRuns) {
+    problems.push(`dynamic.json must contain ${expectedRuns} runs; got ${runs.length}`);
+  }
   for (const [index, run] of runs.entries()) {
     problems.push(...cellProblems(run.cell, `Dynamic run ${index}`));
     if (run.accepted !== true || !Number.isFinite(run.maximumAttachedAnimationDuration)) {
       problems.push(`Dynamic run ${index} was not accepted or has no finite duration`);
     }
     problems.push(...dynamicLifecycleProblems(run, index));
+    if (canonical27) {
+      if (!Number.isFinite(run.samplingDuration) || run.samplingDuration <= 0
+          || !run.context || !["Linear", "System Default"].includes(run.animationMode)) {
+        problems.push(`Dynamic run ${index} lacks its sampling/context contract`);
+      }
+      for (const [sampleIndex, sample] of (run.samples ?? []).entries()) {
+        if (!sample.snapshot?.model || !Array.isArray(sample.snapshot.modelLayers)
+            || !Array.isArray(sample.snapshot.animations)) {
+          problems.push(`Dynamic run ${index} sample ${sampleIndex} lacks its native snapshot`);
+        }
+        if (["raw", "filters", "effects", "layerLines", "backdropSampling"]
+          .some((field) => Object.hasOwn(sample, field))) {
+          problems.push(`Dynamic run ${index} sample ${sampleIndex} duplicates a snapshot projection`);
+        }
+      }
+      problems.push(...samplingProblems(run.samples, `Dynamic run ${index}`));
+    }
     if (!finite(run.samples)) problems.push(`Dynamic run ${index} contains non-finite samples`);
   }
-  problems.push(...dynamicPairingProblems(runs));
+  problems.push(...dynamicPairingProblems(runs, "Dynamic", {
+    enforceCardinality: !canonical27,
+  }));
   return problems;
 }
 
@@ -245,7 +370,15 @@ function validateTint(id, document) {
     }
   }
   if (id.startsWith("tint.parameterization.")) {
-    const planned = document.plan?.colors?.length;
+    const colors = document.plan?.colors ?? [];
+    const expected = new Set(colors.flatMap(({ id }) => [false, true].flatMap((appearance) =>
+      [false, true].flatMap((clear) => [false, true].map((main) =>
+        JSON.stringify([id, appearance, clear, main]))))));
+    if (identities.size !== expected.size
+        || [...identities].some((identity) => !expected.has(identity))) {
+      problems.push(`${id}: observed color/cell IDs differ from the plan`);
+    }
+    const planned = colors.length;
     if (Number.isInteger(planned) && document.rows.length !== planned * 8) {
       problems.push(`${id}: ${document.rows.length} rows do not cover ${planned} colors × 8 cells`);
     }
@@ -317,6 +450,10 @@ function validateSemantic(archive) {
   if (archive.platform.major >= 27 && entries.some(({ isAvailable }) => !isAvailable)) {
     problems.push("macOS 27+ Semantic capture contains unavailable roles");
   }
+  if (archive.platform.major === 27
+      && archive.capture?.transparency?.control === "processOverridePerObservation") {
+    problems.push(...samplingProblems(entries, "Semantic"));
+  }
   return problems;
 }
 
@@ -327,6 +464,23 @@ function embeddedOSProblems(archive) {
     ["semantic.usage-trees", archive.semantic],
   ]) {
     if (!document) continue;
+    if (archive.platform.major !== 27
+        && (document.transparency !== undefined
+          || document.capture?.transparency !== undefined
+          || document.environment?.glassAmount != null)) {
+      problems.push(`${name} contains macOS 27-only transparency metadata`);
+    }
+    if (archive.capture.transparency !== undefined
+        && !compareTransparency(archive.capture, document).comparable) {
+      problems.push(`${name} has missing or different transparency provenance`);
+    }
+    const baselineAmount = archive.capture?.transparency?.baselineAmount
+      ?? archive.capture?.transparency?.amount;
+    if (archive.capture.transparency !== undefined
+        && name.startsWith("tint.parameterization")
+        && document.environment?.glassAmount !== baselineAmount) {
+      problems.push(`${name} environment has missing or different Glass amount`);
+    }
     if (document?.operatingSystem !== archive.capture.operatingSystem) {
       problems.push(`${name} was not captured on ${archive.capture.operatingSystem}`);
     }
@@ -341,6 +495,7 @@ function embeddedOSProblems(archive) {
 export function validateArchive(archive) {
   const problems = [];
   problems.push(...captureProblems(archive));
+  problems.push(...coordinateCoverageProblems(archive));
   problems.push(...validateStaticDocument(archive.static));
   problems.push(...validateDynamic(archive));
   problems.push(...catalogProblems(archive));
@@ -415,7 +570,29 @@ function compareNamedValues(baseline, candidate, name, section) {
   return { differences, examples: [...new Set(examples)].slice(0, 12) };
 }
 
-export function compareStaticDocuments(baseline, candidate) {
+function removeAsymmetricFields(left, right, pathName, gaps) {
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") return;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right)) return;
+    for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
+      removeAsymmetricFields(left[index], right[index], `${pathName}[${index}]`, gaps);
+    }
+    return;
+  }
+  for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+    if (!Object.hasOwn(left, key) || !Object.hasOwn(right, key)) {
+      gaps.push(`${pathName}.${key}`);
+      delete left[key];
+      delete right[key];
+    } else {
+      removeAsymmetricFields(left[key], right[key], `${pathName}.${key}`, gaps);
+    }
+  }
+}
+
+export function compareStaticDocuments(baseline, candidate, {
+  compareCommonFields = false,
+} = {}) {
   const staticBaseline = new Map(
     baseline.observations.map((observation) => [cellKey(observation.cell), observation])
   );
@@ -428,9 +605,15 @@ export function compareStaticDocuments(baseline, candidate) {
   let volatileChanged = 0;
   let volatileDifferences = 0;
   const volatileExamples = [];
+  const coverageGaps = [];
   for (const key of new Set([...staticBaseline.keys(), ...staticCandidate.keys()])) {
-    const baselineSnapshot = staticBaseline.get(key)?.snapshot;
-    const candidateSnapshot = staticCandidate.get(key)?.snapshot;
+    const baselineSnapshot = structuredClone(staticBaseline.get(key)?.snapshot);
+    const candidateSnapshot = structuredClone(staticCandidate.get(key)?.snapshot);
+    if (compareCommonFields) {
+      removeAsymmetricFields(
+        baselineSnapshot, candidateSnapshot, key, coverageGaps
+      );
+    }
     const count = countDifferences(
       baselineSnapshot,
       candidateSnapshot,
@@ -465,6 +648,11 @@ export function compareStaticDocuments(baseline, candidate) {
   ])].filter((key) => baselineTopology.get(key) !== candidateTopology.get(key)).length;
   return {
     equivalent: staticDifferences === 0 && topologyChanged === 0,
+    coverage: {
+      complete: coverageGaps.length === 0,
+      addedOrMissingFields: coverageGaps.length,
+      examples: [...new Set(coverageGaps)].slice(0, 12),
+    },
     changedObservations: staticChanged,
     changedFields: staticDifferences,
     topologyChangedObservations: topologyChanged,
@@ -477,10 +665,145 @@ export function compareStaticDocuments(baseline, candidate) {
   };
 }
 
-export function compareArchives(baseline, candidate) {
-  const staticComparison = compareStaticDocuments(baseline.static, candidate.static);
+function withoutGlassAmount(cell) {
+  const result = structuredClone(cell);
+  delete result.glassAmount;
+  return result;
+}
 
-  const dynamic = compareStableDynamicRuns(baseline.dynamic.runs, candidate.dynamic.runs);
+function alignedStaticForTransparency(baseline, candidate, transparency) {
+  const project = (archive, mode) => {
+    const source = archive.static.observations;
+    const observations = source
+      .filter(({ cell }) => mode !== "axis"
+        || cell.glassAmount === transparency.projectionAmount)
+      .map((observation) => ({
+        ...structuredClone(observation),
+        cell: mode === "axis" ? withoutGlassAmount(observation.cell) : observation.cell,
+      }));
+    return {
+      document: { ...archive.static, observations },
+      outsideProjection: source.length - observations.length,
+    };
+  };
+  const left = project(baseline, transparency.baselineMode);
+  const right = project(candidate, transparency.candidateMode);
+  const leftByCell = new Map(left.document.observations.map((row) => [
+    cellKey(row.cell, LEGACY_CELL_FIELDS), row,
+  ]));
+  const rightByCell = new Map(right.document.observations.map((row) => [
+    cellKey(row.cell, LEGACY_CELL_FIELDS), row,
+  ]));
+  const shared = [...leftByCell.keys()].filter((key) => rightByCell.has(key));
+  return {
+    baseline: {
+      ...left.document, observations: shared.map((key) => leftByCell.get(key)),
+    },
+    candidate: {
+      ...right.document, observations: shared.map((key) => rightByCell.get(key)),
+    },
+    coverage: {
+      baselineOnly: leftByCell.size - shared.length,
+      candidateOnly: rightByCell.size - shared.length,
+      baselineOutsideProjection: left.outsideProjection,
+      candidateOutsideProjection: right.outsideProjection,
+      compared: shared.length,
+    },
+  };
+}
+
+function legacyDynamicSample(sample) {
+  if (!sample?.snapshot) return sample;
+  const mapInputs = (inputs) => Object.fromEntries(
+    (inputs ?? []).map(({ key, value }) => [key, value])
+  );
+  const model = sample.snapshot.model;
+  return {
+    ...(sample.progress === undefined ? {} : { progress: sample.progress }),
+    requestedProgress: sample.requestedProgress,
+    elapsed: sample.elapsed,
+    phase: sample.phase,
+    filters: (model.filters ?? []).map((filter) => ({
+      ...filter,
+      inputs: mapInputs(filter.inputs),
+    })),
+    effects: (model.effects ?? []).map((effect) => ({
+      ...effect,
+      inputs: mapInputs(effect.inputs),
+    })),
+    layerLines: model.layerLines ?? [],
+  };
+}
+
+function alignedDynamicForTransparency(baseline, candidate, transparency) {
+  const project = (archive, mode) => {
+    const sourceRuns = archive.dynamic.runs;
+    const runs = sourceRuns.filter(({ cell }) => mode !== "axis"
+      || cell.glassAmount === transparency.projectionAmount).map((source) => {
+      const run = structuredClone(source);
+      if (mode === "axis") {
+        run.cell = withoutGlassAmount(run.cell);
+        run.samples = run.samples.map(legacyDynamicSample);
+        delete run.requestedDuration;
+        delete run.samplingDuration;
+        delete run.context;
+      }
+      return run;
+    });
+    return { runs, outsideProjection: sourceRuns.length - runs.length };
+  };
+  const left = project(baseline, transparency.baselineMode);
+  const right = project(candidate, transparency.candidateMode);
+  const leftByID = new Map(left.runs.map((run) => [
+    JSON.stringify([run.animationMode, run.slice, cellKey(run.cell, LEGACY_CELL_FIELDS)]), run,
+  ]));
+  const rightByID = new Map(right.runs.map((run) => [
+    JSON.stringify([run.animationMode, run.slice, cellKey(run.cell, LEGACY_CELL_FIELDS)]), run,
+  ]));
+  const shared = [...leftByID.keys()].filter((key) => rightByID.has(key));
+  return {
+    baseline: shared.map((key) => leftByID.get(key)),
+    candidate: shared.map((key) => rightByID.get(key)),
+    coverage: {
+      baselineOnly: leftByID.size - shared.length,
+      candidateOnly: rightByID.size - shared.length,
+      baselineOutsideProjection: left.outsideProjection,
+      candidateOutsideProjection: right.outsideProjection,
+      compared: shared.length,
+    },
+  };
+}
+
+export function compareArchives(baseline, candidate) {
+  const transparency = compareTransparency(baseline.capture, candidate.capture);
+  const needsProjection = transparency.projectionAmount !== null
+    && transparency.baselineMode !== transparency.candidateMode;
+  const projected = needsProjection
+    ? alignedStaticForTransparency(baseline, candidate, transparency) : null;
+  const staticComparison = compareStaticDocuments(
+    projected?.baseline ?? baseline.static,
+    projected?.candidate ?? candidate.static,
+    { compareCommonFields: needsProjection }
+  );
+  if (projected) staticComparison.coordinates = projected.coverage;
+
+  const dynamicProjection = needsProjection
+    ? alignedDynamicForTransparency(baseline, candidate, transparency) : null;
+  const dynamicSampling = needsProjection ? comparableSampling(
+    dynamicProjection.baseline,
+    dynamicProjection.candidate
+  ) : {
+    baseline: baseline.dynamic.runs,
+    candidate: candidate.dynamic.runs,
+    coverage: { complete: true, missingComparisons: 0, examples: [] },
+  };
+  const dynamic = compareStableDynamicRuns(
+    dynamicSampling.baseline, dynamicSampling.candidate
+  );
+  dynamic.coverage = {
+    sampling: dynamicSampling.coverage,
+    coordinates: dynamicProjection?.coverage ?? null,
+  };
   dynamic.volatile = {
     inputMaxHeadroom: compareNamedValues(
       baseline.dynamic.runs, candidate.dynamic.runs, "inputMaxHeadroom", "dynamic"
@@ -491,6 +814,7 @@ export function compareArchives(baseline, candidate) {
     const examples = [];
     const ignoredKeys = new Set([
       "capturedAt", "generatedAt", "operatingSystem", "timings",
+      "transparency", "glassAmount",
     ]);
     if (key === "semantic") ignoredKeys.add("inputMaxHeadroom");
     const differences = countDifferences(baseline[key], candidate[key], key, examples, {
@@ -506,17 +830,33 @@ export function compareArchives(baseline, candidate) {
     }
     documents.push(comparison);
   }
-  const equivalent = staticComparison.equivalent
+  const measuredEquivalent = staticComparison.equivalent
     && dynamic.equivalent && documents.every(({ differences }) => differences === 0);
+  const coordinateCoverageComplete = !needsProjection || (
+    projected.coverage.baselineOnly === 0
+      && projected.coverage.candidateOnly === 0
+      && projected.coverage.baselineOutsideProjection === 0
+      && projected.coverage.candidateOutsideProjection === 0
+      && dynamicProjection.coverage.baselineOnly === 0
+      && dynamicProjection.coverage.candidateOnly === 0
+      && dynamicProjection.coverage.baselineOutsideProjection === 0
+      && dynamicProjection.coverage.candidateOutsideProjection === 0
+  );
+  const coverageComplete = staticComparison.coverage.complete
+    && dynamicSampling.coverage.complete && coordinateCoverageComplete;
+  const environmentConfounded = !transparency.comparable
+    || baseline.platform.displaySignature !== candidate.platform.displaySignature;
   return {
     schemaVersion: 1,
-    equivalent,
+    equivalent: measuredEquivalent && coverageComplete && !environmentConfounded,
+    measuredEquivalent,
+    coverageComplete,
     baseline: baseline.directory,
     candidate: candidate.directory,
     baselinePlatform: baseline.platform,
     candidatePlatform: candidate.platform,
-    environmentConfounded:
-      baseline.platform.displaySignature !== candidate.platform.displaySignature,
+    transparency,
+    environmentConfounded,
     static: staticComparison,
     dynamic,
     documents,

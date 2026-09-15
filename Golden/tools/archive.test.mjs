@@ -266,6 +266,21 @@ test("macOS 26 has the same archive model without inventing Semantic evidence", 
   assert.deepEqual(validateArchive(candidate), []);
 });
 
+test("macOS 26 rejects the macOS 27-only Glass amount coordinate", () => {
+  const candidate = archive();
+  candidate.capture.operatingSystem = "Version 26.6 (Build 25G70)";
+  candidate.platform = {
+    ...candidate.platform, version: "26.6", major: 26, build: "25G70",
+  };
+  for (const key of [
+    "tintSweep", "tintFocused", "tintHue", "tintSync", "tintWideGamut",
+  ]) candidate[key].operatingSystem = candidate.capture.operatingSystem;
+  candidate.semantic = null;
+  candidate.static.observations[0].cell.glassAmount = 0.5;
+  assert.ok(validateArchive(candidate).some((problem) =>
+    problem.includes("glassAmount must be absent outside macOS 27")));
+});
+
 test("paired Tint evidence cannot pass with empty or partial planned coverage", () => {
   const empty = archive();
   empty.tintSync.rows = [];
@@ -295,6 +310,35 @@ test("whole-archive comparison reports value drift without inventing module gate
   assert.equal(report.equivalent, false);
   assert.equal(report.static.changedObservations, 1);
   assert.equal(report.static.topologyChangedObservations, 0);
+});
+
+test("legacy comparison measures the midpoint but reports axis coordinates as new coverage", () => {
+  const baseline = archive();
+  const candidate = structuredClone(baseline);
+  candidate.directory = "/tmp/candidate";
+  candidate.capture.transparency = {
+    version: 1,
+    baselineAmount: 0.5,
+    control: "processOverridePerObservation",
+  };
+  for (const observation of candidate.static.observations) {
+    observation.cell.glassAmount = 0.5;
+  }
+  for (const run of candidate.dynamic.runs) run.cell.glassAmount = 0.5;
+  const extraStatic = structuredClone(candidate.static.observations[0]);
+  extraStatic.cell.glassAmount = 0.25;
+  candidate.static.observations.push(extraStatic);
+  const extraDynamic = structuredClone(candidate.dynamic.runs[0]);
+  extraDynamic.cell.glassAmount = 0.25;
+  candidate.dynamic.runs.push(extraDynamic);
+
+  const report = compareArchives(baseline, candidate);
+  assert.equal(report.transparency.status, "legacy-baseline-projection");
+  assert.equal(report.measuredEquivalent, true);
+  assert.equal(report.coverageComplete, false);
+  assert.equal(report.equivalent, false);
+  assert.equal(report.static.coordinates.candidateOutsideProjection, 1);
+  assert.equal(report.dynamic.coverage.coordinates.candidateOutsideProjection, 1);
 });
 
 test("session-volatile headroom is reported without turning honest drift red", () => {

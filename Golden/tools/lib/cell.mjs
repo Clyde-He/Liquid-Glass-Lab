@@ -13,7 +13,7 @@
 // the exporter which axes it still has to record.
 
 /** Ordered because the key is a join; changing the order changes every key. */
-export const CELL_FIELDS = [
+export const LEGACY_CELL_FIELDS = [
   "variant",
   "subvariant",
   "main",
@@ -28,6 +28,8 @@ export const CELL_FIELDS = [
   "host",
   "direction",
 ];
+
+export const CELL_FIELDS = [...LEGACY_CELL_FIELDS, "glassAmount"];
 
 /** Axes both static sections control, used to pair a run with its endpoint. */
 export const SHARED_FIELDS = [
@@ -45,12 +47,20 @@ const token = (value) => {
   if (value === null || value === undefined) return "-";
   if (value === true) return "1";
   if (value === false) return "0";
+  if (typeof value === "number" && !Number.isInteger(value)) {
+    const view = new DataView(new ArrayBuffer(8));
+    view.setFloat64(0, value);
+    return `@${view.getBigUint64(0).toString(16).padStart(16, "0")}`;
+  }
   return String(value);
 };
 
 export function makeCell(fields = {}) {
   const cell = {};
-  for (const field of CELL_FIELDS) cell[field] = fields[field] ?? null;
+  for (const field of LEGACY_CELL_FIELDS) cell[field] = fields[field] ?? null;
+  if (Object.hasOwn(fields, "glassAmount")) {
+    cell.glassAmount = fields.glassAmount;
+  }
   // Geometry reaches the renderer only through the short side, so it is derived
   // rather than recorded — no capture can disagree with itself about it.
   cell.shortSide =

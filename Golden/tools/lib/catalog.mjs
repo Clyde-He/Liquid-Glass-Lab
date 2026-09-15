@@ -1,5 +1,6 @@
 import { cellKey } from "./cell.mjs";
 import { projectStyleSample } from "./snapshot-projections.mjs";
+import { transparencyProblems } from "./transparency.mjs";
 
 function catalogCell(cell) {
   if (!["Light", "Dark"].includes(cell?.appearance)
@@ -48,6 +49,13 @@ export function verifiesMainOn(mainOn, mainOff) {
 }
 
 export function catalogFromSamples(capture, platform, entries) {
+  const problems = transparencyProblems(capture.transparency);
+  if (problems.length) throw new Error(problems.join("; "));
+  const baselineAmount = capture.transparency?.baselineAmount
+    ?? capture.transparency?.amount;
+  if (capture.transparency !== undefined && baselineAmount !== 0.5) {
+    throw new Error("The base Catalog requires the controlled Glass baseline 0.5");
+  }
   const groups = new Map();
   for (const { cell, sample } of entries) {
     const projectedCell = catalogCell(cell);

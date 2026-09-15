@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import {
+  closeSync, existsSync, openSync, readFileSync, rmSync,
+} from "node:fs";
 import {
   copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile,
 } from "node:fs/promises";
@@ -10,7 +12,7 @@ import path from "node:path";
 import {
   ARCHIVE_FILES, acceptedArchives, admitArchive, admitCoreArchive, compareArchives,
   compareStaticDocuments, copyArchive, finalizeStaging, platformFromCapture,
-  validateStaticDocument,
+  validateStaticDocument, compareTransparency,
 } from "./lib/archive.mjs";
 import { importArtifactEnvelope } from "./lib/artifact-handoff.mjs";
 import { catalogBytes, catalogFromArchive } from "./lib/catalog.mjs";
@@ -30,6 +32,8 @@ const args = process.argv.slice(3);
 function usage(message) {
   if (message) console.error(message);
   console.error(`usage:
+  golden.mjs tint-model --os macOS-27 [--check]
+  golden.mjs fixtures [--check]
   golden.mjs drift --app EXECUTABLE --os macOS-N [--output REPORT]
   golden.mjs capture --app EXECUTABLE --output STAGING
   golden.mjs promote --staging STAGING [--accept]
@@ -58,30 +62,48 @@ const TINT_CHECKPOINT_FLAGS = new Set([
   "--capture-tint-parameterization-phase-2c",
 ]);
 
-function runDriver(app, flag, destination) {
+function runDriver(app, flag, destination, { transparency = false } = {}) {
   const handoff = `@temporary/golden-${process.pid}-${path.basename(destination)}`;
   const checkpoint = TINT_CHECKPOINT_FLAGS.has(flag) && existsSync(destination)
     ? readFileSync(destination) : null;
   const driverArgs = [flag, handoff, "--artifact-stdout"];
-  if (checkpoint) driverArgs.push("--checkpoint-stdin");
-  const result = spawnSync(app, driverArgs, {
-    encoding: "utf8", input: checkpoint ?? undefined, maxBuffer: 128 * 1024 * 1024,
-  });
-  if (result.stderr) process.stderr.write(result.stderr);
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    if (TINT_CHECKPOINT_FLAGS.has(flag) && result.stdout?.trim()) {
-      try {
-        importArtifactEnvelope(result.stdout, destination);
-        console.error(`Tint checkpoint preserved after ${flag} stopped`);
-      } catch {
-        // The original driver failure remains the useful error.
-      }
-    }
-    throw new Error(`${flag} exited ${result.status ?? "by signal"}`);
+  if (transparency) {
+    driverArgs.push("--golden-transparency", "-NSGlassTintAmount", "0.5");
   }
-  if (!result.stdout?.trim()) throw new Error(`${flag} returned no artifact`);
-  importArtifactEnvelope(result.stdout, destination);
+  if (checkpoint) driverArgs.push("--checkpoint-stdin");
+  const stdoutPath = path.join(
+    "/private/tmp",
+    `.golden-driver-${process.pid}-${Date.now()}-${path.basename(destination)}.stdout`,
+  );
+  const stdout = openSync(stdoutPath, "w");
+  let result;
+  try {
+    result = spawnSync(app, driverArgs, {
+      input: checkpoint ?? undefined,
+      stdio: [checkpoint ? "pipe" : "ignore", stdout, "inherit"],
+    });
+  } finally {
+    closeSync(stdout);
+  }
+  const artifact = readFileSync(stdoutPath);
+  try {
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      if (TINT_CHECKPOINT_FLAGS.has(flag) && artifact.length > 0) {
+        try {
+          importArtifactEnvelope(artifact, destination);
+          console.error(`Tint checkpoint preserved after ${flag} stopped`);
+        } catch {
+          // The original driver failure remains the useful error.
+        }
+      }
+      throw new Error(`${flag} exited ${result.status ?? "by signal"}`);
+    }
+    if (artifact.length === 0) throw new Error(`${flag} returned no artifact`);
+    importArtifactEnvelope(artifact, destination);
+  } finally {
+    rmSync(stdoutPath, { force: true });
+  }
 }
 
 async function capture() {
@@ -101,7 +123,7 @@ async function capture() {
   }
 
   // Fail the inexpensive Core contract, including full Catalog derivation,
-  // before starting the long resumable Tint studies.
+  // before starting the long resumable auxiliary captures.
   await admitCoreArchive(partial);
 
   const drivers = [
@@ -111,14 +133,24 @@ async function capture() {
     ["--verify-tint-sync-resolution", ARCHIVE_FILES.tintSync],
     ["--verify-tint-wide-gamut-model", ARCHIVE_FILES.tintWideGamut],
   ];
-  for (const [flag, file] of drivers) runDriver(app, flag, path.join(partial, file));
-
   const captureDocument = JSON.parse(
     await readFile(path.join(partial, ARCHIVE_FILES.capture), "utf8")
   );
   const platform = platformFromCapture(captureDocument);
+  const usesTransparency = platform.major === 27;
+  for (const [flag, file] of drivers) {
+    const destination = path.join(partial, file);
+    if (!existsSync(destination)) {
+      runDriver(app, flag, destination, { transparency: usesTransparency });
+    }
+  }
   if (platform.major >= 27) {
-    runDriver(app, "--capture-semantic-usage-trees", path.join(partial, ARCHIVE_FILES.semantic));
+    const semantic = path.join(partial, ARCHIVE_FILES.semantic);
+    if (!existsSync(semantic)) {
+      runDriver(app, "--capture-semantic-usage-trees", semantic, {
+        transparency: usesTransparency,
+      });
+    }
   } else {
     await rm(path.join(partial, ARCHIVE_FILES.semantic), { force: true });
   }
@@ -242,11 +274,20 @@ async function drift() {
     if (baseline.observations.length !== staticDocument.observations.length) {
       throw new Error("accepted Golden does not contain every drift sentinel coordinate");
     }
+    const staticComparison = compareStaticDocuments(baseline, staticDocument);
+    const transparency = compareTransparency(accepted.capture, captureDocument);
+    const displaySignatureMatches =
+      accepted.platform.displaySignature === platform.displaySignature;
     const report = {
       capturedOn: platform,
       accepted: accepted.platform,
       sampledObservations: staticDocument.observations.length,
-      ...compareStaticDocuments(baseline, staticDocument),
+      ...staticComparison,
+      transparency,
+      displaySignatureMatches,
+      equivalent: staticComparison.equivalent
+        && transparency.comparable
+        && displaySignatureMatches,
     };
     const output = option("--output");
     const text = `${JSON.stringify(report, null, 2)}\n`;
@@ -258,8 +299,48 @@ async function drift() {
   }
 }
 
-if (!["drift", "capture", "promote", "catalog"].includes(command)) usage();
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value).sort().map((key) => [key, canonical(value[key])])
+    );
+  }
+  return value;
+}
+
+async function writeJSONAtomic(output, value) {
+  const temporary = path.join(
+    path.dirname(output), `.${path.basename(output)}.${process.pid}.tmp`
+  );
+  await mkdir(path.dirname(output), { recursive: true });
+  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`);
+  await rename(temporary, output);
+}
+
+async function tintModel() {
+  const name = osName(option("--os", { required: true }));
+  if (name !== "macOS-27") usage("The transparency model is available only for macOS-27");
+  const { modelFromAcceptedArchive } = await import("./tint-amount-model.mjs");
+  const value = await modelFromAcceptedArchive(path.join(goldenDirectory, name));
+  const output = path.join(
+    catalogDirectory, `glass-tint-amount-${name.toLowerCase()}.json`
+  );
+  if (args.includes("--check")) {
+    const actual = JSON.parse(await readFile(output, "utf8"));
+    if (JSON.stringify(canonical(actual)) !== JSON.stringify(canonical(value))) {
+      throw new Error("Bundled transparency model is stale");
+    }
+  } else {
+    await writeJSONAtomic(output, value);
+  }
+  console.error(`Transparency model ${args.includes("--check") ? "verified" : "generated"} from accepted Golden`);
+}
+
+if (!["drift", "capture", "promote", "catalog", "tint-model", "fixtures"].includes(command)) usage();
 if (command === "drift") await drift();
 else if (command === "capture") await capture();
 else if (command === "promote") await promote();
-else await catalog();
+else if (command === "catalog") await catalog();
+else if (command === "tint-model") await tintModel();
+else await import("./fixtures.mjs");
