@@ -6,6 +6,8 @@ The project follows [Semantic Versioning](https://semver.org/). While the packag
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-15
+
 ### Added
 
 - Added macOS 27-only `tintAmount` with system following by default, manual `0...1` control, and `resolvedTintAmount` readback, independently of `effectAmount` and colored Tint.
@@ -115,7 +117,8 @@ The project follows [Semantic Versioning](https://semver.org/). While the packag
 - The package can be linked from a macOS 15 deployment target so consumers can retain an older-system fallback. `AdjustableGlassEffectView` itself is available on macOS 26 and later.
 - The implementation relies on private AppKit details and is intended for Direct Distribution, not the Mac App Store.
 
-[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.4...HEAD
+[Unreleased]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.4.0...HEAD
+[0.4.0]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.4...0.4.0
 [0.3.4]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.3...0.3.4
 [0.3.3]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.2...0.3.3
 [0.3.2]: https://github.com/Clyde-He/Liquid-Glass-Lab/compare/0.3.1...0.3.2
