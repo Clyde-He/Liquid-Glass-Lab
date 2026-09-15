@@ -233,8 +233,11 @@ function captureProblems(archive) {
         if (layer.layerClass !== "CABackdropLayer") continue;
         const scale = layer.properties?.scale;
         if (scale?.state !== "value" || scale.value?.type !== "number"
-            || !Number.isFinite(scale.value.number) || scale.value.number <= 0) {
-          problems.push(`Static observation ${index}: missing readable backdrop scale at ${layer.path}`);
+            || !Number.isFinite(scale.value.number) || scale.value.number < 0) {
+          problems.push(`Static observation ${index}: missing readable finite backdrop scale at ${layer.path}`);
+        } else if ([1, 2].includes(observation.cell?.variant)
+            && observation.cell?.subvariant == null && scale.value.number <= 0) {
+          problems.push(`Static observation ${index}: product-reachable backdrop scale is not positive at ${layer.path}`);
         }
       }
     }

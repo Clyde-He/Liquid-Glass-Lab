@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   compareArchives, validateArchive, validateDynamicDocument,
-  validateStaticDocument,
+  validateCaptureDocument, validateStaticDocument,
 } from "./lib/archive.mjs";
 
 const property = (value, state = "value") => ({
@@ -167,6 +167,56 @@ test("Core chunks validate without pretending to be complete archives", () => {
     validateDynamicDocument(dynamicDocument, capture, { expectedRuns: 1 }),
     [],
   );
+});
+
+test("zero backdrop scale remains valid only for research subvariants", () => {
+  const capture = {
+    schemaVersion: 2,
+    operatingSystem: "Version 27.0 (Build 26A1)",
+    architecture: "arm64",
+    displaySignature: "display",
+    capturedAt: "2026-08-12T00:00:00Z",
+    transparency: {
+      version: 1,
+      baselineAmount: 0.5,
+      control: "processOverridePerObservation",
+    },
+  };
+  const resolved = snapshot(200);
+  for (const layer of resolved.layers) {
+    Object.assign(layer, {
+      position: { x: 0, y: 0 },
+      anchorPoint: { x: 0.5, y: 0.5 },
+      zPosition: 0,
+      contentsScale: 2,
+      transform: Array(16).fill(0),
+      sublayerTransform: Array(16).fill(0),
+      affineTransform: Array(6).fill(0),
+    });
+    if (layer.layerClass === "CABackdropLayer") {
+      layer.properties.scale = property(number(0));
+    }
+  }
+  const observation = {
+    cell: {
+      ...cell(199),
+      variant: 2,
+      subvariant: "menu",
+      glassAmount: 0.5,
+    },
+    snapshot: resolved,
+  };
+  assert.deepEqual(validateCaptureDocument(capture, {
+    schemaVersion: 2,
+    consumerCells: [],
+    observations: [observation],
+  }), []);
+  observation.cell.subvariant = null;
+  assert.ok(validateCaptureDocument(capture, {
+    schemaVersion: 2,
+    consumerCells: [],
+    observations: [observation],
+  }).some((problem) => problem.includes("product-reachable")));
 });
 
 function tintCell(index) {
